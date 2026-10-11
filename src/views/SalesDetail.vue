@@ -12,7 +12,13 @@
       <div class="info">
         <span>客户：{{ sale.customer }}</span>
         <span>日期：{{ sale.date }}</span>
-        <span>金额：¥ {{ sale.total }}</span>
+        <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}</span>
+        <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}</span>
+        <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
+        <span>实收：{{ sale.received != null ? '¥ ' + Number(sale.received).toFixed(2) : '未填写' }}</span>
+        <span>
+          未收：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b>
+        </span>
         <span>
           结算：
           <el-tag :type="sale.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
@@ -42,11 +48,16 @@ import { useRoute } from 'vue-router'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
+import { receivableOf, grossOf } from '../utils/account'
 
 const route = useRoute()
 const sales = ref([])
 const items = ref([])
 const sale = computed(() => sales.value.find(s => s.id === route.params.id) || { id: route.params.id, customer: '', date: '', total: 0, items: [] })
+
+// 应收(合计−优惠) 与 未收(应收−实收)，与全站统一规则一致
+const dueAmount = computed(() => grossOf(sale.value))
+const unpaid = computed(() => receivableOf(sale.value))
 
 const detailItems = computed(() => {
   const map = Object.fromEntries((items.value || []).map(i => [i.code, i]))
@@ -83,4 +94,6 @@ onMounted(async () => {
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; align-items: center; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
+.debt { color: #f56c6c; }
+.zero { color: #67c23a; }
 </style>
