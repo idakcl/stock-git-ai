@@ -124,20 +124,10 @@ async function save() {
     items: resolved,
     total: resolved.reduce((s, l) => s + l.total, 0)
   }
-  const currentStock = await api.getStock()
-  const newStock = { ...currentStock }
-  for (const l of resolved) {
-    if (!newStock[l.code]) newStock[l.code] = { qty: 0, cost: 0 }
-    newStock[l.code].qty += l.qty
-    newStock[l.code].cost = l.price
-  }
   list.value.push(entry)
   await api.savePurchases(list.value)
-  if (catalog.length !== itemOptions.value.length) {
-    await api.saveItems(catalog)
-    itemOptions.value = catalog
-  }
-  await api.saveStock(newStock)
+  // 商品建档、库存、供应商关系均由后端自动推导
+  itemOptions.value = await api.getItems().catch(() => itemOptions.value)
   dialog.value = false
   ElMessage.success('采购入库成功')
 }

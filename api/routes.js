@@ -48,6 +48,128 @@ function parseFreeText(text) {
   return out
 }
 
+// 从采购单/销售单推导：商品与供应商的关系链接、历史采购价/销售价、库存
+function findItem(items, code, name) {
+  if (code) {
+    const byCode = items.find(i => i.code === code)
+    if (byCode) return byCode
+  }
+  if (name) return items.find(i => i.name === name)
+  return null
+}
+
+function ensureSupplier(suppliers, name) {
+  let s = suppliers.find(x => x.name && name && x.name === name)
+  if (!s) {
+    const code = 'G' + String(suppliers.length + 1).padStart(3, '0')
+    s = { code, name: name || '', products: [] }
+    suppliers.push(s)
+  }
+  return s
+}
+
+export function derive(items, suppliers, purchases, sales) {
+  items = (items || []).map(i => ({
+    ...i,
+    suppliers: i.suppliers || [],
+    purchaseHistory: i.purchaseHistory || [],
+    saleHistory: i.saleHistory || []
+  }))
+  suppliers = (suppliers || []).map(s => ({ ...s, products: s.products || [] }))
+  const nameToCode = {}
+  suppliers.forEach(s => { if (s.name) nameToCode[s.name] = s.code })
+
+  const upsertItem = (code, name) => {
+    let it = findItem(items, code, name)
+    if (!it) {
+      it = {
+        code: code || ('N' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5)),
+        name: name || code || '',
+        unit: '', cost: 0, price: 0, warning: 0,
+        suppliers: [], purchaseHistory: [], saleHistory: []
+      }
+      items.push(it)
+    }
+    return it
+  }
+
+  for (const p of (purchases || [])) {
+    const supName = p.supplier || ''
+    let sCode = nameToCode[supName]
+    if (!sCode) {
+      const s = ensureSupplier(suppliers, supName)
+      sCode = s.code
+      nameToCode[supName] = sCode
+    }
+    for (const l of (p.items || [])) {
+      const it = upsertItem(l.code, l.name)
+      it.suppliers = Array.from(new Set([...(it.suppliers || []), sCode]))
+      it.purchaseHistory = [...(it.purchaseHistory || []), {
+        date: p.date, supplier: sCode, supplierName: supName,
+        qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
+      }]
+      if (l.price != null) it.cost = Number(l.price)
+    }
+  }
+
+  for (const s of (sales || [])) {
+    for (const l of (s.items || [])) {
+      const it = upsertItem(l.code, l.name)
+      it.saleHistory = [...(it.saleHistory || []), {
+        date: s.date, customer: s.customer || '',
+        qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
+      }]
+      if (l.price != null) it.price = Number(l.price)
+    }
+  }
+
+  // 双向链接：供应商.products 由商品.suppliers 反推
+  for (const s of suppliers) {
+    s.products = items.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
+  }
+  return { items, suppliers }
+}
+
+export function rebuildStock(purchases, sales, items) {
+  const stock = {}
+  const costByCode = {}
+  for (const p of (purchases || [])) {
+    for (const l of (p.items || [])) {
+      const code = l.code
+      stock[code] = stock[code] || { qty: 0, cost: 0 }
+      stock[code].qty += Number(l.qty || 0)
+      if (l.price != null) costByCode[code] = Number(l.price)
+    }
+  }
+  for (const s of (sales || [])) {
+    for (const l of (s.items || [])) {
+      const code = l.code
+      stock[code] = stock[code] || { qty: 0, cost: 0 }
+      stock[code].qty -= Number(l.qty || 0)
+    }
+  }
+  const itemCost = {}
+  ;(items || []).forEach(i => { itemCost[i.code] = i.cost })
+  for (const code in stock) stock[code].cost = costByCode[code] != null ? costByCode[code] : (itemCost[code] || 0)
+  return stock
+}
+
+async function syncDerived(env, { purchases, sales }) {
+  const [items, suppliers, curP, curS] = await Promise.all([
+    readJSON(env, 'items.json'),
+    readJSON(env, 'suppliers.json'),
+    readJSON(env, 'purchases.json'),
+    readJSON(env, 'sales.json')
+  ])
+  const p = purchases != null ? purchases : curP
+  const s = sales != null ? sales : curS
+  const { items: newItems, suppliers: newSuppliers } = derive(items, suppliers, p, s)
+  const stock = rebuildStock(p, s, newItems)
+  await writeJSON(env, 'items.json', newItems, 'derive items')
+  await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers')
+  await writeJSON(env, 'stock.json', stock, 'derive stock')
+}
+
 export async function handleApi(req, url, env) {
   const path = url.pathname.replace(/^\/api/, '') || '/'
   const method = req.method
@@ -88,11 +210,15 @@ export async function handleApi(req, url, env) {
         return json({ ok: true })
       }
       if (path === '/purchases') {
-        await writeJSON(env, 'purchases.json', body.purchases || [], 'update purchases')
+        const purchases = body.purchases || []
+        await writeJSON(env, 'purchases.json', purchases, 'update purchases')
+        await syncDerived(env, { purchases })
         return json({ ok: true })
       }
       if (path === '/sales') {
-        await writeJSON(env, 'sales.json', body.sales || [], 'update sales')
+        const sales = body.sales || []
+        await writeJSON(env, 'sales.json', sales, 'update sales')
+        await syncDerived(env, { sales })
         return json({ ok: true })
       }
       if (path === '/stock') {
@@ -114,6 +240,11 @@ export async function handleApi(req, url, env) {
         if (Object.keys(parsed.stock).length) {
           await writeJSON(env, 'stock.json', parsed.stock, 'ai import stock')
           results.push({ key: 'stock', count: Object.keys(parsed.stock).length })
+        }
+
+        if ((parsed.purchases && parsed.purchases.length) || (parsed.sales && parsed.sales.length)) {
+          await syncDerived(env, { purchases: parsed.purchases, sales: parsed.sales })
+          results.push({ key: 'derived', count: 3 })
         }
 
         const logs = await readJSON(env, 'logs.json')

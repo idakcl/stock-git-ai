@@ -11,6 +11,12 @@
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="contact" label="联系人" width="140" />
         <el-table-column prop="phone" label="电话" width="140" />
+        <el-table-column label="关联商品" min-width="220">
+          <template #default="{ row }">
+            <span v-if="!row.products || !row.products.length" class="muted">—</span>
+            <span v-else>{{ (row.products || []).map(c => itemMap[c] || c).join('、') }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
@@ -39,14 +45,23 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 
 const list = ref([])
+const items = ref([])
 const keyword = ref('')
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'' })
-const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone)))
+const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, ...(i.products || []))))
+const itemMap = computed(() => {
+  const m = {}
+  ;(items.value || []).forEach(it => { m[it.code] = it.name })
+  return m
+})
 
 onMounted(load)
 async function load() {
-  try { list.value = await api.getSuppliers() } catch (e) { list.value = [] }
+  try {
+    const [sp, it] = await Promise.all([api.getSuppliers(), api.getItems()])
+    list.value = sp; items.value = it
+  } catch (e) { list.value = []; items.value = [] }
 }
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code:'', name:'', contact:'', phone:'' }); dialog.value = true }
 async function save() {
@@ -65,4 +80,5 @@ async function remove(row) {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
+.muted{color:#bbb;}
 </style>

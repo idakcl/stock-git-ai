@@ -117,7 +117,6 @@ async function save() {
     }
   })
   if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
-  const currentStock = await api.getStock()
   const entry = {
     id: 'S' + Date.now(),
     customer: form.customer,
@@ -127,16 +126,8 @@ async function save() {
   }
   list.value.push(entry)
   await api.saveSales(list.value)
-  if (catalog.length !== itemOptions.value.length) {
-    await api.saveItems(catalog)
-    itemOptions.value = catalog
-  }
-  const newStock = { ...currentStock }
-  for (const l of resolved) {
-    if (!newStock[l.code]) newStock[l.code] = { qty: 0, cost: 0 }
-    newStock[l.code].qty -= l.qty
-  }
-  await api.saveStock(newStock)
+  // 商品销售价历史、库存均由后端自动推导
+  itemOptions.value = await api.getItems().catch(() => itemOptions.value)
   dialog.value = false
   ElMessage.success('销售出库成功')
 }
