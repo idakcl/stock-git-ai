@@ -15,6 +15,7 @@
             <span>{{ item.label }}</span>
           </el-menu-item>
         </el-menu>
+        <div class="build-info">构建 {{ buildTime }}</div>
       </el-aside>
       <el-main class="main">
         <router-view />
@@ -27,7 +28,8 @@
           <el-icon><component :is="item.icon" /></el-icon>
           <span>{{ item.label }}</span>
         </el-menu-item>
-      </el-menu>
+        </el-menu>
+      <div class="build-info">构建 {{ buildTime }}</div>
     </el-drawer>
   </el-container>
 </template>
@@ -37,6 +39,7 @@ import { ref } from 'vue'
 import { Menu, HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis } from '@element-plus/icons-vue'
 
 const drawer = ref(false)
+const buildTime = __BUILD_TIME__
 const nav = [
   { path: '/', label: '看板', icon: HomeFilled },
   { path: '/items', label: '商品', icon: Goods },
@@ -68,6 +71,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .aside { background: #fff; border-right: 1px solid #e4e7ed; overflow-y: auto; }
 .logo { height: 56px; line-height: 56px; text-align: center; font-size: 18px; font-weight: 700; color: #409eff; }
 .menu { border-right: none; }
+.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f0f2f5; }
 .main { padding: 16px; overflow-y: auto; min-width: 0; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .stat-item { min-width: 0; }
