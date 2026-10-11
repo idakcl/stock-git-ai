@@ -88,10 +88,6 @@ async function save() {
   if (!form.customer) return ElMessage.warning('请填写客户')
   if (!form.lines.length || form.lines.some(l => !l.code)) return ElMessage.warning('请完整填写销售明细')
   const currentStock = await api.getStock()
-  for (const l of form.lines) {
-    const s = currentStock[l.code]
-    if (!s || s.qty < l.qty) return ElMessage.warning(`库存不足：${l.code}`)
-  }
   const entry = {
     id: 'S' + Date.now(),
     customer: form.customer,
@@ -106,8 +102,8 @@ async function save() {
   await api.saveSales(list.value)
   const newStock = { ...currentStock }
   for (const l of form.lines) {
+    if (!newStock[l.code]) newStock[l.code] = { qty: 0, cost: 0 }
     newStock[l.code].qty -= l.qty
-    if (newStock[l.code].qty < 0) newStock[l.code].qty = 0
   }
   await api.saveStock(newStock)
   dialog.value = false

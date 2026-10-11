@@ -13,7 +13,8 @@
         <el-table-column prop="value" label="库存金额" width="140" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag v-if="row.warning > 0 && row.qty <= row.warning" type="danger">预警</el-tag>
+            <el-tag v-if="row.qty < 0" type="danger">负库存</el-tag>
+            <el-tag v-else-if="row.warning > 0 && row.qty <= row.warning" type="warning">预警</el-tag>
             <el-tag v-else type="success">正常</el-tag>
           </template>
         </el-table-column>
