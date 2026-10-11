@@ -36,18 +36,22 @@
                 <el-table-column prop="price" label="单价" width="90" />
                 <el-table-column prop="total" label="金额" width="100" />
               </el-table>
+              <div v-if="row.brand" class="history-title" style="margin-top:12px">品牌：{{ row.brand }}</div>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
+              <div v-if="row.remark" class="history-title" style="margin-top:12px">备注：{{ row.remark }}</div>
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="unit" label="单位" width="80" />
+        <el-table-column prop="brand" label="品牌" width="120" show-overflow-tooltip />
         <el-table-column label="供应商" min-width="160">
           <template #default="{ row }">{{ (row.suppliers || []).map(c => supplierMap[c] || c).join('、') || '—' }}</template>
         </el-table-column>
         <el-table-column prop="cost" label="进价" width="100" />
         <el-table-column prop="price" label="售价" width="100" />
+        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
         <slot name="extra" />
         <el-table-column v-if="$slots.actions" label="操作" width="160">
           <template #default="{ row }"><slot name="actions" :row="row" /></template>
@@ -76,7 +80,7 @@ const supplierMap = computed(() => {
   return m
 })
 const filtered = computed(() => (props.items || []).filter(i => matchText(
-  keyword.value, i.code, i.name, i.unit, ...(i.suppliers || [])
+  keyword.value, i.code, i.name, i.unit, i.brand, i.remark, ...(i.suppliers || [])
 )))
 onMounted(async () => {
   try { suppliers.value = await api.getSuppliers() } catch (e) { suppliers.value = [] }
