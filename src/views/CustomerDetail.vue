@@ -14,6 +14,9 @@
         <span>联系人：{{ customer.contact || '—' }}</span>
         <span>电话：{{ customer.phone || '—' }}</span>
         <span>关联商品：{{ products.length }} 个</span>
+        <span class="amount-item">
+          应收款：<b :class="receivable ? 'amount-debt' : 'amount-zero'">¥ {{ receivable.toFixed(2) }}</b>
+        </span>
         <span v-if="customer.remark">备注：{{ customer.remark }}</span>
       </div>
 
@@ -37,7 +40,16 @@
             <el-table-column label="商品" min-width="200">
               <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
             </el-table-column>
-            <el-table-column prop="total" label="金额" width="110" />
+            <el-table-column prop="total" label="金额" width="110">
+              <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="结算" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+                  {{ row.settle || '挂账' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           </el-table>
           <div v-if="!filteredSales.length" class="empty">该时间段暂无销售单</div>
@@ -85,6 +97,11 @@ const summaryAmount = ({ columns, data }) => {
   })
 }
 
+// 应收款：该客户所有「挂账」销售单金额合计
+const receivable = computed(() => saleList.value
+  .filter(s => (s.settle || '挂账') !== '结清')
+  .reduce((sum, s) => sum + Number(s.total || 0), 0))
+
 onMounted(async () => {
   try {
     const [cu, it, sa] = await Promise.all([api.getCustomers(), api.getItems(), api.getSales()])
@@ -103,4 +120,7 @@ onMounted(async () => {
 .filter-label { color: #606266; font-size: 14px; }
 .filter-sep { color: #909399; }
 .empty { color: #909399; text-align: center; padding: 24px 0; }
+.amount-item { display: inline-flex; align-items: center; gap: 4px; }
+.amount-debt { color: #f56c6c; font-weight: 700; }
+.amount-zero { color: #c0c4cc; }
 </style>
