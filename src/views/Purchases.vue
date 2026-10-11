@@ -4,6 +4,7 @@
       <template #header>
         <div class="card-header"><b>采购入库</b><el-button type="primary" @click="openDialog()">新增采购</el-button></div>
       </template>
+      <div class="table-wrap">
       <el-table :data="list" stripe>
         <el-table-column prop="id" label="单号" width="120" />
         <el-table-column prop="supplier" label="供应商" width="140" />
@@ -13,6 +14,7 @@
         </el-table-column>
         <el-table-column prop="total" label="金额" width="100" />
       </el-table>
+      </div>
     </el-card>
 
     <el-dialog v-model="dialog" title="采购入库" width="560">

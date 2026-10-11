@@ -4,6 +4,7 @@
       <template #header>
         <div class="card-header"><b>商品管理</b><el-button type="primary" @click="openDialog()">新增商品</el-button></div>
       </template>
+      <div class="table-wrap">
       <el-table :data="items" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
@@ -18,6 +19,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </el-card>
 
     <el-dialog v-model="dialog" title="商品" width="420">

@@ -2,24 +2,20 @@
   <div>
     <el-card>
       <template #header><b>统计报表</b></template>
-      <el-row :gutter="16">
-        <el-col :span="8">
-          <el-statistic title="采购总额" :value="stats.purchaseTotal" :precision="2" prefix="¥" />
-        </el-col>
-        <el-col :span="8">
-          <el-statistic title="销售总额" :value="stats.saleTotal" :precision="2" prefix="¥" />
-        </el-col>
-        <el-col :span="8">
-          <el-statistic title="毛利" :value="stats.profit" :precision="2" prefix="¥" />
-        </el-col>
-      </el-row>
+      <div class="stat-grid">
+        <div class="stat-item"><el-statistic title="采购总额" :value="stats.purchaseTotal" :precision="2" prefix="¥" /></div>
+        <div class="stat-item"><el-statistic title="销售总额" :value="stats.saleTotal" :precision="2" prefix="¥" /></div>
+        <div class="stat-item"><el-statistic title="毛利" :value="stats.profit" :precision="2" prefix="¥" /></div>
+      </div>
       <el-divider />
       <b>按商品销售汇总</b>
+      <div class="table-wrap">
       <el-table :data="salesByItem" stripe style="margin-top:8px">
         <el-table-column prop="name" label="商品" />
         <el-table-column prop="qty" label="销量" width="100" />
         <el-table-column prop="amount" label="金额" width="140" />
       </el-table>
+      </div>
       <el-empty v-if="!salesByItem.length" description="暂无销售数据" />
     </el-card>
   </div>

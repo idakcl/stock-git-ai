@@ -2,21 +2,23 @@
   <div>
     <el-card>
       <template #header><b>经营看板</b></template>
-      <el-row :gutter="16">
-        <el-col :span="6"><el-statistic title="商品数" :value="stats.itemCount" /></el-col>
-        <el-col :span="6"><el-statistic title="库存总金额" :value="stats.stockValue" :precision="2" prefix="¥" /></el-col>
-        <el-col :span="6"><el-statistic title="采购总金额" :value="stats.purchaseTotal" :precision="2" prefix="¥" /></el-col>
-        <el-col :span="6"><el-statistic title="销售总金额" :value="stats.saleTotal" :precision="2" prefix="¥" /></el-col>
-      </el-row>
+      <div class="stat-grid">
+        <div class="stat-item"><el-statistic title="商品数" :value="stats.itemCount" /></div>
+        <div class="stat-item"><el-statistic title="库存总金额" :value="stats.stockValue" :precision="2" prefix="¥" /></div>
+        <div class="stat-item"><el-statistic title="采购总金额" :value="stats.purchaseTotal" :precision="2" prefix="¥" /></div>
+        <div class="stat-item"><el-statistic title="销售总金额" :value="stats.saleTotal" :precision="2" prefix="¥" /></div>
+      </div>
     </el-card>
     <el-card style="margin-top:16px">
       <template #header><b>低库存预警</b></template>
+      <div class="table-wrap">
       <el-table :data="lowStock" stripe>
         <el-table-column prop="code" label="编码" width="140" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="stock" label="库存" width="100" />
         <el-table-column prop="warning" label="预警值" width="100" />
       </el-table>
+      </div>
       <el-empty v-if="!lowStock.length" description="暂无低库存商品" />
     </el-card>
   </div>

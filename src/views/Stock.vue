@@ -2,6 +2,7 @@
   <div>
     <el-card>
       <template #header><b>库存查询</b></template>
+      <div class="table-wrap">
       <el-table :data="rows" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
@@ -16,6 +17,7 @@
           </template>
         </el-table-column>
       </el-table>
+      </div>
     </el-card>
   </div>
 </template>
