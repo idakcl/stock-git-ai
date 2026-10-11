@@ -13,7 +13,7 @@
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
       </div>
       <div class="table-wrap">
-      <el-table :data="filtered" stripe>
+      <el-table :data="filtered" stripe show-summary :summary-method="summaryAmount">
         <el-table-column label="单号" width="160">
           <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
         </el-table-column>
@@ -33,7 +33,19 @@
 
     <el-dialog v-model="dialog" title="销售出库" width="560">
       <el-form :model="form" label-width="80px">
-        <el-form-item label="客户"><el-input v-model="form.customer" /></el-form-item>
+        <el-form-item label="客户">
+          <el-select
+            v-model="form.customer"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="选择或输入客户"
+            style="width:100%"
+            @change="onCustomerChange"
+          >
+            <el-option v-for="c in customerOptions" :key="c.code" :label="`${c.name} (${c.code})`" :value="c.name" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
@@ -83,6 +95,7 @@ const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
 const itemOptions = ref([])
+const customerOptions = ref([])
 const dialog = ref(false)
 const form = reactive({ customer:'', date:'', remark:'', lines:[] })
 
@@ -94,13 +107,36 @@ const filtered = computed(() => list.value.filter(row => {
   return true
 }))
 
+// 表格底部汇总：合计金额
+const summaryAmount = ({ columns, data }) => {
+  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+  return columns.map((c, idx) => {
+    if (idx === 0) return '合计'
+    if (c.property === 'total') return total.toFixed(2)
+    return ''
+  })
+}
+
+// 按「某客户最近一次销售价」带出单价；没历史则用商品当前售价
+function customerPriceFor(code) {
+  if (!form.customer || !code) return null
+  const item = itemOptions.value.find(i => i.code === code)
+  if (!item) return null
+  const hist = (item.saleHistory || []).filter(h => h.customer === form.customer)
+  if (!hist.length) return null
+  const latest = hist.reduce((a, b) => ((a.date || '') > (b.date || '') ? a : b))
+  return latest.price
+}
+
 onMounted(async () => {
   try {
     list.value = await api.getSales()
     itemOptions.value = await api.getItems()
+    customerOptions.value = await api.getCustomers()
   } catch (e) {
     list.value = []
     itemOptions.value = []
+    customerOptions.value = []
   }
 })
 
@@ -114,10 +150,21 @@ function onItemChange(row) {
   if (found) {
     row.code = found.code
     row.name = found.name
-    if (!row.price) row.price = found.price || 0
+    // 优先带出该客户最近一次成交价，其次商品当前售价
+    const recent = customerPriceFor(found.code)
+    row.price = recent != null ? recent : (found.price || 0)
   } else {
     row.name = row.code
   }
+}
+
+// 更换客户后，按新客户的最近售价刷新已填行的单价（仍可手动改）
+function onCustomerChange() {
+  form.lines.forEach(l => {
+    if (!l.code) return
+    const recent = customerPriceFor(l.code)
+    if (recent != null) l.price = recent
+  })
 }
 
 async function save() {
