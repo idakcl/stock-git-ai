@@ -58,7 +58,9 @@ export function derive(items, suppliers, purchases, sales) {
   const ensureSupplier = (name) => {
     let s = suppliers.find(x => x.name && name && x.name === name)
     if (!s) {
-      const code = 'G' + String(suppliers.length + 1).padStart(3, '0')
+      let max = 0
+      for (const x of suppliers) { const m = /^S(\d{5})$/.exec(x.code || ''); if (m) max = Math.max(max, parseInt(m[1], 10)) }
+      const code = 'S' + String(max + 1).padStart(5, '0')
       s = { code, name: name || '', products: [] }
       suppliers.push(s)
     }
@@ -72,7 +74,10 @@ export function derive(items, suppliers, purchases, sales) {
   const ensureItem = (code, name) => {
     let it = (code && itemByCode[code]) || (name && itemByName[name])
     if (!it) {
-      it = { code: code || ('N' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5)), name: name || code || '', unit: '', cost: 0, price: 0, warning: 0 }
+      let max = 0
+      for (const x of items) { const m = /^P(\d{5})$/.exec(x.code || ''); if (m) max = Math.max(max, parseInt(m[1], 10)) }
+      const code = 'P' + String(max + 1).padStart(5, '0')
+      it = { code, name: name || code || '', unit: '', cost: 0, price: 0, warning: 0 }
       items.push(it)
     }
     it.suppliers = it.suppliers || []
