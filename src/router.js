@@ -8,6 +8,7 @@ import Sales from './views/Sales.vue'
 import Stock from './views/Stock.vue'
 import Report from './views/Report.vue'
 import SupplierDetail from './views/SupplierDetail.vue'
+import CustomerDetail from './views/CustomerDetail.vue'
 import PurchaseDetail from './views/PurchaseDetail.vue'
 import SalesDetail from './views/SalesDetail.vue'
 
@@ -17,6 +18,7 @@ const routes = [
   { path: '/suppliers', component: Suppliers },
   { path: '/supplier/:code', component: SupplierDetail },
   { path: '/customers', component: Customers },
+  { path: '/customer/:code', component: CustomerDetail },
   { path: '/purchases', component: Purchases },
   { path: '/purchase/:id', component: PurchaseDetail },
   { path: '/sales', component: Sales },
