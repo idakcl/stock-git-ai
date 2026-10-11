@@ -4,8 +4,9 @@
       <template #header>
         <div class="card-header"><b>客户</b><el-button type="primary" @click="openDialog()">新增</el-button></div>
       </template>
+      <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称 / 联系人 / 电话" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="list" stripe>
+      <el-table :data="filtered" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="contact" label="联系人" width="140" />
@@ -32,13 +33,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const list = ref([])
+const keyword = ref('')
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'' })
+const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone)))
 
 onMounted(load)
 async function load() {
@@ -58,4 +62,7 @@ async function remove(row) {
   await api.saveCustomers(list.value); ElMessage.success('已删除'); load()
 }
 </script>
-<style scoped>.card-header{display:flex;justify-content:space-between;align-items:center;}</style>
+<style scoped>
+.card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.search-input{margin-bottom:12px;max-width:360px;}
+</style>

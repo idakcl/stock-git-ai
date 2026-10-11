@@ -2,8 +2,9 @@
   <div>
     <el-card>
       <template #header><b>库存查询</b></template>
+      <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="rows" stripe>
+      <el-table :data="filtered" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="qty" label="库存数量" width="120" />
@@ -23,10 +24,13 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const rows = ref([])
+const keyword = ref('')
+const filtered = computed(() => rows.value.filter(i => matchText(keyword.value, i.code, i.name)))
 
 onMounted(async () => {
   try {
@@ -51,3 +55,6 @@ onMounted(async () => {
   }
 })
 </script>
+<style scoped>
+.search-input{margin-bottom:12px;max-width:360px;}
+</style>

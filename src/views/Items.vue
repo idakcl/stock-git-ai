@@ -4,8 +4,9 @@
       <template #header>
         <div class="card-header"><b>商品管理</b><el-button type="primary" @click="openDialog()">新增商品</el-button></div>
       </template>
+      <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="items" stripe>
+      <el-table :data="filtered" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="unit" label="单位" width="80" />
@@ -40,13 +41,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const items = ref([])
+const keyword = ref('')
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', unit:'', cost:0, price:0, warning:0 })
+const filtered = computed(() => items.value.filter(i => matchText(keyword.value, i.code, i.name, i.unit)))
 
 onMounted(load)
 async function load() {
@@ -79,5 +83,6 @@ async function remove(row) {
 </script>
 
 <style scoped>
-.card-header { display:flex; justify-content:space-between; align-items:center; }
+.card-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.search-input { margin-bottom: 12px; max-width: 360px; }
 </style>

@@ -4,8 +4,9 @@
       <template #header>
         <div class="card-header"><b>销售出库</b><el-button type="primary" @click="openDialog()">新增销售</el-button></div>
       </template>
+      <el-input v-model="keyword" clearable placeholder="搜索单号 / 客户 / 商品" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="list" stripe>
+      <el-table :data="filtered" stripe>
         <el-table-column prop="id" label="单号" width="120" />
         <el-table-column prop="customer" label="客户" width="140" />
         <el-table-column prop="date" label="日期" width="120" />
@@ -51,13 +52,22 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const list = ref([])
+const keyword = ref('')
 const itemOptions = ref([])
 const dialog = ref(false)
 const form = reactive({ customer:'', date:'', lines:[] })
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
+const filtered = computed(() => list.value.filter(row => matchText(
+  keyword.value,
+  row.id,
+  row.customer,
+  row.date,
+  ...(row.items || []).map(i => i.name)
+)))
 
 onMounted(async () => {
   try {
@@ -104,4 +114,7 @@ async function save() {
   ElMessage.success('销售出库成功')
 }
 </script>
-<style scoped>.card-header{display:flex;justify-content:space-between;align-items:center;}</style>
+<style scoped>
+.card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.search-input{margin-bottom:12px;max-width:360px;}
+</style>

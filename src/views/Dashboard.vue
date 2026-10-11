@@ -11,8 +11,9 @@
     </el-card>
     <el-card style="margin-top:16px">
       <template #header><b>低库存预警</b></template>
+      <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="lowStock" stripe>
+      <el-table :data="filteredLowStock" stripe>
         <el-table-column prop="code" label="编码" width="140" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="stock" label="库存" width="100" />
@@ -25,11 +26,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const stats = reactive({ itemCount: 0, stockValue: 0, purchaseTotal: 0, saleTotal: 0 })
 const lowStock = ref([])
+const keyword = ref('')
+const filteredLowStock = computed(() => lowStock.value.filter(i => matchText(keyword.value, i.code, i.name)))
 
 onMounted(async () => {
   try {
@@ -53,3 +57,6 @@ onMounted(async () => {
   }
 })
 </script>
+<style scoped>
+.search-input{margin-bottom:12px;max-width:360px;}
+</style>

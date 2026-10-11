@@ -9,8 +9,9 @@
       </div>
       <el-divider />
       <b>按商品销售汇总</b>
+      <el-input v-model="keyword" clearable placeholder="搜索商品名称" class="search-input" />
       <div class="table-wrap">
-      <el-table :data="salesByItem" stripe style="margin-top:8px">
+      <el-table :data="filteredSales" stripe style="margin-top:8px">
         <el-table-column prop="name" label="商品" />
         <el-table-column prop="qty" label="销量" width="100" />
         <el-table-column prop="amount" label="金额" width="140" />
@@ -22,11 +23,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { api } from '../api'
+import { matchText } from '../utils/search'
 
 const stats = reactive({ purchaseTotal: 0, saleTotal: 0, profit: 0 })
 const salesByItem = ref([])
+const keyword = ref('')
+const filteredSales = computed(() => salesByItem.value.filter(i => matchText(keyword.value, i.name)))
 
 onMounted(async () => {
   try {
@@ -59,3 +63,6 @@ onMounted(async () => {
   }
 })
 </script>
+<style scoped>
+.search-input{margin:8px 0 12px;max-width:360px;}
+</style>
