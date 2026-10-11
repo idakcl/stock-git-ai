@@ -1,0 +1,6 @@
+{
+  "name": "stock-test-403",
+  "main": "web/test.js",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": true
+}

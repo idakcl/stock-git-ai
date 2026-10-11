@@ -7,7 +7,8 @@ export async function gh(req, env, method = 'GET', body) {
   const headers = {
     Authorization: `token ${env.GITHUB_TOKEN}`,
     'Content-Type': 'application/json',
-    Accept: 'application/vnd.github+json'
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'stock-git-ai-worker/1.0'
   }
   const opts = { method, headers }
   if (body) opts.body = JSON.stringify(body)

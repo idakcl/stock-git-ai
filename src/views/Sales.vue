@@ -58,8 +58,13 @@ const form = reactive({ customer:'', date:'', lines:[] })
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
 
 onMounted(async () => {
-  list.value = await api.getSales()
-  itemOptions.value = await api.getItems()
+  try {
+    list.value = await api.getSales()
+    itemOptions.value = await api.getItems()
+  } catch (e) {
+    list.value = []
+    itemOptions.value = []
+  }
 })
 
 function openDialog() {

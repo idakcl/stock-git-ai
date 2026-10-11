@@ -39,7 +39,9 @@ const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'' })
 
 onMounted(load)
-async function load() { list.value = await api.getSuppliers() }
+async function load() {
+  try { list.value = await api.getSuppliers() } catch (e) { list.value = [] }
+}
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code:'', name:'', contact:'', phone:'' }); dialog.value = true }
 async function save() {
   const idx = list.value.findIndex(i => i.code === form.code)

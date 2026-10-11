@@ -33,26 +33,33 @@ const stats = reactive({ purchaseTotal: 0, saleTotal: 0, profit: 0 })
 const salesByItem = ref([])
 
 onMounted(async () => {
-  const [purchases, sales, stock] = await Promise.all([
-    api.getPurchases(), api.getSales(), api.getStock()
-  ])
-  stats.purchaseTotal = purchases.reduce((s, p) => s + p.total, 0)
-  stats.saleTotal = sales.reduce((s, p) => s + p.total, 0)
+  try {
+    const [purchases, sales, stock] = await Promise.all([
+      api.getPurchases(), api.getSales(), api.getStock()
+    ])
+    const purchaseList = purchases || []
+    const saleList = sales || []
+    const stockObj = stock && !Array.isArray(stock) ? stock : {}
+    stats.purchaseTotal = purchaseList.reduce((s, p) => s + (p.total || 0), 0)
+    stats.saleTotal = saleList.reduce((s, p) => s + (p.total || 0), 0)
 
-  const costMap = {}
-  for (const [code, v] of Object.entries(stock)) costMap[code] = v.cost || 0
-  const totalCost = sales.reduce((sum, s) =>
-    sum + s.items.reduce((c, i) => c + i.qty * (costMap[i.code] || 0), 0), 0)
-  stats.profit = stats.saleTotal - totalCost
+    const costMap = {}
+    for (const [code, v] of Object.entries(stockObj)) costMap[code] = v.cost || 0
+    const totalCost = saleList.reduce((sum, s) =>
+      sum + (s.items || []).reduce((c, i) => c + i.qty * (costMap[i.code] || 0), 0), 0)
+    stats.profit = stats.saleTotal - totalCost
 
-  const agg = {}
-  for (const s of sales) {
-    for (const i of s.items) {
-      if (!agg[i.name]) agg[i.name] = { name: i.name, qty: 0, amount: 0 }
-      agg[i.name].qty += i.qty
-      agg[i.name].amount += i.total
+    const agg = {}
+    for (const s of saleList) {
+      for (const i of (s.items || [])) {
+        if (!agg[i.name]) agg[i.name] = { name: i.name, qty: 0, amount: 0 }
+        agg[i.name].qty += i.qty
+        agg[i.name].amount += i.total
+      }
     }
+    salesByItem.value = Object.values(agg).sort((a, b) => b.amount - a.amount)
+  } catch (e) {
+    salesByItem.value = []
   }
-  salesByItem.value = Object.values(agg).sort((a, b) => b.amount - a.amount)
 })
 </script>

@@ -30,19 +30,24 @@ const stats = reactive({ itemCount: 0, stockValue: 0, purchaseTotal: 0, saleTota
 const lowStock = ref([])
 
 onMounted(async () => {
-  const [items, purchases, sales, stock] = await Promise.all([
-    api.getItems(), api.getPurchases(), api.getSales(), api.getStock()
-  ])
-  stats.itemCount = items.length
-  stats.purchaseTotal = purchases.reduce((s, p) => s + p.total, 0)
-  stats.saleTotal = sales.reduce((s, p) => s + p.total, 0)
-  for (const [code, info] of Object.entries(stock)) {
-    stats.stockValue += (info.qty || 0) * (info.cost || 0)
+  try {
+    const [items, purchases, sales, stock] = await Promise.all([
+      api.getItems(), api.getPurchases(), api.getSales(), api.getStock()
+    ])
+    stats.itemCount = (items || []).length
+    stats.purchaseTotal = (purchases || []).reduce((s, p) => s + (p.total || 0), 0)
+    stats.saleTotal = (sales || []).reduce((s, p) => s + (p.total || 0), 0)
+    const stockObj = stock && !Array.isArray(stock) ? stock : {}
+    for (const info of Object.values(stockObj)) {
+      stats.stockValue += (info.qty || 0) * (info.cost || 0)
+    }
+    const warnMap = {}
+    ;(items || []).forEach(i => { warnMap[i.code] = i.warning || 0 })
+    lowStock.value = Object.entries(stockObj)
+      .filter(([, v]) => (v.qty || 0) <= (warnMap[v.code] || 0))
+      .map(([code, v]) => ({ ...v, code, warning: warnMap[code] || 0 }))
+  } catch (e) {
+    console.error(e)
   }
-  const warnMap = {}
-  items.forEach(i => { warnMap[i.code] = i.warning || 0 })
-  lowStock.value = Object.entries(stock)
-    .filter(([, v]) => (v.qty || 0) <= (warnMap[v.code] || 0))
-    .map(([code, v]) => ({ ...v, code, warning: warnMap[code] || 0 }))
 })
 </script>

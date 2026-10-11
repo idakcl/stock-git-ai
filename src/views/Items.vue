@@ -47,7 +47,9 @@ const dialog = ref(false)
 const form = reactive({ code:'', name:'', unit:'', cost:0, price:0, warning:0 })
 
 onMounted(load)
-async function load() { items.value = await api.getItems() }
+async function load() {
+  try { items.value = await api.getItems() } catch (e) { items.value = [] }
+}
 
 function openDialog(row) {
   if (row) Object.assign(form, row)

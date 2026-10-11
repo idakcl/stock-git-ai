@@ -22,5 +22,6 @@ export const api = {
   getSales: () => request('/sales'),
   saveSales: (sales) => request('/sales', { method: 'POST', body: JSON.stringify({ sales }) }),
   getStock: () => request('/stock'),
+  saveStock: (stock) => request('/stock', { method: 'POST', body: JSON.stringify({ stock }) }),
   getLogs: () => request('/logs')
 }

@@ -58,8 +58,13 @@ const form = reactive({ supplier:'', date:'', lines:[] })
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
 
 onMounted(async () => {
-  list.value = await api.getPurchases()
-  itemOptions.value = await api.getItems()
+  try {
+    list.value = await api.getPurchases()
+    itemOptions.value = await api.getItems()
+  } catch (e) {
+    list.value = []
+    itemOptions.value = []
+  }
 })
 
 function openDialog() {
@@ -80,21 +85,18 @@ async function save() {
     }),
     total: totalAmount.value
   }
-  list.value.push(entry)
-  await api.savePurchases(list.value)
-  await api.saveStock(await api.getStock(), form.lines)
-  dialog.value = false
-  ElMessage.success('采购入库成功')
-}
-
-async function saveStock(currentStock, lines) {
+  const currentStock = await api.getStock()
   const newStock = { ...currentStock }
-  for (const l of lines) {
+  for (const l of form.lines) {
     if (!newStock[l.code]) newStock[l.code] = { qty: 0, cost: 0 }
     newStock[l.code].qty += l.qty
     newStock[l.code].cost = l.price
   }
+  list.value.push(entry)
+  await api.savePurchases(list.value)
   await api.saveStock(newStock)
+  dialog.value = false
+  ElMessage.success('采购入库成功')
 }
 </script>
 <style scoped>.card-header{display:flex;justify-content:space-between;align-items:center;}</style>

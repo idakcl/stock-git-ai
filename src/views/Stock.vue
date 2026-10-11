@@ -27,20 +27,25 @@ import { api } from '../api'
 const rows = ref([])
 
 onMounted(async () => {
-  const [stock, items] = await Promise.all([api.getStock(), api.getItems()])
-  const itemMap = {}
-  items.forEach(i => { itemMap[i.code] = i })
-  rows.value = Object.entries(stock).map(([code, v]) => {
-    const item = itemMap[code] || {}
-    return {
-      code,
-      name: item.name || code,
-      unit: item.unit || '',
-      qty: v.qty || 0,
-      cost: v.cost || 0,
-      value: (v.qty || 0) * (v.cost || 0),
-      warning: item.warning || 0
-    }
-  })
+  try {
+    const [stock, items] = await Promise.all([api.getStock(), api.getItems()])
+    const itemMap = {}
+    ;(items || []).forEach(i => { itemMap[i.code] = i })
+    const stockObj = stock && !Array.isArray(stock) ? stock : {}
+    rows.value = Object.entries(stockObj).map(([code, v]) => {
+      const item = itemMap[code] || {}
+      return {
+        code,
+        name: item.name || code,
+        unit: item.unit || '',
+        qty: v.qty || 0,
+        cost: v.cost || 0,
+        value: (v.qty || 0) * (v.cost || 0),
+        warning: item.warning || 0
+      }
+    })
+  } catch (e) {
+    rows.value = []
+  }
 })
 </script>
