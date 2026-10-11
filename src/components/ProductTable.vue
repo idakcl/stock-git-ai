@@ -36,16 +36,21 @@
                 <el-table-column prop="price" label="单价" width="90" />
                 <el-table-column prop="total" label="金额" width="100" />
               </el-table>
-              <div v-if="row.brand" class="history-title" style="margin-top:12px">品牌：{{ row.brand }}</div>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
               <div v-if="row.remark" class="history-title" style="margin-top:12px">备注：{{ row.remark }}</div>
+              <div v-if="(row.photos || []).length" class="history-title" style="margin-top:12px">商品照片</div>
+              <PhotoThumbs v-if="(row.photos || []).length" :value="row.photos" style="margin-top:6px" />
             </div>
           </template>
         </el-table-column>
         <el-table-column prop="code" label="编码" width="120" />
-        <el-table-column prop="name" label="名称" />
+        <el-table-column label="名称" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.brand" class="brand-tag">{{ row.brand }}</span>
+            <span>{{ row.name }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="brand" label="品牌" width="120" show-overflow-tooltip />
         <el-table-column label="供应商" min-width="160">
           <template #default="{ row }">{{ (row.suppliers || []).map(c => supplierMap[c] || c).join('、') || '—' }}</template>
         </el-table-column>
@@ -65,6 +70,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
+import PhotoThumbs from './PhotoThumbs.vue'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },
@@ -91,4 +97,15 @@ onMounted(async () => {
 .search-input { margin-bottom: 12px; max-width: 360px; }
 .history { padding: 8px 16px; }
 .history-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
+.brand-tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 6px;
+  border-radius: 3px;
+  background: #fdf3e6;
+  color: #e6a23c;
+  font-size: 12px;
+  line-height: 18px;
+  vertical-align: middle;
+}
 </style>
