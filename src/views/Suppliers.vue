@@ -30,6 +30,7 @@
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="联系人"><el-input v-model="form.contact" /></el-form-item>
         <el-form-item label="电话"><el-input v-model="form.phone" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
     </el-dialog>
@@ -41,18 +42,19 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
+import { nextEntityCode } from '../utils/code'
 
 const list = ref([])
 const keyword = ref('')
 const dialog = ref(false)
-const form = reactive({ code:'', name:'', contact:'', phone:'' })
-const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone)))
+const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
+const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)))
 
 onMounted(load)
 async function load() {
   try { list.value = await api.getSuppliers() } catch (e) { list.value = [] }
 }
-function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code:'', name:'', contact:'', phone:'' }); dialog.value = true }
+function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'S'), name:'', contact:'', phone:'', remark:'' }); dialog.value = true }
 async function save() {
   const idx = list.value.findIndex(i => i.code === form.code)
   if (idx >= 0) list.value[idx] = { ...list.value[idx], ...form }
