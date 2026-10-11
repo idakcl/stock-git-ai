@@ -14,6 +14,9 @@
         <span>联系人：{{ supplier.contact || '—' }}</span>
         <span>电话：{{ supplier.phone || '—' }}</span>
         <span>关联商品：{{ products.length }} 个</span>
+        <span class="amount-item">
+          应付款：<b :class="payable ? 'amount-debt' : 'amount-zero'">¥ {{ payable.toFixed(2) }}</b>
+        </span>
         <span v-if="supplier.remark">备注：{{ supplier.remark }}</span>
       </div>
 
@@ -34,7 +37,16 @@
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column prop="total" label="金额" width="110" />
+            <el-table-column prop="total" label="金额" width="110">
+              <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="结算" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+                  {{ row.settle || '挂账' }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           </el-table>
           <div v-if="!filteredPurchases.length" class="empty">该时间段暂无采购单</div>
@@ -80,6 +92,11 @@ const summaryAmount = ({ columns, data }) => {
   })
 }
 
+// 应付款：该供应商所有「挂账」采购单金额合计
+const payable = computed(() => purchaseList.value
+  .filter(p => (p.settle || '挂账') !== '结清')
+  .reduce((sum, p) => sum + Number(p.total || 0), 0))
+
 onMounted(async () => {
   try {
     const [sp, it, pu] = await Promise.all([api.getSuppliers(), api.getItems(), api.getPurchases()])
@@ -98,4 +115,7 @@ onMounted(async () => {
 .filter-label { color: #606266; font-size: 14px; }
 .filter-sep { color: #909399; }
 .empty { color: #909399; text-align: center; padding: 24px 0; }
+.amount-item { display: inline-flex; align-items: center; gap: 4px; }
+.amount-debt { color: #f56c6c; font-weight: 700; }
+.amount-zero { color: #c0c4cc; }
 </style>
