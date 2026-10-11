@@ -230,12 +230,12 @@ function customerPriceFor(code) {
   return latest.price
 }
 
-// 单价优先级：客户类别对应的分级售价 → 该客户最近成交价 → 商品当前售价
+// 单价优先级：该客户最近成交价(历史成交价最优先) → 客户类别对应分级售价 → 商品当前售价
 function autoPriceFor(item) {
-  const tier = tierPriceFor(item)
-  if (tier != null) return tier
   const recent = customerPriceFor(item.code)
   if (recent != null) return recent
+  const tier = tierPriceFor(item)
+  if (tier != null) return tier
   return item.price || 0
 }
 
