@@ -23,5 +23,14 @@ export const api = {
   saveSales: (sales) => request('/sales', { method: 'POST', body: JSON.stringify({ sales }) }),
   getStock: () => request('/stock'),
   saveStock: (stock) => request('/stock', { method: 'POST', body: JSON.stringify({ stock }) }),
-  getLogs: () => request('/logs')
+  getLogs: () => request('/logs'),
+  // 上传图片/单据照片到图床，返回 { url }
+  uploadPhoto: async (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch(BASE + '/upload', { method: 'POST', body: fd })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || res.statusText)
+    return data
+  }
 }
