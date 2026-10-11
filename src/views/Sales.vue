@@ -24,10 +24,18 @@
         <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
       </el-form>
       <el-table :data="form.lines" stripe>
-        <el-table-column label="商品" min-width="160">
+        <el-table-column label="商品" min-width="180">
           <template #default="{ row }">
-            <el-select v-model="row.code" placeholder="选择商品" style="width:100%">
-              <el-option v-for="i in itemOptions" :key="i.code" :label="i.name" :value="i.code" />
+            <el-select
+              v-model="row.code"
+              filterable
+              allow-create
+              default-first-option
+              placeholder="选择或输入商品"
+              style="width:100%"
+              @change="onItemChange(row)"
+            >
+              <el-option v-for="i in itemOptions" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
             </el-select>
           </template>
         </el-table-column>
@@ -41,7 +49,7 @@
           <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
         </el-table-column>
       </el-table>
-      <div style="margin-top:8px"><el-button size="small" @click="form.lines.push({code:'',qty:1,price:0})">添加行</el-button></div>
+      <div style="margin-top:8px"><el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0})">添加行</el-button></div>
       <div style="margin-top:12px;text-align:right"><b>合计：¥ {{ totalAmount }}</b></div>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存出库</el-button></template>
     </el-dialog>
@@ -53,6 +61,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
+import { resolveLine } from '../utils/catalog'
 
 const list = ref([])
 const keyword = ref('')
@@ -80,28 +89,50 @@ onMounted(async () => {
 })
 
 function openDialog() {
-  Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), lines: [{code:'', qty:1, price:0}] })
+  Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), lines: [{code:'', name:'', qty:1, price:0}] })
   dialog.value = true
+}
+
+function onItemChange(row) {
+  const found = itemOptions.value.find(i => i.code === row.code || i.name === row.code)
+  if (found) {
+    row.code = found.code
+    row.name = found.name
+    if (!row.price) row.price = found.price || 0
+  } else {
+    row.name = row.code
+  }
 }
 
 async function save() {
   if (!form.customer) return ElMessage.warning('请填写客户')
-  if (!form.lines.length || form.lines.some(l => !l.code)) return ElMessage.warning('请完整填写销售明细')
+  if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning('请完整填写销售明细')
+  let catalog = [...itemOptions.value]
+  const resolved = []
+  form.lines.forEach((l, idx) => {
+    const result = resolveLine(catalog, l, idx)
+    if (result.line) {
+      catalog = result.items
+      resolved.push(result.line)
+    }
+  })
+  if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
   const currentStock = await api.getStock()
   const entry = {
     id: 'S' + Date.now(),
     customer: form.customer,
     date: form.date,
-    items: form.lines.map(l => {
-      const item = itemOptions.value.find(i => i.code === l.code)
-      return { code: l.code, name: item?.name || l.code, qty: l.qty, price: l.price, total: l.qty * l.price }
-    }),
-    total: totalAmount.value
+    items: resolved,
+    total: resolved.reduce((s, l) => s + l.total, 0)
   }
   list.value.push(entry)
   await api.saveSales(list.value)
+  if (catalog.length !== itemOptions.value.length) {
+    await api.saveItems(catalog)
+    itemOptions.value = catalog
+  }
   const newStock = { ...currentStock }
-  for (const l of form.lines) {
+  for (const l of resolved) {
     if (!newStock[l.code]) newStock[l.code] = { qty: 0, cost: 0 }
     newStock[l.code].qty -= l.qty
   }
