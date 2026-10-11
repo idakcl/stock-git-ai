@@ -5,6 +5,13 @@
         <div class="card-header"><b>销售出库</b><el-button type="primary" @click="openDialog()">新增销售</el-button></div>
       </template>
       <el-input v-model="keyword" clearable placeholder="搜索单号 / 客户 / 商品" class="search-input" />
+      <div class="filter-row">
+        <span class="filter-label">时间段</span>
+        <el-date-picker v-model="dateStart" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width:150px" />
+        <span class="filter-sep">至</span>
+        <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
+        <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
+      </div>
       <div class="table-wrap">
       <el-table :data="filtered" stripe>
         <el-table-column label="单号" width="160">
@@ -16,6 +23,7 @@
           <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
         </el-table-column>
         <el-table-column prop="total" label="金额" width="100" />
+        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
         <el-table-column label="" width="80">
           <template #default="{ row }"><el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button></template>
         </el-table-column>
@@ -27,6 +35,7 @@
       <el-form :model="form" label-width="80px">
         <el-form-item label="客户"><el-input v-model="form.customer" /></el-form-item>
         <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <el-table :data="form.lines" stripe>
         <el-table-column label="商品" min-width="180">
@@ -67,21 +76,23 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine } from '../utils/catalog'
+import { genOrderId } from '../utils/code'
 
 const list = ref([])
 const keyword = ref('')
+const dateStart = ref('')
+const dateEnd = ref('')
 const itemOptions = ref([])
 const dialog = ref(false)
-const form = reactive({ customer:'', date:'', lines:[] })
+const form = reactive({ customer:'', date:'', remark:'', lines:[] })
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
-const filtered = computed(() => list.value.filter(row => matchText(
-  keyword.value,
-  row.id,
-  row.customer,
-  row.date,
-  ...(row.items || []).map(i => i.name)
-)))
+const filtered = computed(() => list.value.filter(row => {
+  if (!matchText(keyword.value, row.id, row.customer, row.date, row.remark, ...(row.items || []).map(i => i.name))) return false
+  if (dateStart.value && (row.date || '') < dateStart.value) return false
+  if (dateEnd.value && (row.date || '') > dateEnd.value) return false
+  return true
+}))
 
 onMounted(async () => {
   try {
@@ -94,7 +105,7 @@ onMounted(async () => {
 })
 
 function openDialog() {
-  Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), lines: [{code:'', name:'', qty:1, price:0}] })
+  Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', lines: [{code:'', name:'', qty:1, price:0}] })
   dialog.value = true
 }
 
@@ -123,9 +134,10 @@ async function save() {
   })
   if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
   const entry = {
-    id: 'S' + Date.now(),
+    id: genOrderId('X', list.value, form.date),
     customer: form.customer,
     date: form.date,
+    remark: form.remark || '',
     items: resolved,
     total: resolved.reduce((s, l) => s + l.total, 0)
   }
@@ -140,4 +152,7 @@ async function save() {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
+.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.filter-label{color:#606266;font-size:14px;}
+.filter-sep{color:#909399;}
 </style>
