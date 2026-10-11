@@ -12,8 +12,15 @@
         <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
       </div>
+      <TableToolbar
+        filename="销售单"
+        title="销售单"
+        :subtitle="subtitle"
+        :columns="exportColumns"
+        :rows="filtered"
+      />
       <div class="table-wrap">
-      <el-table :data="filtered" stripe show-summary :summary-method="summaryAmount">
+      <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
         <el-table-column label="单号" width="170">
           <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
         </el-table-column>
@@ -24,6 +31,15 @@
         </el-table-column>
         <el-table-column prop="total" label="金额" width="110">
           <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="实收" width="110">
+          <template #default="{ row }">{{ row.received != null ? Number(row.received).toFixed(2) : '—' }}</template>
+        </el-table-column>
+        <el-table-column label="优惠" width="100">
+          <template #default="{ row }">
+            <span v-if="row.received != null && discountOf(row) > 0" class="discount">-{{ discountOf(row).toFixed(2) }}</span>
+            <span v-else class="none">—</span>
+          </template>
         </el-table-column>
         <el-table-column label="结算" width="130">
           <template #default="{ row }">
@@ -45,6 +61,14 @@
         </el-table-column>
       </el-table>
       </div>
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="PAGE_SIZE"
+        :total="filtered.length"
+        layout="total, prev, pager, next"
+        background
+        class="pager"
+      />
     </el-card>
 
     <el-dialog v-model="dialog" :title="editingId ? '编辑销售单' : '销售出库'" width="620">
@@ -71,6 +95,9 @@
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="单据照片"><PhotoUpload v-model="form.photos" /></el-form-item>
+        <el-form-item label="实收金额">
+          <el-input-number v-model="form.received" :min="0" :precision="2" :controls="false" placeholder="留空表示未填写" style="width:100%" />
+        </el-form-item>
       </el-form>
       <el-table :data="form.lines" stripe>
         <el-table-column label="商品" min-width="180">
@@ -99,30 +126,43 @@
         </el-table-column>
       </el-table>
       <div style="margin-top:8px"><el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0})">添加行</el-button></div>
-      <div style="margin-top:12px;text-align:right"><b>合计：¥ {{ totalAmount }}</b></div>
+      <div style="margin-top:12px;text-align:right">
+        <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
+        <span v-if="discountAmount > 0" class="discount" style="margin-left:12px">优惠：-{{ discountAmount.toFixed(2) }}</span>
+      </div>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存出库</el-button></template>
     </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import PhotoUpload from '../components/PhotoUpload.vue'
+import TableToolbar from '../components/TableToolbar.vue'
+
+const PAGE_SIZE = 40
+// 客户类别 → 商品上的对应分级售价字段
+const CATEGORY_PRICE_FIELD = { '批发': 'priceWholesale', '零售': 'priceRetail', '安装师傅': 'priceInstaller' }
 
 const list = ref([])
 const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
+const page = ref(1)
 const itemOptions = ref([])
 const customerOptions = ref([])
 const dialog = ref(false)
 const editingId = ref('')
-const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], lines:[] })
+const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], received:null, lines:[] })
+
+// 优惠折扣 = 合计 - 实收（未填写实收时视为 0 优惠）
+const discountOf = (row) => (row.received != null ? Math.max(0, Number(row.total || 0) - Number(row.received || 0)) : 0)
+const discountAmount = computed(() => (form.received != null ? Math.max(0, totalAmount.value - Number(form.received || 0)) : 0))
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
 const filtered = computed(() => list.value.filter(row => {
@@ -132,14 +172,51 @@ const filtered = computed(() => list.value.filter(row => {
   return true
 }))
 
-// 表格底部汇总：合计金额
-const summaryAmount = ({ columns, data }) => {
-  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+// 表格底部汇总：基于「全部筛选结果」，不受分页影响
+const summaryAmount = ({ columns }) => {
+  const rows = filtered.value
+  const total = rows.reduce((sum, r) => sum + Number(r.total || 0), 0)
+  const settled = rows.filter(r => (r.settle || '挂账') === '结清').length
   return columns.map((c, idx) => {
-    if (idx === 0) return '合计'
+    if (idx === 0) return `合计（${rows.length} 单，结清 ${settled}）`
     if (c.property === 'total') return total.toFixed(2)
     return ''
   })
+}
+
+const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+watch([keyword, dateStart, dateEnd], () => { page.value = 1 })
+
+const subtitle = computed(() => {
+  const parts = [`共 ${filtered.value.length} 单`]
+  if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
+  if (keyword.value) parts.push('已按关键词筛选')
+  return parts.join(' · ')
+})
+const exportColumns = [
+  { label: '单号', prop: 'id' },
+  { label: '客户', prop: 'customer' },
+  { label: '日期', prop: 'date' },
+  { label: '商品', value: r => (r.items || []).map(i => `${i.name}×${i.qty}`).join('、') },
+  { label: '金额', value: r => Number(r.total || 0).toFixed(2) },
+  { label: '实收', value: r => (r.received != null ? Number(r.received).toFixed(2) : '') },
+  { label: '优惠', value: r => (discountOf(r) > 0 ? discountOf(r).toFixed(2) : '') },
+  { label: '结算', value: r => (r.settle || '挂账') },
+  { label: '备注', prop: 'remark' }
+]
+
+// 当前所选客户的类别
+const customerCategory = computed(() => {
+  const c = (customerOptions.value || []).find(c => c.name === form.customer)
+  return c && c.category ? c.category : ''
+})
+
+// 按客户类别取对应分级售价（批发→批发价 / 零售→零售价 / 安装师傅→安装师傅价）
+function tierPriceFor(item) {
+  const field = CATEGORY_PRICE_FIELD[customerCategory.value]
+  if (!field) return null
+  const v = item?.[field]
+  return (v !== '' && v != null && Number(v) > 0) ? Number(v) : null
 }
 
 // 按「某客户最近一次销售价」带出单价；没历史则用商品当前售价
@@ -151,6 +228,15 @@ function customerPriceFor(code) {
   if (!hist.length) return null
   const latest = hist.reduce((a, b) => ((a.date || '') > (b.date || '') ? a : b))
   return latest.price
+}
+
+// 单价优先级：客户类别对应的分级售价 → 该客户最近成交价 → 商品当前售价
+function autoPriceFor(item) {
+  const tier = tierPriceFor(item)
+  if (tier != null) return tier
+  const recent = customerPriceFor(item.code)
+  if (recent != null) return recent
+  return item.price || 0
 }
 
 function loadAll() {
@@ -179,11 +265,12 @@ function openDialog(row) {
       remark: row.remark || '',
       settle: row.settle || '挂账',
       photos: [...(row.photos || [])],
+      received: row.received ?? null,
       lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price }))
     })
   } else {
     editingId.value = ''
-    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], lines: [{code:'', name:'', qty:1, price:0}] })
+    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], received:null, lines: [{code:'', name:'', qty:1, price:0}] })
   }
   dialog.value = true
 }
@@ -193,20 +280,18 @@ function onItemChange(row) {
   if (found) {
     row.code = found.code
     row.name = found.name
-    // 优先带出该客户最近一次成交价，其次商品当前售价
-    const recent = customerPriceFor(found.code)
-    row.price = recent != null ? recent : (found.price || 0)
+    row.price = autoPriceFor(found)
   } else {
     row.name = row.code
   }
 }
 
-// 更换客户后，按新客户的最近售价刷新已填行的单价（仍可手动改）
+// 更换客户后，按新客户的类别价/最近售价刷新已填行的单价（仍可手动改）
 function onCustomerChange() {
   form.lines.forEach(l => {
     if (!l.code) return
-    const recent = customerPriceFor(l.code)
-    if (recent != null) l.price = recent
+    const item = itemOptions.value.find(i => i.code === l.code)
+    if (item) l.price = autoPriceFor(item)
   })
 }
 
@@ -231,6 +316,7 @@ async function save() {
     remark: form.remark || '',
     settle: form.settle || '挂账',
     photos: [...(form.photos || [])],
+    received: form.received != null ? Number(form.received) : null,
     items: resolved,
     total: amount
   }
@@ -275,4 +361,7 @@ async function remove(row) {
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
 .filter-label{color:#606266;font-size:14px;}
 .filter-sep{color:#909399;}
+.pager{margin-top:12px;justify-content:flex-end;}
+.discount{color:#67c23a;}
+.none{color:#c0c4cc;}
 </style>
