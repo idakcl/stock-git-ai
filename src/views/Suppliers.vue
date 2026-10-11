@@ -5,8 +5,15 @@
         <div class="card-header"><b>供应商</b><el-button type="primary" @click="openDialog()">新增</el-button></div>
       </template>
       <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称 / 联系人 / 电话" class="search-input" />
+      <TableToolbar
+        filename="供应商"
+        title="供应商"
+        :subtitle="`共 ${filtered.length} 条`"
+        :columns="exportColumns"
+        :rows="filtered"
+      />
       <div class="table-wrap">
-      <el-table :data="filtered" stripe>
+      <el-table :data="paged" stripe>
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column label="名称" min-width="200">
           <template #default="{ row }">
@@ -30,6 +37,14 @@
         </el-table-column>
       </el-table>
       </div>
+      <el-pagination
+        v-model:current-page="page"
+        :page-size="PAGE_SIZE"
+        :total="filtered.length"
+        layout="total, prev, pager, next"
+        background
+        class="pager"
+      />
     </el-card>
     <el-dialog v-model="dialog" title="供应商" width="420">
       <el-form :model="form" label-width="80px">
@@ -45,18 +60,33 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
+import TableToolbar from '../components/TableToolbar.vue'
+
+const PAGE_SIZE = 40
 
 const list = ref([])
 const purchases = ref([])
 const keyword = ref('')
+const page = ref(1)
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
 const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)))
+const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+watch(keyword, () => { page.value = 1 })
+
+const exportColumns = [
+  { label: '编码', prop: 'code' },
+  { label: '名称', prop: 'name' },
+  { label: '联系人', prop: 'contact' },
+  { label: '电话', prop: 'phone' },
+  { label: '应付款', value: r => Number(payableMap.value[r.name] || 0).toFixed(2) },
+  { label: '备注', prop: 'remark' }
+]
 
 // 应付款：该供应商所有「未结清（挂账）」采购单金额合计
 const payableMap = computed(() => {
@@ -96,4 +126,5 @@ async function remove(row) {
 .search-input{margin-bottom:12px;max-width:360px;}
 .amount-debt{color:#f56c6c;font-weight:600;}
 .amount-zero{color:#c0c4cc;}
+.pager{margin-top:12px;justify-content:flex-end;}
 </style>
