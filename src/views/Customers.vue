@@ -13,8 +13,15 @@
             <router-link :to="`/customer/${row.code}`" class="link">{{ row.name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="contact" label="联系人" width="140" />
-        <el-table-column prop="phone" label="电话" width="140" />
+        <el-table-column prop="contact" label="联系人" width="130" />
+        <el-table-column prop="phone" label="电话" width="130" />
+        <el-table-column label="应收款" width="130">
+          <template #default="{ row }">
+            <span :class="receivableMap[row.name] ? 'amount-debt' : 'amount-zero'">
+              ¥ {{ Number(receivableMap[row.name] || 0).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
@@ -45,14 +52,30 @@ import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
 
 const list = ref([])
+const sales = ref([])
 const keyword = ref('')
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
 const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)))
 
+// 应收款：该客户所有「未结清（挂账）」销售单金额合计
+const receivableMap = computed(() => {
+  const map = {}
+  for (const s of sales.value || []) {
+    if ((s.settle || '挂账') === '结清') continue
+    const name = s.customer || ''
+    map[name] = (map[name] || 0) + Number(s.total || 0)
+  }
+  return map
+})
+
 onMounted(load)
 async function load() {
-  try { list.value = await api.getCustomers() } catch (e) { list.value = [] }
+  try {
+    const [cu, sa] = await Promise.all([api.getCustomers(), api.getSales()])
+    list.value = cu
+    sales.value = sa
+  } catch (e) { list.value = []; sales.value = [] }
 }
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'C'), name:'', contact:'', phone:'', remark:'' }); dialog.value = true }
 async function save() {
@@ -71,4 +94,6 @@ async function remove(row) {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
+.amount-debt{color:#f56c6c;font-weight:600;}
+.amount-zero{color:#c0c4cc;}
 </style>
