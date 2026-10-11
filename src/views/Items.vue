@@ -2,9 +2,19 @@
   <div>
     <el-card>
       <template #header>
-        <div class="card-header"><b>商品管理</b><el-button type="primary" @click="openDialog()">新增商品</el-button></div>
+        <div class="card-header">
+          <b>商品管理</b>
+          <el-button type="primary" @click="openDialog()">新增商品</el-button>
+        </div>
       </template>
-      <ProductTable :items="items" search-placeholder="搜索编码 / 名称">
+      <TableToolbar
+        filename="商品库"
+        title="商品库"
+        :subtitle="`共 ${exportRows.length} 条`"
+        :columns="exportColumns"
+        :rows="exportRows"
+      />
+      <ProductTable ref="tableRef" :items="items" search-placeholder="搜索编码 / 名称" show-price-tiers :page-size="40">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -20,6 +30,9 @@
         <el-form-item label="品牌"><el-input v-model="form.brand" /></el-form-item>
         <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="批发价"><el-input-number v-model="form.priceWholesale" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="零售价"><el-input-number v-model="form.priceRetail" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="安装师傅价"><el-input-number v-model="form.priceInstaller" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="预警值"><el-input-number v-model="form.warning" :min="0" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="商品照片"><PhotoUpload v-model="form.photos" /></el-form-item>
@@ -33,16 +46,38 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
+import TableToolbar from '../components/TableToolbar.vue'
 import { nextEntityCode } from '../utils/code'
 
 const items = ref([])
 const dialog = ref(false)
-const form = reactive({ code:'', name:'', unit:'', brand:'', photos:[], cost:0, price:0, warning:0, remark:'' })
+const tableRef = ref(null)
+const form = reactive({
+  code:'', name:'', unit:'', brand:'', photos:[],
+  cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0,
+  warning:0, remark:''
+})
+
+// 导出/打印使用当前搜索后的全部结果
+const exportRows = computed(() => (tableRef.value && tableRef.value.filtered) || items.value)
+const exportColumns = [
+  { label: '编码', prop: 'code' },
+  { label: '品牌', prop: 'brand' },
+  { label: '名称', prop: 'name' },
+  { label: '单位', prop: 'unit' },
+  { label: '进价', prop: 'cost' },
+  { label: '售价', prop: 'price' },
+  { label: '批发价', prop: 'priceWholesale' },
+  { label: '零售价', prop: 'priceRetail' },
+  { label: '安装师傅价', prop: 'priceInstaller' },
+  { label: '预警值', prop: 'warning' },
+  { label: '备注', prop: 'remark' }
+]
 
 onMounted(load)
 async function load() {
@@ -51,7 +86,10 @@ async function load() {
 
 function openDialog(row) {
   if (row) Object.assign(form, row)
-  else Object.assign(form, { code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', photos:[], cost:0, price:0, warning:0, remark:'' })
+  else Object.assign(form, {
+    code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', photos:[],
+    cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0, warning:0, remark:''
+  })
   dialog.value = true
 }
 
