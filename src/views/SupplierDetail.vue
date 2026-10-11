@@ -20,18 +20,19 @@
         <span v-if="supplier.remark">备注：{{ supplier.remark }}</span>
       </div>
 
+      <div class="filter-row">
+        <span class="filter-label">时间段</span>
+        <el-date-picker v-model="dateStart" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width:150px" />
+        <span class="filter-sep">至</span>
+        <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
+        <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
+      </div>
+
       <el-tabs v-model="tab">
         <el-tab-pane label="产品列表" name="products">
           <ProductTable :items="products" search-placeholder="搜索该供应商商品" />
         </el-tab-pane>
         <el-tab-pane :label="`采购单 (${filteredPurchases.length})`" name="purchases">
-          <div class="filter-row">
-            <span class="filter-label">时间段</span>
-            <el-date-picker v-model="dateStart" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width:150px" />
-            <span class="filter-sep">至</span>
-            <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
-            <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
-          </div>
           <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
@@ -39,6 +40,9 @@
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column prop="total" label="金额" width="110">
               <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="实付" width="110">
+              <template #default="{ row }">{{ row.paid != null ? Number(row.paid).toFixed(2) : '—' }}</template>
             </el-table-column>
             <el-table-column label="结算" width="100">
               <template #default="{ row }">
@@ -50,6 +54,39 @@
             <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           </el-table>
           <div v-if="!filteredPurchases.length" class="empty">该时间段暂无采购单</div>
+        </el-tab-pane>
+        <el-tab-pane :label="`来往账 (${ledgerRows.length})`" name="ledger">
+          <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
+            <el-table-column prop="date" label="日期" width="120" />
+            <el-table-column label="单号" width="180">
+              <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
+            </el-table-column>
+            <el-table-column prop="summary" label="摘要" width="120" />
+            <el-table-column label="应付金额" width="120">
+              <template #default="{ row }">{{ row.amount.toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="实付金额" width="120">
+              <template #default="{ row }">{{ row.paid.toFixed(2) }}</template>
+            </el-table-column>
+            <el-table-column label="未结金额" width="120">
+              <template #default="{ row }">
+                <span :class="row.unpaid > 0 ? 'amount-debt' : 'none'">{{ row.unpaid.toFixed(2) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="累计欠款" width="130">
+              <template #default="{ row }">
+                <b :class="row.balance > 0 ? 'amount-debt' : 'amount-zero'">{{ row.balance.toFixed(2) }}</b>
+              </template>
+            </el-table-column>
+            <el-table-column label="结算" width="100">
+              <template #default="{ row }">
+                <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+                  {{ row.settle || '挂账' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="!ledgerRows.length" class="empty">该时间段暂无往来记录</div>
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -82,6 +119,26 @@ const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   return true
 }))
 
+// 应付款：该供应商所有「挂账」采购单金额合计
+const payable = computed(() => purchaseList.value
+  .filter(p => (p.settle || '挂账') !== '结清')
+  .reduce((sum, p) => sum + Number(p.total || 0), 0))
+
+// 来往账：按时间顺序滚动计算累计欠款
+const ledgerRows = computed(() => {
+  let balance = 0
+  return filteredPurchases.value
+    .slice()
+    .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)))
+    .map(p => {
+      const amount = Number(p.total || 0)
+      const paid = p.paid != null ? Number(p.paid) : 0
+      const unpaid = Math.max(0, amount - paid)
+      balance += unpaid
+      return { date: p.date, id: p.id, summary: '采购入库', amount, paid, unpaid, balance, settle: p.settle || '挂账' }
+    })
+})
+
 // 表格底部汇总：合计金额
 const summaryAmount = ({ columns, data }) => {
   const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
@@ -92,10 +149,20 @@ const summaryAmount = ({ columns, data }) => {
   })
 }
 
-// 应付款：该供应商所有「挂账」采购单金额合计
-const payable = computed(() => purchaseList.value
-  .filter(p => (p.settle || '挂账') !== '结清')
-  .reduce((sum, p) => sum + Number(p.total || 0), 0))
+// 来往账合计行
+const ledgerSummary = ({ columns, data }) => {
+  const amount = (data || []).reduce((s, r) => s + r.amount, 0)
+  const paid = (data || []).reduce((s, r) => s + r.paid, 0)
+  const unpaid = (data || []).reduce((s, r) => s + r.unpaid, 0)
+  return columns.map((c, idx) => {
+    if (idx === 0) return '合计'
+    if (c.label === '应付金额') return amount.toFixed(2)
+    if (c.label === '实付金额') return paid.toFixed(2)
+    if (c.label === '未结金额') return unpaid.toFixed(2)
+    if (c.label === '累计欠款') return unpaid.toFixed(2)
+    return ''
+  })
+}
 
 onMounted(async () => {
   try {
@@ -118,4 +185,5 @@ onMounted(async () => {
 .amount-item { display: inline-flex; align-items: center; gap: 4px; }
 .amount-debt { color: #f56c6c; font-weight: 700; }
 .amount-zero { color: #c0c4cc; }
+.none { color: #c0c4cc; }
 </style>
