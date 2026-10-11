@@ -13,6 +13,7 @@
         <span>供应商：{{ purchase.supplier }}</span>
         <span>日期：{{ purchase.date }}</span>
         <span>金额：¥ {{ purchase.total }}</span>
+        <span v-if="purchase.remark">备注：{{ purchase.remark }}</span>
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
         <template #extra>
