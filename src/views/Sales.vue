@@ -14,24 +14,40 @@
       </div>
       <div class="table-wrap">
       <el-table :data="filtered" stripe show-summary :summary-method="summaryAmount">
-        <el-table-column label="单号" width="160">
+        <el-table-column label="单号" width="170">
           <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
         </el-table-column>
-        <el-table-column prop="customer" label="客户" width="140" />
+        <el-table-column prop="customer" label="客户" width="150" />
         <el-table-column prop="date" label="日期" width="120" />
         <el-table-column label="商品" min-width="200">
           <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
         </el-table-column>
-        <el-table-column prop="total" label="金额" width="100" />
+        <el-table-column prop="total" label="金额" width="110">
+          <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="结算" width="130">
+          <template #default="{ row }">
+            <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+              {{ row.settle || '挂账' }}
+            </el-tag>
+            <el-button link size="small" type="primary" style="margin-left:4px" @click="toggleSettle(row)">
+              {{ row.settle === '结清' ? '改挂账' : '结清' }}
+            </el-button>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="" width="80">
-          <template #default="{ row }"><el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button></template>
+        <el-table-column label="操作" width="190">
+          <template #default="{ row }">
+            <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
+            <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
+            <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+          </template>
         </el-table-column>
       </el-table>
       </div>
     </el-card>
 
-    <el-dialog v-model="dialog" title="销售出库" width="560">
+    <el-dialog v-model="dialog" :title="editingId ? '编辑销售单' : '销售出库'" width="620">
       <el-form :model="form" label-width="80px">
         <el-form-item label="客户">
           <el-select
@@ -47,7 +63,14 @@
           </el-select>
         </el-form-item>
         <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="结算">
+          <el-radio-group v-model="form.settle">
+            <el-radio-button label="挂账" />
+            <el-radio-button label="结清" />
+          </el-radio-group>
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="单据照片"><PhotoUpload v-model="form.photos" /></el-form-item>
       </el-form>
       <el-table :data="form.lines" stripe>
         <el-table-column label="商品" min-width="180">
@@ -84,11 +107,12 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
+import PhotoUpload from '../components/PhotoUpload.vue'
 
 const list = ref([])
 const keyword = ref('')
@@ -97,7 +121,8 @@ const dateEnd = ref('')
 const itemOptions = ref([])
 const customerOptions = ref([])
 const dialog = ref(false)
-const form = reactive({ customer:'', date:'', remark:'', lines:[] })
+const editingId = ref('')
+const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], lines:[] })
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
 const filtered = computed(() => list.value.filter(row => {
@@ -128,11 +153,16 @@ function customerPriceFor(code) {
   return latest.price
 }
 
+function loadAll() {
+  return Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+}
+
 onMounted(async () => {
   try {
-    list.value = await api.getSales()
-    itemOptions.value = await api.getItems()
-    customerOptions.value = await api.getCustomers()
+    const [s, it, cu] = await loadAll()
+    list.value = s
+    itemOptions.value = it
+    customerOptions.value = cu
   } catch (e) {
     list.value = []
     itemOptions.value = []
@@ -140,8 +170,21 @@ onMounted(async () => {
   }
 })
 
-function openDialog() {
-  Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', lines: [{code:'', name:'', qty:1, price:0}] })
+function openDialog(row) {
+  if (row) {
+    editingId.value = row.id
+    Object.assign(form, {
+      customer: row.customer || '',
+      date: row.date || '',
+      remark: row.remark || '',
+      settle: row.settle || '挂账',
+      photos: [...(row.photos || [])],
+      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price }))
+    })
+  } else {
+    editingId.value = ''
+    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], lines: [{code:'', name:'', qty:1, price:0}] })
+  }
   dialog.value = true
 }
 
@@ -180,20 +223,50 @@ async function save() {
     }
   })
   if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
-  const entry = {
-    id: genOrderId('X', list.value, form.date),
+  const amount = resolved.reduce((s, l) => s + l.total, 0)
+  const isEdit = !!editingId.value
+  const payload = {
     customer: form.customer,
     date: form.date,
     remark: form.remark || '',
+    settle: form.settle || '挂账',
+    photos: [...(form.photos || [])],
     items: resolved,
-    total: resolved.reduce((s, l) => s + l.total, 0)
+    total: amount
   }
-  list.value.push(entry)
+  // 编辑时沿用原单号，新增才生成新单号
+  if (isEdit) {
+    const idx = list.value.findIndex(s => s.id === editingId.value)
+    if (idx >= 0) list.value[idx] = { ...list.value[idx], ...payload }
+  } else {
+    list.value.push({ id: genOrderId('X', list.value, form.date), ...payload })
+  }
   await api.saveSales(list.value)
   // 商品销售价历史、库存均由后端自动推导
-  itemOptions.value = await api.getItems().catch(() => itemOptions.value)
+  const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+  list.value = s
+  itemOptions.value = it
   dialog.value = false
-  ElMessage.success('销售出库成功')
+  editingId.value = ''
+  ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
+}
+
+async function toggleSettle(row) {
+  row.settle = row.settle === '结清' ? '挂账' : '结清'
+  await api.saveSales(list.value)
+  ElMessage.success(row.settle === '结清' ? '已标记为结清' : '已改回挂账')
+}
+
+async function remove(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除销售单 ${row.id}?\n删除后库存与历史价会自动重算。`, '提示', { type: 'warning' })
+  } catch { return }
+  list.value = list.value.filter(s => s.id !== row.id)
+  await api.saveSales(list.value)
+  const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+  list.value = s
+  itemOptions.value = it
+  ElMessage.success('已删除')
 }
 </script>
 <style scoped>
