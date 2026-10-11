@@ -49,78 +49,70 @@ function parseFreeText(text) {
 }
 
 // 从采购单/销售单推导：商品与供应商的关系链接、历史采购价/销售价、库存
-function findItem(items, code, name) {
-  if (code) {
-    const byCode = items.find(i => i.code === code)
-    if (byCode) return byCode
-  }
-  if (name) return items.find(i => i.name === name)
-  return null
-}
-
-function ensureSupplier(suppliers, name) {
-  let s = suppliers.find(x => x.name && name && x.name === name)
-  if (!s) {
-    const code = 'G' + String(suppliers.length + 1).padStart(3, '0')
-    s = { code, name: name || '', products: [] }
-    suppliers.push(s)
-  }
-  return s
-}
-
 export function derive(items, suppliers, purchases, sales) {
-  items = (items || []).map(i => ({
-    ...i,
-    suppliers: i.suppliers || [],
-    purchaseHistory: i.purchaseHistory || [],
-    saleHistory: i.saleHistory || []
-  }))
-  suppliers = (suppliers || []).map(s => ({ ...s, products: s.products || [] }))
+  items = (items || []).map(i => ({ ...i }))
+  suppliers = (suppliers || []).map(s => ({ ...s }))
   const nameToCode = {}
   suppliers.forEach(s => { if (s.name) nameToCode[s.name] = s.code })
 
-  const upsertItem = (code, name) => {
-    let it = findItem(items, code, name)
+  const ensureSupplier = (name) => {
+    let s = suppliers.find(x => x.name && name && x.name === name)
+    if (!s) {
+      const code = 'G' + String(suppliers.length + 1).padStart(3, '0')
+      s = { code, name: name || '', products: [] }
+      suppliers.push(s)
+    }
+    return s
+  }
+
+  const itemByCode = {}
+  const itemByName = {}
+  items.forEach(i => { if (i.code) itemByCode[i.code] = i; if (i.name) itemByName[i.name] = i })
+
+  const ensureItem = (code, name) => {
+    let it = (code && itemByCode[code]) || (name && itemByName[name])
     if (!it) {
-      it = {
-        code: code || ('N' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5)),
-        name: name || code || '',
-        unit: '', cost: 0, price: 0, warning: 0,
-        suppliers: [], purchaseHistory: [], saleHistory: []
-      }
+      it = { code: code || ('N' + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 5)), name: name || code || '', unit: '', cost: 0, price: 0, warning: 0 }
       items.push(it)
     }
+    it.suppliers = it.suppliers || []
+    it.purchaseHistory = []
+    it.saleHistory = []
+    if (code) itemByCode[code] = it
+    if (name) itemByName[name] = it
     return it
   }
 
+  // 历史由单据「重建」（幂等），不从已有 history 追加
+  const purchaseHist = {}
+  const saleHist = {}
   for (const p of (purchases || [])) {
     const supName = p.supplier || ''
     let sCode = nameToCode[supName]
-    if (!sCode) {
-      const s = ensureSupplier(suppliers, supName)
-      sCode = s.code
-      nameToCode[supName] = sCode
-    }
+    if (!sCode) { const s = ensureSupplier(supName); sCode = s.code; nameToCode[supName] = sCode }
     for (const l of (p.items || [])) {
-      const it = upsertItem(l.code, l.name)
-      it.suppliers = Array.from(new Set([...(it.suppliers || []), sCode]))
-      it.purchaseHistory = [...(it.purchaseHistory || []), {
+      const it = ensureItem(l.code, l.name)
+      if (!it.suppliers.includes(sCode)) it.suppliers.push(sCode)
+      ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
         date: p.date, supplier: sCode, supplierName: supName,
         qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
-      }]
+      })
       if (l.price != null) it.cost = Number(l.price)
     }
   }
-
   for (const s of (sales || [])) {
     for (const l of (s.items || [])) {
-      const it = upsertItem(l.code, l.name)
-      it.saleHistory = [...(it.saleHistory || []), {
+      const it = ensureItem(l.code, l.name)
+      ;(saleHist[it.code] = saleHist[it.code] || []).push({
         date: s.date, customer: s.customer || '',
         qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
-      }]
+      })
       if (l.price != null) it.price = Number(l.price)
     }
+  }
+  for (const it of items) {
+    it.purchaseHistory = purchaseHist[it.code] || []
+    it.saleHistory = saleHist[it.code] || []
   }
 
   // 双向链接：供应商.products 由商品.suppliers 反推
