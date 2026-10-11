@@ -13,6 +13,7 @@
         <span>客户：{{ sale.customer }}</span>
         <span>日期：{{ sale.date }}</span>
         <span>金额：¥ {{ sale.total }}</span>
+        <span v-if="sale.remark">备注：{{ sale.remark }}</span>
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
         <template #extra>
