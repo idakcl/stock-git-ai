@@ -13,8 +13,15 @@
             <router-link :to="`/supplier/${row.code}`" class="link">{{ row.name }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="contact" label="联系人" width="140" />
-        <el-table-column prop="phone" label="电话" width="140" />
+        <el-table-column prop="contact" label="联系人" width="130" />
+        <el-table-column prop="phone" label="电话" width="130" />
+        <el-table-column label="应付款" width="130">
+          <template #default="{ row }">
+            <span :class="payableMap[row.name] ? 'amount-debt' : 'amount-zero'">
+              ¥ {{ Number(payableMap[row.name] || 0).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
@@ -45,14 +52,30 @@ import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
 
 const list = ref([])
+const purchases = ref([])
 const keyword = ref('')
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
 const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)))
 
+// 应付款：该供应商所有「未结清（挂账）」采购单金额合计
+const payableMap = computed(() => {
+  const map = {}
+  for (const p of purchases.value || []) {
+    if ((p.settle || '挂账') === '结清') continue
+    const name = p.supplier || ''
+    map[name] = (map[name] || 0) + Number(p.total || 0)
+  }
+  return map
+})
+
 onMounted(load)
 async function load() {
-  try { list.value = await api.getSuppliers() } catch (e) { list.value = [] }
+  try {
+    const [sp, pu] = await Promise.all([api.getSuppliers(), api.getPurchases()])
+    list.value = sp
+    purchases.value = pu
+  } catch (e) { list.value = []; purchases.value = [] }
 }
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'S'), name:'', contact:'', phone:'', remark:'' }); dialog.value = true }
 async function save() {
@@ -71,4 +94,6 @@ async function remove(row) {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
+.amount-debt{color:#f56c6c;font-weight:600;}
+.amount-zero{color:#c0c4cc;}
 </style>
