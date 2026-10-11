@@ -94,6 +94,7 @@ export function derive(items, suppliers, purchases, sales) {
       const it = ensureItem(l.code, l.name)
       if (!it.suppliers.includes(sCode)) it.suppliers.push(sCode)
       ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
+        id: p.id,
         date: p.date, supplier: sCode, supplierName: supName,
         qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
       })
@@ -104,6 +105,7 @@ export function derive(items, suppliers, purchases, sales) {
     for (const l of (s.items || [])) {
       const it = ensureItem(l.code, l.name)
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
+        id: s.id,
         date: s.date, customer: s.customer || '',
         qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
       })

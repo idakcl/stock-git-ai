@@ -15,7 +15,10 @@
               <div class="history-title">历史采购价</div>
               <el-table :data="row.purchaseHistory || []" size="small" border>
                 <el-table-column prop="date" label="日期" width="120" />
-                <el-table-column label="供应商" min-width="180">
+                <el-table-column label="采购单" width="160">
+                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
+                </el-table-column>
+                <el-table-column label="供应商" min-width="160">
                   <template #default="{ row: h }">{{ h.supplierName || (supplierMap[h.supplier] || h.supplier || '') }}</template>
                 </el-table-column>
                 <el-table-column prop="qty" label="数量" width="80" />
@@ -25,7 +28,10 @@
               <div class="history-title" style="margin-top:12px">历史销售价</div>
               <el-table :data="row.saleHistory || []" size="small" border>
                 <el-table-column prop="date" label="日期" width="120" />
-                <el-table-column prop="customer" label="客户" min-width="180" />
+                <el-table-column label="销售单" width="160">
+                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
+                </el-table-column>
+                <el-table-column prop="customer" label="客户" min-width="160" />
                 <el-table-column prop="qty" label="数量" width="80" />
                 <el-table-column prop="price" label="单价" width="90" />
                 <el-table-column prop="total" label="金额" width="100" />

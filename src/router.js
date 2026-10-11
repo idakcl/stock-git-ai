@@ -9,6 +9,7 @@ import Stock from './views/Stock.vue'
 import Report from './views/Report.vue'
 import SupplierDetail from './views/SupplierDetail.vue'
 import PurchaseDetail from './views/PurchaseDetail.vue'
+import SalesDetail from './views/SalesDetail.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -19,6 +20,7 @@ const routes = [
   { path: '/purchases', component: Purchases },
   { path: '/purchase/:id', component: PurchaseDetail },
   { path: '/sales', component: Sales },
+  { path: '/sale/:id', component: SalesDetail },
   { path: '/stock', component: Stock },
   { path: '/report', component: Report }
 ]
