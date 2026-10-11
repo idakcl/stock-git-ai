@@ -82,6 +82,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
+import { receivableOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 40
@@ -114,13 +115,12 @@ const exportColumns = [
   { label: '备注', prop: 'remark' }
 ]
 
-// 应收款：该客户所有「未结清（挂账）」销售单金额合计
+// 应收款：该客户全部销售单的未结金额合计（欠款按金额计算，与结算状态无关）
 const receivableMap = computed(() => {
   const map = {}
   for (const s of sales.value || []) {
-    if ((s.settle || '挂账') === '结清') continue
     const name = s.customer || ''
-    map[name] = (map[name] || 0) + Number(s.total || 0)
+    map[name] = (map[name] || 0) + receivableOf(s)
   }
   return map
 })
