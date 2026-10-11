@@ -65,6 +65,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
+import { payableOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 40
@@ -88,13 +89,12 @@ const exportColumns = [
   { label: '备注', prop: 'remark' }
 ]
 
-// 应付款：该供应商所有「未结清（挂账）」采购单金额合计
+// 应付款：该供应商全部采购单的未结金额合计（欠款按金额计算，与结算状态无关）
 const payableMap = computed(() => {
   const map = {}
   for (const p of purchases.value || []) {
-    if ((p.settle || '挂账') === '结清') continue
     const name = p.supplier || ''
-    map[name] = (map[name] || 0) + Number(p.total || 0)
+    map[name] = (map[name] || 0) + payableOf(p)
   }
   return map
 })
