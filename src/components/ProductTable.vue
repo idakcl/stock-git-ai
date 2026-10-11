@@ -8,7 +8,7 @@
       class="search-input"
     />
     <div class="table-wrap">
-      <el-table :data="filtered" stripe>
+      <el-table :data="pagedRows" stripe>
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="history">
@@ -37,6 +37,9 @@
                 <el-table-column prop="total" label="金额" width="100" />
               </el-table>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
+              <div class="history-title" style="margin-top:12px">
+                分级售价：批发 {{ fmt(row.priceWholesale) }} / 零售 {{ fmt(row.priceRetail) }} / 安装师傅 {{ fmt(row.priceInstaller) }}
+              </div>
               <div v-if="row.remark" class="history-title" style="margin-top:12px">备注：{{ row.remark }}</div>
               <div v-if="(row.photos || []).length" class="history-title" style="margin-top:12px">商品照片</div>
               <PhotoThumbs v-if="(row.photos || []).length" :value="row.photos" style="margin-top:6px" />
@@ -56,6 +59,11 @@
         </el-table-column>
         <el-table-column prop="cost" label="进价" width="100" />
         <el-table-column prop="price" label="售价" width="100" />
+        <template v-if="showPriceTiers">
+          <el-table-column prop="priceWholesale" label="批发价" width="100" />
+          <el-table-column prop="priceRetail" label="零售价" width="100" />
+          <el-table-column prop="priceInstaller" label="安装师傅价" width="110" />
+        </template>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
         <slot name="extra" />
         <el-table-column v-if="$slots.actions" label="操作" width="160">
@@ -63,11 +71,20 @@
         </el-table-column>
       </el-table>
     </div>
+    <el-pagination
+      v-if="pageSize"
+      v-model:current-page="page"
+      :page-size="pageSize"
+      :total="filtered.length"
+      layout="total, prev, pager, next"
+      background
+      class="pager"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import PhotoThumbs from './PhotoThumbs.vue'
@@ -75,7 +92,11 @@ import PhotoThumbs from './PhotoThumbs.vue'
 const props = defineProps({
   items: { type: Array, default: () => [] },
   searchable: { type: Boolean, default: true },
-  searchPlaceholder: { type: String, default: '搜索编码 / 名称' }
+  searchPlaceholder: { type: String, default: '搜索编码 / 名称' },
+  // 是否显示批发价/零售价/安装师傅价三列
+  showPriceTiers: { type: Boolean, default: false },
+  // 每页条数，0 表示不分页
+  pageSize: { type: Number, default: 0 }
 })
 
 const keyword = ref('')
@@ -88,6 +109,21 @@ const supplierMap = computed(() => {
 const filtered = computed(() => (props.items || []).filter(i => matchText(
   keyword.value, i.code, i.name, i.unit, i.brand, i.remark, ...(i.suppliers || [])
 )))
+
+const page = ref(1)
+const pagedRows = computed(() => {
+  if (!props.pageSize) return filtered.value
+  const start = (page.value - 1) * props.pageSize
+  return filtered.value.slice(start, start + props.pageSize)
+})
+// 筛选条件变化后回到第一页
+watch(keyword, () => { page.value = 1 })
+watch(() => props.items, () => { page.value = 1 })
+const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
+
+// 供父组件获取当前筛选结果（用于导出/打印）
+defineExpose({ filtered })
+
 onMounted(async () => {
   try { suppliers.value = await api.getSuppliers() } catch (e) { suppliers.value = [] }
 })
@@ -95,6 +131,7 @@ onMounted(async () => {
 
 <style scoped>
 .search-input { margin-bottom: 12px; max-width: 360px; }
+.pager { margin-top: 12px; justify-content: flex-end; }
 .history { padding: 8px 16px; }
 .history-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
 .brand-tag {
