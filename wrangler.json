@@ -1,0 +1,21 @@
+{
+  "name": "stock-git-ai",
+  "main": "web/index.js",
+  "compatibility_date": "2026-01-01",
+  "workers_dev": true,
+
+  "assets": {
+    "directory": "dist",
+    "binding": "ASSETS"
+  },
+
+  "vars": {
+    "GITHUB_OWNER": "idakcl",
+    "GITHUB_REPO": "stock-git-ai-data",
+    "GITHUB_BRANCH": "main"
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
