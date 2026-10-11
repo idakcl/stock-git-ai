@@ -193,6 +193,22 @@ export async function handleApi(req, url, env) {
     if (path === '/stock' && method === 'GET') return json(await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(await readJSON(env, 'logs.json'))
 
+    // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端
+    if (path === '/upload' && method === 'POST') {
+      if (!env.IMGBED_AUTH_CODE) return json({ error: '未配置图床密钥 IMGBED_AUTH_CODE' }, 500)
+      const form = await req.formData()
+      const file = form.get('file')
+      if (!file) return json({ error: '缺少文件' }, 400)
+      const fd = new FormData()
+      fd.append('file', file)
+      const upstream = `https://netpan.1234.nyc.mn/upload?authCode=${encodeURIComponent(env.IMGBED_AUTH_CODE)}&returnFormat=full`
+      const res = await fetch(upstream, { method: 'POST', body: fd })
+      const data = await res.json().catch(() => ({}))
+      const src = Array.isArray(data) ? (data[0] && data[0].src) : data.src
+      if (!src) return json({ error: '图床上传失败' }, 502)
+      return json({ url: src })
+    }
+
     if (method === 'POST') {
       const body = await req.json()
 
