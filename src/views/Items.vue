@@ -17,9 +17,11 @@
         <el-form-item label="编码"><el-input v-model="form.code" /></el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="单位"><el-input v-model="form.unit" /></el-form-item>
+        <el-form-item label="品牌"><el-input v-model="form.brand" /></el-form-item>
         <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="预警值"><el-input-number v-model="form.warning" :min="0" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog=false">取消</el-button>
@@ -34,10 +36,11 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
+import { nextEntityCode } from '../utils/code'
 
 const items = ref([])
 const dialog = ref(false)
-const form = reactive({ code:'', name:'', unit:'', cost:0, price:0, warning:0 })
+const form = reactive({ code:'', name:'', unit:'', brand:'', cost:0, price:0, warning:0, remark:'' })
 
 onMounted(load)
 async function load() {
@@ -46,7 +49,7 @@ async function load() {
 
 function openDialog(row) {
   if (row) Object.assign(form, row)
-  else Object.assign(form, { code:'', name:'', unit:'', cost:0, price:0, warning:0 })
+  else Object.assign(form, { code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', cost:0, price:0, warning:0, remark:'' })
   dialog.value = true
 }
 
