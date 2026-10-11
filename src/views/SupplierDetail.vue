@@ -29,7 +29,7 @@
             <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
             <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
           </div>
-          <el-table :data="filteredPurchases" stripe>
+          <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
@@ -69,6 +69,16 @@ const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateEnd.value && (p.date || '') > dateEnd.value) return false
   return true
 }))
+
+// 表格底部汇总：合计金额
+const summaryAmount = ({ columns, data }) => {
+  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+  return columns.map((c, idx) => {
+    if (idx === 0) return '合计'
+    if (c.property === 'total') return total.toFixed(2)
+    return ''
+  })
+}
 
 onMounted(async () => {
   try {
