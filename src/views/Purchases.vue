@@ -7,13 +7,19 @@
       <el-input v-model="keyword" clearable placeholder="搜索单号 / 供应商 / 商品" class="search-input" />
       <div class="table-wrap">
       <el-table :data="filtered" stripe>
-        <el-table-column prop="id" label="单号" width="120" />
-        <el-table-column prop="supplier" label="供应商" width="140" />
-        <el-table-column prop="date" label="日期" width="120" />
-        <el-table-column prop="items" label="商品" min-width="200">
-          <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
+        <el-table-column label="单号" width="160">
+          <template #default="{ row }">
+            <router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link>
+          </template>
         </el-table-column>
+        <el-table-column prop="supplier" label="供应商" width="160" />
+        <el-table-column prop="date" label="日期" width="120" />
         <el-table-column prop="total" label="金额" width="100" />
+        <el-table-column label="操作" width="100">
+          <template #default="{ row }">
+            <el-button size="small" @click="$router.push(`/purchase/${row.id}`)">查看</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       </div>
     </el-card>

@@ -74,6 +74,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .table-wrap { overflow-x: auto; }
+.link { color: #409eff; cursor: pointer; text-decoration: none; }
+.link:hover { text-decoration: underline; }
 
 @media (max-width: 768px) {
   .desktop-only { display: none; }
