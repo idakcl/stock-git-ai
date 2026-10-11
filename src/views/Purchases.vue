@@ -13,7 +13,7 @@
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
       </div>
       <div class="table-wrap">
-      <el-table :data="filtered" stripe>
+      <el-table :data="filtered" stripe show-summary :summary-method="summaryAmount">
         <el-table-column label="单号" width="160">
           <template #default="{ row }">
             <router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link>
@@ -94,6 +94,16 @@ const filtered = computed(() => list.value.filter(row => {
   if (dateEnd.value && (row.date || '') > dateEnd.value) return false
   return true
 }))
+
+// 表格底部汇总：合计金额
+const summaryAmount = ({ columns, data }) => {
+  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+  return columns.map((c, idx) => {
+    if (idx === 0) return '合计'
+    if (c.property === 'total') return total.toFixed(2)
+    return ''
+  })
+}
 
 onMounted(async () => {
   try {
