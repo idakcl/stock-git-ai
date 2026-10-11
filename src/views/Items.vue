@@ -12,7 +12,7 @@
       </ProductTable>
     </el-card>
 
-    <el-dialog v-model="dialog" title="商品" width="420">
+    <el-dialog v-model="dialog" title="商品" width="520">
       <el-form :model="form" label-width="80px">
         <el-form-item label="编码"><el-input v-model="form.code" /></el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
@@ -22,6 +22,7 @@
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="预警值"><el-input-number v-model="form.warning" :min="0" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="商品照片"><PhotoUpload v-model="form.photos" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialog=false">取消</el-button>
@@ -36,11 +37,12 @@ import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
+import PhotoUpload from '../components/PhotoUpload.vue'
 import { nextEntityCode } from '../utils/code'
 
 const items = ref([])
 const dialog = ref(false)
-const form = reactive({ code:'', name:'', unit:'', brand:'', cost:0, price:0, warning:0, remark:'' })
+const form = reactive({ code:'', name:'', unit:'', brand:'', photos:[], cost:0, price:0, warning:0, remark:'' })
 
 onMounted(load)
 async function load() {
@@ -49,7 +51,7 @@ async function load() {
 
 function openDialog(row) {
   if (row) Object.assign(form, row)
-  else Object.assign(form, { code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', cost:0, price:0, warning:0, remark:'' })
+  else Object.assign(form, { code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', photos:[], cost:0, price:0, warning:0, remark:'' })
   dialog.value = true
 }
 
