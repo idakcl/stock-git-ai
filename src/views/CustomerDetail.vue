@@ -64,27 +64,27 @@
         <el-tab-pane :label="`来往账 (${ledgerRows.length})`" name="ledger">
           <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column label="单号" width="180">
+            <el-table-column prop="id" label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="summary" label="摘要" width="120" />
-            <el-table-column label="应收金额" width="120">
+            <el-table-column prop="amount" label="应收金额" width="120">
               <template #default="{ row }">{{ row.amount.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column label="实收金额" width="120">
+            <el-table-column prop="received" label="实收金额" width="120">
               <template #default="{ row }">{{ row.received.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column label="未结金额" width="120">
+            <el-table-column prop="unpaid" label="未结金额" width="120">
               <template #default="{ row }">
                 <span :class="row.unpaid > 0 ? 'amount-debt' : 'none'">{{ row.unpaid.toFixed(2) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="累计欠款" width="130">
+            <el-table-column prop="balance" label="累计欠款" width="130">
               <template #default="{ row }">
                 <b :class="row.balance > 0 ? 'amount-debt' : 'amount-zero'">{{ row.balance.toFixed(2) }}</b>
               </template>
             </el-table-column>
-            <el-table-column label="结算" width="100">
+            <el-table-column prop="settle" label="结算" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
                   {{ row.settle || '挂账' }}
@@ -159,18 +159,18 @@ const summaryAmount = ({ columns, data }) => {
   })
 }
 
-// 来往账合计行
+// 来往账合计行（按列的 property 匹配，避免依赖 label）
 const ledgerSummary = ({ columns, data }) => {
-  const amount = (data || []).reduce((s, r) => s + r.amount, 0)
-  const received = (data || []).reduce((s, r) => s + r.received, 0)
-  const unpaid = (data || []).reduce((s, r) => s + r.unpaid, 0)
+  const sum = (key) => (data || []).reduce((s, r) => s + (Number(r[key]) || 0), 0)
+  const values = {
+    amount: sum('amount').toFixed(2),
+    received: sum('received').toFixed(2),
+    unpaid: sum('unpaid').toFixed(2),
+    balance: sum('unpaid').toFixed(2)
+  }
   return columns.map((c, idx) => {
     if (idx === 0) return '合计'
-    if (c.label === '应收金额') return amount.toFixed(2)
-    if (c.label === '实收金额') return received.toFixed(2)
-    if (c.label === '未结金额') return unpaid.toFixed(2)
-    if (c.label === '累计欠款') return unpaid.toFixed(2)
-    return ''
+    return values[c.property] ?? ''
   })
 }
 
