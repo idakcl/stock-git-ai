@@ -13,7 +13,17 @@
         <span>客户：{{ sale.customer }}</span>
         <span>日期：{{ sale.date }}</span>
         <span>金额：¥ {{ sale.total }}</span>
+        <span>
+          结算：
+          <el-tag :type="sale.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+            {{ sale.settle || '挂账' }}
+          </el-tag>
+        </span>
         <span v-if="sale.remark">备注：{{ sale.remark }}</span>
+      </div>
+      <div v-if="(sale.photos || []).length" class="photos-block">
+        <div class="photos-title">原始单据照片</div>
+        <PhotoThumbs :value="sale.photos" />
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
         <template #extra>
@@ -31,6 +41,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
+import PhotoThumbs from '../components/PhotoThumbs.vue'
 
 const route = useRoute()
 const sales = ref([])
@@ -69,5 +80,7 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; }
+.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; align-items: center; }
+.photos-block { margin-bottom: 12px; }
+.photos-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
 </style>
