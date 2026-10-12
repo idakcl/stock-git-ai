@@ -11,11 +11,15 @@
       :on-exceed="onExceed"
       :on-success="onSuccess"
       :on-error="onError"
+      :on-progress="onProgress"
+      :on-change="onChange"
       :before-upload="beforeUpload"
     >
       <el-icon><Plus /></el-icon>
     </el-upload>
-    <div v-if="!fileList.length" class="tip">可上传多张照片</div>
+    <div v-if="!fileList.length" class="tip">可上传多张照片（最多 {{ limit }} 张，单击缩略图可放大）</div>
+    <div v-else-if="uploading > 0" class="tip uploading">正在上传 {{ uploading }} 张照片，请稍候…</div>
+    <div v-else class="tip">已添加 {{ fileList.length }} 张照片，单击缩略图可放大查看</div>
   </div>
 </template>
 
@@ -35,6 +39,12 @@ const toList = (urls) => (urls || []).filter(Boolean).map(url => ({ name: url, u
 const toUrls = (list) => (list || []).map(f => f.url).filter(Boolean)
 
 const fileList = ref(toList(props.modelValue))
+// 正在上传中的照片数量（用于父级保存前防呆）
+const uploading = ref(0)
+
+const countUploading = (files) => {
+  uploading.value = (files || []).filter(f => f && f.status === 'uploading').length
+}
 
 // 外部传入值变化（如切换单据）时同步进来
 watch(() => props.modelValue, (v) => {
@@ -47,6 +57,9 @@ watch(() => props.modelValue, (v) => {
 watch(fileList, (v) => {
   emit('update:modelValue', toUrls(v))
 }, { deep: true })
+
+// 供父级调用：是否还有照片在上传中
+defineExpose({ isUploading: () => uploading.value > 0 })
 
 function beforeUpload(file) {
   if (!/^image\//.test(file.type)) {
@@ -72,6 +85,7 @@ function onSuccess(res, file, files) {
   file.url = url
   file.name = file.name || url
   fileList.value = files.map(f => ({ name: f.name, url: f.url }))
+  countUploading(files)
 }
 
 function onError(err) {
@@ -81,9 +95,18 @@ function onError(err) {
 function onExceed() {
   ElMessage.warning(`最多上传 ${props.limit} 张`)
 }
+
+function onProgress(evt, file, files) {
+  countUploading(files)
+}
+
+function onChange(file, files) {
+  countUploading(files)
+}
 </script>
 
 <style scoped>
 .photo-upload { width: 100%; }
 .tip { color: #909399; font-size: 12px; margin-top: 6px; }
+.tip.uploading { color: #e6a23c; }
 </style>

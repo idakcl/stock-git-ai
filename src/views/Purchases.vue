@@ -90,7 +90,7 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="单据照片"><PhotoUpload v-model="form.photos" /></el-form-item>
+        <el-form-item label="单据照片"><PhotoUpload ref="photoUpload" v-model="form.photos" /></el-form-item>
         <el-form-item label="优惠金额">
           <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
@@ -153,7 +153,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf } from '../utils/account'
+import { payableOf, paidSumOf, ensurePayments, appendPayment, syncPayments, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -169,6 +169,7 @@ const itemOptions = ref([])
 const dialog = ref(false)
 const editingId = ref('')
 const form = reactive({ supplier:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, lines:[] })
+const photoUpload = ref(null)
 const payDialog = ref(false)
 const payOrder = ref({})
 
@@ -270,6 +271,7 @@ function onItemChange(row) {
 }
 
 async function save() {
+  if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
   if (!form.supplier) return ElMessage.warning('请填写供应商')
   if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning('请完整填写采购明细')
   let catalog = [...itemOptions.value]

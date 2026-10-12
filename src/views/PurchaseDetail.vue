@@ -28,7 +28,7 @@
         <span v-if="purchase.remark">备注：{{ purchase.remark }}</span>
       </div>
       <div v-if="(purchase.photos || []).length" class="photos-block">
-        <div class="photos-title">原始单据照片</div>
+        <div class="photos-title">原始单据照片（{{ (purchase.photos || []).length }} 张）</div>
         <PhotoThumbs :value="purchase.photos" />
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
