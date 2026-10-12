@@ -245,7 +245,7 @@ function recompute() {
   const pList = filteredPurchases.value
   const sList = filteredSales.value
   stats.purchaseTotal = money(pList.reduce((s, p) => s + Number(p.total || 0), 0))
-  stats.saleTotal = money(sList.reduce((s, p) => s + Number(s.total || 0), 0))
+  stats.saleTotal = money(sList.reduce((sum, s) => sum + Number(s.total || 0), 0))
 
   const stockObj = stock.value && !Array.isArray(stock.value) ? stock.value : {}
   const costMap = {}
