@@ -128,15 +128,38 @@
           <span class="section-sub">随「客户 + 时间段」筛选联动</span>
         </div>
       </template>
-      <el-input v-model="keyword" clearable placeholder="搜索商品名称" class="search-input" />
+      <div class="tool-row">
+        <el-input v-model="keyword" clearable placeholder="搜索商品名称 / 编码" class="search-input" />
+        <TableToolbar
+          filename="按商品销售汇总"
+          title="按商品销售汇总"
+          :subtitle="saleSubtitle"
+          :columns="saleExportColumns"
+          :rows="filteredSalesByItem"
+        />
+      </div>
+      <div class="pager-info">共 {{ filteredSalesByItem.length }} 项{{ saleAll ? '（当前展示全部）' : ` · 第 ${salePage}/${salePageCount} 页，每页 ${saleSize} 条` }}</div>
       <div class="table-wrap">
-      <el-table :data="filteredSalesByItem" stripe style="margin-top:8px" show-summary :summary-method="itemSummary">
+      <el-table :data="pagedSalesByItem" stripe style="margin-top:8px" show-summary :summary-method="itemSummary">
         <el-table-column prop="name" label="商品" />
         <el-table-column prop="qty" label="销量" width="100" />
         <el-table-column prop="amount" label="金额" width="140">
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
       </el-table>
+      </div>
+      <div class="pager-row">
+        <el-pagination
+          v-model:current-page="salePage"
+          :page-size="saleSize"
+          :page-sizes="[60, 100, 200]"
+          :total="filteredSalesByItem.length"
+          layout="total, sizes, prev, pager, next"
+          background
+        />
+        <el-button text type="primary" @click="saleAll = !saleAll">
+          {{ saleAll ? '恢复分页' : `展示全部 ${filteredSalesByItem.length} 项` }}
+        </el-button>
       </div>
       <el-empty v-if="!filteredSalesByItem.length" description="暂无销售数据" />
     </el-card>
@@ -149,9 +172,19 @@
           <span class="section-sub">随「供应商 + 时间段」筛选联动</span>
         </div>
       </template>
-      <el-input v-model="purchaseKeyword" clearable placeholder="搜索商品名称" class="search-input" />
+      <div class="tool-row">
+        <el-input v-model="purchaseKeyword" clearable placeholder="搜索商品名称 / 编码" class="search-input" />
+        <TableToolbar
+          filename="按商品采购汇总"
+          title="按商品采购汇总"
+          :subtitle="purchaseSubtitle"
+          :columns="purchaseExportColumns"
+          :rows="filteredPurchasesByItem"
+        />
+      </div>
+      <div class="pager-info">共 {{ filteredPurchasesByItem.length }} 项{{ purchaseAll ? '（当前展示全部）' : ` · 第 ${purchasePage}/${purchasePageCount} 页，每页 ${purchaseSize} 条` }}</div>
       <div class="table-wrap">
-      <el-table :data="filteredPurchasesByItem" stripe style="margin-top:8px" show-summary :summary-method="purchaseItemSummary">
+      <el-table :data="pagedPurchasesByItem" stripe style="margin-top:8px" show-summary :summary-method="purchaseItemSummary">
         <el-table-column prop="name" label="商品" />
         <el-table-column prop="orders" label="采购单数" width="110" />
         <el-table-column prop="qty" label="采购数量" width="110" />
@@ -162,6 +195,19 @@
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
       </el-table>
+      </div>
+      <div class="pager-row">
+        <el-pagination
+          v-model:current-page="purchasePage"
+          :page-size="purchaseSize"
+          :page-sizes="[60, 100, 200]"
+          :total="filteredPurchasesByItem.length"
+          layout="total, sizes, prev, pager, next"
+          background
+        />
+        <el-button text type="primary" @click="purchaseAll = !purchaseAll">
+          {{ purchaseAll ? '恢复分页' : `展示全部 ${filteredPurchasesByItem.length} 项` }}
+        </el-button>
       </div>
       <el-empty v-if="!filteredPurchasesByItem.length" description="暂无采购数据" />
     </el-card>
@@ -174,6 +220,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { aggregateByItem } from '../utils/catalog'
 import { receivableOf, payableOf, ensurePayments } from '../utils/account'
+import TableToolbar from '../components/TableToolbar.vue'
 
 const purchases = ref([])
 const sales = ref([])
@@ -185,6 +232,21 @@ const dateStart = ref('')
 const dateEnd = ref('')
 const supplierFilter = ref('')
 const customerFilter = ref('')
+
+// ---------- 汇总表分页：商品上千条时一次性渲染会明显卡顿，默认每页 60 条 ----------
+const salePage = ref(1)
+const saleSize = ref(60)
+const saleAll = ref(false)
+const purchasePage = ref(1)
+const purchaseSize = ref(60)
+const purchaseAll = ref(false)
+
+// ---------- 搜索防抖：避免每敲一个字都对上千行重算过滤 ----------
+const debouncedKeyword = ref('')
+const debouncedPurchaseKeyword = ref('')
+let kTimer = null, pkTimer = null
+watch(keyword, v => { clearTimeout(kTimer); kTimer = setTimeout(() => { debouncedKeyword.value = v; salePage.value = 1 }, 300) }, { immediate: true })
+watch(purchaseKeyword, v => { clearTimeout(pkTimer); pkTimer = setTimeout(() => { debouncedPurchaseKeyword.value = v; purchasePage.value = 1 }, 300) }, { immediate: true })
 
 // ---------- 筛选条件本地记忆：刷新页面后恢复上次选择 ----------
 const FILTERS_KEY = 'report-filters-v1'
@@ -312,11 +374,49 @@ const saleTrendTotal = computed(() => saleTrend.value.reduce((s, b) => s + b.amo
 
 // ---------- 按商品销售汇总（按编码分组，显示商品主数据当前名，改名不裂行） ----------
 const salesByItem = computed(() => aggregateByItem(filteredSales.value, items.value))
-const filteredSalesByItem = computed(() => salesByItem.value.filter(i => matchText(keyword.value, i.name, i.code)))
+const filteredSalesByItem = computed(() => salesByItem.value.filter(i => matchText(debouncedKeyword.value, i.name, i.code)))
 
 // ---------- 按商品采购汇总：进价维度（采购单数/数量/金额，按编码分组） ----------
 const purchasesByItem = computed(() => aggregateByItem(filteredPurchases.value, items.value, { withOrders: true }))
-const filteredPurchasesByItem = computed(() => purchasesByItem.value.filter(i => matchText(purchaseKeyword.value, i.name, i.code)))
+const filteredPurchasesByItem = computed(() => purchasesByItem.value.filter(i => matchText(debouncedPurchaseKeyword.value, i.name, i.code)))
+
+// ---------- 分页切片（合计行仍基于全部筛选结果，不受分页影响） ----------
+const pagedSalesByItem = computed(() => saleAll.value
+  ? filteredSalesByItem.value
+  : filteredSalesByItem.value.slice((salePage.value - 1) * saleSize.value, salePage.value * saleSize.value))
+const salePageCount = computed(() => Math.max(1, Math.ceil(filteredSalesByItem.value.length / saleSize.value)))
+const pagedPurchasesByItem = computed(() => purchaseAll.value
+  ? filteredPurchasesByItem.value
+  : filteredPurchasesByItem.value.slice((purchasePage.value - 1) * purchaseSize.value, purchasePage.value * purchaseSize.value))
+const purchasePageCount = computed(() => Math.max(1, Math.ceil(filteredPurchasesByItem.value.length / purchaseSize.value)))
+// 筛选条件变化时回到第一页
+watch([filteredSalesByItem, filteredPurchasesByItem], () => { salePage.value = 1; purchasePage.value = 1 })
+
+// ---------- 导出/打印：输出当前筛选后的全部数据（不受分页限制） ----------
+const saleExportColumns = [
+  { label: '商品', prop: 'name' },
+  { label: '销量', prop: 'qty' },
+  { label: '金额', value: r => Number(r.amount || 0).toFixed(2) }
+]
+const purchaseExportColumns = [
+  { label: '商品', prop: 'name' },
+  { label: '采购单数', prop: 'orders' },
+  { label: '采购数量', prop: 'qty' },
+  { label: '平均进价', value: r => (r.qty > 0 ? (r.amount / r.qty).toFixed(2) : '—') },
+  { label: '采购金额', value: r => Number(r.amount || 0).toFixed(2) }
+]
+const saleSubtitle = computed(() => {
+  const parts = [`共 ${filteredSalesByItem.value.length} 项`]
+  if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
+  if (customerFilter.value) parts.push(customerFilter.value)
+  return parts.join(' · ')
+})
+const purchaseSubtitle = computed(() => {
+  const parts = [`共 ${filteredPurchasesByItem.value.length} 项`]
+  if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
+  if (supplierFilter.value) parts.push(supplierFilter.value)
+  return parts.join(' · ')
+})
 
 // 表格底部合计：基于全部筛选结果
 const itemSummary = ({ columns, data }) => {
@@ -369,7 +469,11 @@ onMounted(async () => {
 .filter-label { color: #606266; font-size: 14px; }
 .filter-sep { color: #909399; }
 .filter-hint { color: #c0c4cc; font-size: 12px; }
-.search-input { margin: 8px 0 12px; max-width: 360px; }
+.search-input { max-width: 280px; }
+.tool-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 6px; }
+.pager-info { color: #909399; font-size: 12px; margin-bottom: 6px; }
+.pager-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.pager-row :deep(.el-pagination) { padding: 0; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
 .stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
