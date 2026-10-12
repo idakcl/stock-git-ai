@@ -7,6 +7,24 @@
           <el-button type="primary" @click="openDialog()">新增商品</el-button>
         </div>
       </template>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <el-statistic title="商品条目总数" :value="itemCount" suffix="条" />
+          <div class="stat-sub">{{ filteredCount === itemCount ? '未筛选，显示全部' : `当前筛选 ${filteredCount} 条` }}</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="库存总数量" :value="stockQty" suffix="件" />
+          <div class="stat-sub">按最近进价核算</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="库存货值" :value="stockValue" :precision="2" prefix="¥" />
+          <div class="stat-sub">{{ inStockCount }} 项有库存</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="库存预警" :value="warningCount" suffix="项" value-style="color:#f56c6c" />
+          <div class="stat-sub">{{ zeroStockCount }} 项零库存</div>
+        </div>
+      </div>
       <TableToolbar
         filename="商品库"
         title="商品库"
@@ -54,8 +72,31 @@ import TableToolbar from '../components/TableToolbar.vue'
 import { nextEntityCode } from '../utils/code'
 
 const items = ref([])
+const stock = ref({})
 const dialog = ref(false)
 const tableRef = ref(null)
+
+// ---------- 商品库汇总：条目总数、库存数量/货值、预警数 ----------
+const itemCount = computed(() => items.value.length)
+// 当前筛选条数跟随表格搜索联动（分页前的实际命中数）
+const filteredCount = computed(() => (tableRef.value && tableRef.value.filtered ? tableRef.value.filtered.length : itemCount.value) || 0)
+const stockMap = computed(() => (stock.value && !Array.isArray(stock.value) ? stock.value : {}))
+const stockQty = computed(() => Object.values(stockMap.value).reduce((s, v) => s + Number(v && v.qty || 0), 0))
+// 库存货值：Σ 数量 × 最近进价，抹掉浮点尘避免显示 -0.00
+const stockValue = computed(() => {
+  const v = Object.values(stockMap.value).reduce((s, x) => s + Number(x && x.qty || 0) * Number(x && x.cost || 0), 0)
+  const rounded = Math.round((v + Number.EPSILON) * 100) / 100
+  return rounded === 0 ? 0 : rounded
+})
+const inStockCount = computed(() => items.value.filter(i => Number((stockMap.value[i.code] || {}).qty || 0) > 0).length)
+const zeroStockCount = computed(() => itemCount.value - inStockCount.value)
+// 预警：设置了预警值且库存不高于预警线
+const warningCount = computed(() => items.value.filter(i => {
+  const w = Number(i.warning || 0)
+  if (w <= 0) return false
+  const qty = Number((stockMap.value[i.code] || {}).qty || 0)
+  return qty <= w
+}).length)
 const form = reactive({
   code:'', name:'', unit:'', photos:[],
   cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0,
@@ -85,7 +126,14 @@ const exportColumns = [
 
 onMounted(load)
 async function load() {
-  try { items.value = await api.getItems() } catch (e) { items.value = [] }
+  try {
+    const [it, st] = await Promise.all([api.getItems(), api.getStock()])
+    items.value = it || []
+    stock.value = st || {}
+  } catch (e) {
+    items.value = []
+    stock.value = {}
+  }
 }
 
 function openDialog(row) {
@@ -137,4 +185,9 @@ async function remove(row) {
 
 <style scoped>
 .card-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+.stat-item .el-statistic__head,
+.stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 </style>
