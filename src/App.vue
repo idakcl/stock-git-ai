@@ -9,12 +9,7 @@
     <el-container class="body">
       <el-aside width="220px" class="aside desktop-only">
         <div class="logo">进销存</div>
-        <el-menu :default-active="$route.path" router class="menu">
-          <el-menu-item v-for="item in nav" :key="item.path" :index="item.path">
-            <el-icon><component :is="item.icon" /></el-icon>
-            <span>{{ item.label }}</span>
-          </el-menu-item>
-        </el-menu>
+        <AppMenu />
         <div class="build-info">构建 {{ buildTime }}</div>
       </el-aside>
       <el-main class="main">
@@ -23,12 +18,7 @@
     </el-container>
     <el-drawer v-model="drawer" direction="ltr" size="220px" :with-header="false">
       <div class="logo">进销存</div>
-      <el-menu :default-active="$route.path" router class="menu" @select="drawer = false">
-        <el-menu-item v-for="item in nav" :key="item.path" :index="item.path">
-          <el-icon><component :is="item.icon" /></el-icon>
-          <span>{{ item.label }}</span>
-        </el-menu-item>
-        </el-menu>
+      <AppMenu @select="drawer = false" />
       <div class="build-info">构建 {{ buildTime }}</div>
     </el-drawer>
   </el-container>
@@ -36,20 +26,11 @@
 
 <script setup>
 import { ref } from 'vue'
-import { Menu, HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis } from '@element-plus/icons-vue'
+import { Menu } from '@element-plus/icons-vue'
+import AppMenu from './components/AppMenu.vue'
 
 const drawer = ref(false)
 const buildTime = __BUILD_TIME__
-const nav = [
-  { path: '/', label: '看板', icon: HomeFilled },
-  { path: '/items', label: '商品', icon: Goods },
-  { path: '/suppliers', label: '供应商', icon: OfficeBuilding },
-  { path: '/customers', label: '客户', icon: User },
-  { path: '/purchases', label: '采购', icon: Download },
-  { path: '/sales', label: '销售', icon: Sell },
-  { path: '/stock', label: '库存', icon: Box },
-  { path: '/report', label: '报表', icon: DataAnalysis }
-]
 </script>
 
 <style>
@@ -68,10 +49,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 }
 .header-title { font-size: 16px; font-weight: 700; color: #409eff; }
 .menu-btn { padding: 8px; }
-.aside { background: #fff; border-right: 1px solid #e4e7ed; overflow-y: auto; }
-.logo { height: 56px; line-height: 56px; text-align: center; font-size: 18px; font-weight: 700; color: #409eff; }
-.menu { border-right: none; }
-.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f0f2f5; }
+.aside { background: #fff; border-right: 1px solid #e4e7ed; overflow-y: auto; display: flex; flex-direction: column; }
+.logo { height: 56px; line-height: 56px; text-align: center; font-size: 18px; font-weight: 700; color: #409eff; flex: none; }
+.aside .menu { flex: 1; }
+.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f0f2f5; flex: none; }
 .main { padding: 16px; overflow-y: auto; min-width: 0; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .stat-item { min-width: 0; }
