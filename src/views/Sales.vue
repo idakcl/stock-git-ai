@@ -327,6 +327,12 @@ async function save() {
   })
   if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
   const amount = resolved.reduce((s, l) => s + l.total, 0)
+  const discountVal = Number(form.discount || 0)
+  const dueAfter = Math.max(0, amount - discountVal)
+  // 标记为结清时，实收必须等于应收金额，避免"状态结清但金额仍欠"
+  const receivedVal = (form.settle === '结清' && (form.received == null || Number(form.received) < dueAfter))
+    ? dueAfter
+    : (form.received != null ? Number(form.received) : null)
   const isEdit = !!editingId.value
   const payload = {
     customer: form.customer,
@@ -334,7 +340,7 @@ async function save() {
     remark: form.remark || '',
     settle: form.settle || '挂账',
     photos: [...(form.photos || [])],
-    received: form.received != null ? Number(form.received) : null,
+    received: receivedVal,
     discount: Number(form.discount || 0),
     items: resolved,
     total: amount
