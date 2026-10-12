@@ -234,29 +234,35 @@ const stats = reactive({
   receivable: 0, receivableCount: 0, receivableOpen: 0
 })
 
+// 金额统一两位小数，并把 -0 归一化为 0：浮点尘（如 40.29-40.29=-1.4e-14）经 toFixed(2) 会渲染成 "-0.00"
+const money = (n) => {
+  const v = Math.round((Number(n) + Number.EPSILON) * 100) / 100
+  return v === 0 ? 0 : v
+}
+
 // 所有指标随筛选实时重算（watch 监听筛选后的计算结果）
 function recompute() {
   const pList = filteredPurchases.value
   const sList = filteredSales.value
-  stats.purchaseTotal = pList.reduce((s, p) => s + Number(p.total || 0), 0)
-  stats.saleTotal = sList.reduce((s, p) => s + Number(s.total || 0), 0)
+  stats.purchaseTotal = money(pList.reduce((s, p) => s + Number(p.total || 0), 0))
+  stats.saleTotal = money(sList.reduce((s, p) => s + Number(s.total || 0), 0))
 
   const stockObj = stock.value && !Array.isArray(stock.value) ? stock.value : {}
   const costMap = {}
   for (const [code, v] of Object.entries(stockObj)) costMap[code] = v.cost || 0
   const totalCost = sList.reduce((sum, s) =>
     sum + (s.items || []).reduce((c, i) => c + i.qty * (costMap[i.code] || 0), 0), 0)
-  stats.profit = stats.saleTotal - totalCost
+  stats.profit = money(stats.saleTotal - totalCost)
 
   // 采购：累计实付与流水笔数（付款流水）
-  stats.purchasePaid = pList.reduce((s, p) => s + ensurePayments(p, 'paid').reduce((t, x) => t + Number(x.amount || 0), 0), 0)
+  stats.purchasePaid = money(pList.reduce((s, p) => s + ensurePayments(p, 'paid').reduce((t, x) => t + Number(x.amount || 0), 0), 0))
   stats.purchasePayCount = pList.reduce((s, p) => s + ensurePayments(p, 'paid').length, 0)
 
   // 应收/应付：按金额规则（与 src/utils/account.js 一致），欠款与结算状态解耦
-  stats.payable = pList.reduce((sum, p) => sum + payableOf(p), 0)
+  stats.payable = money(pList.reduce((sum, p) => sum + payableOf(p), 0))
   stats.payableCount = pList.length
   stats.payableOpen = pList.filter(p => payableOf(p) > 0).length
-  stats.receivable = sList.reduce((sum, s) => sum + receivableOf(s), 0)
+  stats.receivable = money(sList.reduce((sum, s) => sum + receivableOf(s), 0))
   stats.receivableCount = sList.length
   stats.receivableOpen = sList.filter(s => receivableOf(s) > 0).length
 }

@@ -217,12 +217,17 @@ const pagedPurchases = computed(() => filteredPurchases.value.slice((purPage.val
 const pagedSales = computed(() => filteredSales.value.slice((salePage.value - 1) * PAGE_SIZE, salePage.value * PAGE_SIZE))
 watch([dateStart, dateEnd, supplierFilter], () => { purPage.value = 1 })
 watch([dateStart, dateEnd, customerFilter], () => { salePage.value = 1 })
-const purchaseTotal = computed(() => filteredPurchases.value.reduce((sum, p) => sum + Number(p.total || 0), 0))
-const saleTotal = computed(() => filteredSales.value.reduce((sum, s) => sum + Number(s.total || 0), 0))
+// 金额统一两位小数，并把 -0 归一化为 0：浮点尘（如 40.29-40.29=-1.4e-14）经 toFixed(2) 会渲染成 "-0.00"
+const money = (n) => {
+  const v = Math.round((Number(n) + Number.EPSILON) * 100) / 100
+  return v === 0 ? 0 : v
+}
+const purchaseTotal = computed(() => money(filteredPurchases.value.reduce((sum, p) => sum + Number(p.total || 0), 0)))
+const saleTotal = computed(() => money(filteredSales.value.reduce((sum, s) => sum + Number(s.total || 0), 0)))
 const profit = computed(() => {
   const cost = filteredSales.value.reduce(
     (sum, s) => sum + (s.items || []).reduce((c, i) => c + Number(i.qty || 0) * Number(costMap.value[i.code] || 0), 0), 0)
-  return saleTotal.value - cost
+  return money(saleTotal.value - cost)
 })
 const filteredLowStock = computed(() => lowStock.value.filter(i => matchText(keyword.value, i.code, i.name)))
 

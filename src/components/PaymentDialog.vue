@@ -13,9 +13,10 @@
         <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-      <el-table-column label="操作" width="70">
-        <template #default="{ $index }">
-          <el-button size="small" type="danger" link @click="rows.splice($index, 1)">删除</el-button>
+      <el-table-column label="操作" width="120">
+        <template #default="{ row, $index }">
+          <el-button size="small" type="primary" link :class="{ 'is-editing': editingIndex === $index }" @click="startEdit($index)">编辑</el-button>
+          <el-button size="small" type="danger" link @click="removeRow($index)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -32,9 +33,15 @@
         style="width:120px"
       />
       <el-input v-model="draft.remark" placeholder="备注（付款方式等，可空）" style="flex:1;min-width:140px" />
-      <el-button type="primary" @click="addOne">记一笔</el-button>
+      <template v-if="editingIndex < 0">
+        <el-button type="primary" @click="addOne">记一笔</el-button>
+      </template>
+      <template v-else>
+        <el-button type="primary" @click="saveEdit">保存修改</el-button>
+        <el-button @click="cancelEdit">取消编辑</el-button>
+      </template>
     </div>
-    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；超额收付会被拒绝，少收/少付保存时会提示是否按优惠结清。</div>
+    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「编辑」可修改已有记录；超额收付会被拒绝，少收/少付保存时会提示是否按优惠结清。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -64,17 +71,22 @@ const kindLabel = computed(() => props.kind === 'payable' ? '付款' : '收款')
 const rows = ref([])
 const dirty = ref(false)
 const draft = ref({ date: '', amount: null, remark: '' })
+// 正在编辑的流水下标，-1 表示未进入编辑（此时表单用于「记一笔」）
+const editingIndex = ref(-1)
 
 const due = computed(() => grossOf(props.order))
 const paidSum = computed(() => rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
-const unpaid = computed(() => Math.max(0, due.value - paidSum.value))
-const draftMax = computed(() => Math.max(0, unpaid.value))
+const editingRow = computed(() => (editingIndex.value >= 0 ? rows.value[editingIndex.value] : null))
+// 编辑已有记录时，「未收/未付」要排除该笔原金额：草稿金额上限 = 应收 − 其他各笔合计
+const unpaid = computed(() => Math.max(0, due.value - paidSum.value + (editingRow.value ? Number(editingRow.value.amount || 0) : 0)))
+const draftMax = computed(() => unpaid.value)
 
 watch(() => props.modelValue, v => {
   if (v) {
     const field = props.kind === 'payable' ? 'paid' : 'received'
     rows.value = ensurePayments(props.order, field)
     draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+    editingIndex.value = -1
     dirty.value = false
   }
 })
@@ -93,6 +105,51 @@ function addOne() {
   // 默认带入剩余未收，方便连续录入
   draft.value.amount = Math.max(0, unpaid.value - amount) || null
   draft.value.remark = ''
+}
+
+// ---------- 编辑已有流水：把该笔载入表单，改完写回原位置（保留原 time） ----------
+function startEdit(idx) {
+  const row = rows.value[idx]
+  if (!row) return
+  editingIndex.value = idx
+  draft.value = {
+    date: row.date || new Date().toISOString().slice(0, 10),
+    amount: Number(row.amount || 0),
+    remark: row.remark || ''
+  }
+}
+
+function saveEdit() {
+  const idx = editingIndex.value
+  const row = rows.value[idx]
+  if (!row) { cancelEdit(); return }
+  const amount = Number(draft.value.amount || 0)
+  if (!amount || amount <= 0) return ElMessage.warning('请输入收款/付款金额')
+  // unpaid 已排除该笔原金额，此处校验的是「其他各笔 + 本次修改」是否超额
+  if (amount > unpaid.value + 1e-6) return ElMessage.warning(`金额超过未${kindLabel.value === '付款' ? '付' : '收'}金额`)
+  rows.value[idx] = {
+    ...row,
+    date: draft.value.date || row.date,
+    amount,
+    remark: draft.value.remark || '',
+    time: row.time || new Date().toISOString() // 保留原记录时间，仅更新可改字段
+  }
+  dirty.value = true
+  cancelEdit()
+  ElMessage.success('已修改该笔记录，点「保存」后生效')
+}
+
+function cancelEdit() {
+  editingIndex.value = -1
+  draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+}
+
+function removeRow(idx) {
+  // 删除后同步修正编辑下标：删的是正在编辑行则退出编辑，删在前方则前移
+  if (editingIndex.value === idx) cancelEdit()
+  else if (editingIndex.value > idx) editingIndex.value -= 1
+  rows.value.splice(idx, 1)
+  dirty.value = true
 }
 
 // 两位小数四舍五入，避免浮点误差导致「差额入优惠后仍差一分钱」
@@ -133,6 +190,7 @@ async function saveAll() {
 function onClosed() {
   rows.value = []
   dirty.value = false
+  editingIndex.value = -1
 }
 </script>
 
@@ -140,6 +198,8 @@ function onClosed() {
 .pay-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color: #606266; font-size: 14px; }
 .pay-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .pay-hint { margin-top: 6px; color: #909399; font-size: 12px; }
+.editing-tip { margin-left: 6px; color: #e6a23c; }
+.is-editing { font-weight: 600; }
 .debt { color: #f56c6c; }
 .zero { color: #67c23a; }
 </style>
