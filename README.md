@@ -291,3 +291,10 @@ npx wrangler secret put GITHUB_TOKEN
 - workers.dev：https://stock-git-ai.dakcl.workers.dev/
 
 > 提示：`*.workers.dev` 域名在国内常被网络干扰，已为该 Worker 绑定自定义域名（Custom Domain）以获得稳定访问。
+
+## 商品改名全站即时生效
+单据 `items[].name` 是开单时冻结的**快照名**，商品在主数据改名后，历史单据不会自动变。展示层统一按「编码 → 主数据当前名」解析（`src/utils/catalog.js` 的 `lineDisplayName` / `withCurrentNames` / `aggregateByItem`）：
+
+- **详情页 / 列表搜索 / 应收应付搜索**：按编码取商品主数据当前名，旧单也显示新名，用新名或编码都能搜到旧单。
+- **统计报表按商品汇总**：按**编码**分组（无编码的历史行退化为按名字），同一商品只出一行，改名不会让汇总裂成两行。
+- 存储层不动历史快照（审计需要），仅展示层解析；如确需连快照一起改，可对数据仓执行一次性订正。
