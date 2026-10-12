@@ -265,6 +265,12 @@ async function save() {
   })
   if (!resolved.length) return ElMessage.warning('请完整填写采购明细')
   const amount = resolved.reduce((s, l) => s + l.total, 0)
+  const discountVal = Number(form.discount || 0)
+  const dueAfter = Math.max(0, amount - discountVal)
+  // 标记为结清时，实付必须等于应付金额，避免"状态结清但金额仍欠"
+  const paidVal = (form.settle === '结清' && (form.paid == null || Number(form.paid) < dueAfter))
+    ? dueAfter
+    : (form.paid != null ? Number(form.paid) : null)
   const isEdit = !!editingId.value
   // 编辑时沿用原单号，新增才生成新单号
   if (editingId.value) {
@@ -277,7 +283,7 @@ async function save() {
         remark: form.remark || '',
         settle: form.settle || '挂账',
         photos: [...(form.photos || [])],
-        paid: form.paid != null ? Number(form.paid) : null,
+        paid: paidVal,
         discount: Number(form.discount || 0),
         items: resolved,
         total: amount
@@ -291,7 +297,7 @@ async function save() {
       remark: form.remark || '',
       settle: form.settle || '挂账',
       photos: [...(form.photos || [])],
-      paid: form.paid != null ? Number(form.paid) : null,
+      paid: paidVal,
       discount: Number(form.discount || 0),
       items: resolved,
       total: amount
