@@ -34,7 +34,7 @@
       <el-input v-model="draft.remark" placeholder="备注（付款方式等，可空）" style="flex:1;min-width:140px" />
       <el-button type="primary" @click="addOne">记一笔</el-button>
     </div>
-    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；超额收款会被拒绝。</div>
+    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；超额收付会被拒绝，少收/少付保存时会提示是否按优惠结清。</div>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -45,7 +45,7 @@
 
 <script setup>
 import { ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ensurePayments, grossOf, syncPayments } from '../utils/account'
 
 const props = defineProps({
@@ -95,9 +95,33 @@ function addOne() {
   draft.value.remark = ''
 }
 
-function saveAll() {
+// 两位小数四舍五入，避免浮点误差导致「差额入优惠后仍差一分钱」
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+
+async function saveAll() {
   // 以当前行覆盖原单 payments，并同步汇总字段(received/paid)与结算状态
-  const updated = syncPayments({ ...props.order, payments: rows.value.map(p => ({ ...p })) }, props.kind)
+  const due = round2(grossOf(props.order))
+  const paidSum = round2(rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
+  const gap = round2(due - paidSum)
+  const isPay = props.kind === 'payable'
+  const action = isPay ? '付款' : '收款'
+  const order = { ...props.order, payments: rows.value.map(p => ({ ...p })) }
+  if (gap > 0.005) {
+    // 少收/少付：提示确认是否把差额作为优惠并结清
+    try {
+      await ElMessageBox.confirm(
+        `本单${isPay ? '应付' : '应收'} ¥${due.toFixed(2)}，本次${action}合计 ¥${paidSum.toFixed(2)}，差额 ¥${gap.toFixed(2)}。\n` +
+        `确认后差额作为优惠入账，本单按 ¥${paidSum.toFixed(2)} 结清；\n取消则仅记部分${action}，账单保持挂账。`,
+        '优惠结清确认',
+        { type: 'warning', confirmButtonText: '确认优惠结清', cancelButtonText: `仅记部分${action}`, distinguishCancelAndClose: true }
+      )
+      // 用户确认：差额计入优惠字段，syncPayments 会按金额自动判定为结清（全站口径一致）
+      order.discount = round2(Number(props.order.discount || 0) + gap)
+    } catch {
+      // 用户取消：按部分收付保存，账单保持挂账
+    }
+  }
+  const updated = syncPayments(order, props.kind)
   // 不在此处关闭弹窗：由父组件保存成功后关闭，失败时弹窗保持打开便于重试
   emit('saved', updated)
 }
