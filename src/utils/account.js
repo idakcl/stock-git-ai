@@ -15,14 +15,15 @@ function sortPayments(list) {
     String(a.time || '').localeCompare(String(b.time || '')))
 }
 
-// 收付款流水（兼容旧字段）：旧单无 payments 时，把 received/paid 转成一笔「历史收付」
+// 收付款流水（兼容旧字段）：旧单无 payments 数组时，把 received/paid 转成一笔「历史收付」
+// 注意：payments 数组一旦存在（即使为空）即为权威数据，不再回退旧字段
 export function ensurePayments(order, field) {
+  if (order && Array.isArray(order.payments)) return sortPayments(order.payments.map(p => ({ ...p })))
   const legacy = order ? order[field] : null
-  const list = Array.isArray(order && order.payments) ? order.payments.map(p => ({ ...p })) : []
-  if (!list.length && legacy != null && Number(legacy) > 0) {
-    list.push({ date: (order && order.date) || '', amount: Number(legacy), remark: '历史收付', time: '' })
+  if (legacy != null && Number(legacy) > 0) {
+    return [{ date: (order && order.date) || '', amount: Number(legacy), remark: '历史收付', time: '' }]
   }
-  return sortPayments(list)
+  return []
 }
 
 // 销售单累计实收 / 采购单累计实付（兼容旧字段）
