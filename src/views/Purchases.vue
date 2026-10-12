@@ -151,7 +151,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { resolveLine } from '../utils/catalog'
+import { resolveLine, lineDisplayName, itemNameMap } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, paidSumOf, ensurePayments, appendPayment, syncPayments, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
@@ -183,8 +183,12 @@ const payableTotal = computed(() => Math.max(0, totalAmount.value - Number(form.
 const unpaidAmount = computed(() => Math.max(0, payableTotal.value - paidSumOf(editOrder.value)))
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
+// 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
+const nameMap = computed(() => itemNameMap(itemOptions.value))
 const filtered = computed(() => list.value.filter(row => {
-  if (!matchText(keyword.value, row.id, row.supplier, row.date, row.remark, ...(row.items || []).map(i => i.name))) return false
+  // 搜索商品名按编码解析为当前名：单据快照名过期（商品改名前）也能命中
+  if (!matchText(keyword.value, row.id, row.supplier, row.date, row.remark,
+    ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
   if (dateStart.value && (row.date || '') < dateStart.value) return false
   if (dateEnd.value && (row.date || '') > dateEnd.value) return false
   return true

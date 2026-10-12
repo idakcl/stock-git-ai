@@ -172,11 +172,13 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
+import { aggregateByItem } from '../utils/catalog'
 import { receivableOf, payableOf, ensurePayments } from '../utils/account'
 
 const purchases = ref([])
 const sales = ref([])
 const stock = ref({})
+const items = ref([])
 const keyword = ref('')
 const purchaseKeyword = ref('')
 const dateStart = ref('')
@@ -308,36 +310,13 @@ const saleTrend = computed(() => buildTrend(filteredSales.value))
 const purchaseTrendTotal = computed(() => purchaseTrend.value.reduce((s, b) => s + b.amount, 0).toFixed(2))
 const saleTrendTotal = computed(() => saleTrend.value.reduce((s, b) => s + b.amount, 0).toFixed(2))
 
-// ---------- 按商品销售汇总（原逻辑保留） ----------
-const salesByItem = computed(() => {
-  const agg = {}
-  for (const s of filteredSales.value) {
-    for (const i of (s.items || [])) {
-      if (!agg[i.name]) agg[i.name] = { name: i.name, qty: 0, amount: 0 }
-      agg[i.name].qty += Number(i.qty || 0)
-      agg[i.name].amount += Number(i.total || 0)
-    }
-  }
-  return Object.values(agg).sort((a, b) => b.amount - a.amount)
-})
-const filteredSalesByItem = computed(() => salesByItem.value.filter(i => matchText(keyword.value, i.name)))
+// ---------- 按商品销售汇总（按编码分组，显示商品主数据当前名，改名不裂行） ----------
+const salesByItem = computed(() => aggregateByItem(filteredSales.value, items.value))
+const filteredSalesByItem = computed(() => salesByItem.value.filter(i => matchText(keyword.value, i.name, i.code)))
 
-// ---------- 按商品采购汇总：进价维度（采购单数/数量/金额） ----------
-const purchasesByItem = computed(() => {
-  const agg = {}
-  for (const p of filteredPurchases.value) {
-    const seen = new Set()
-    for (const i of (p.items || [])) {
-      if (!agg[i.name]) agg[i.name] = { name: i.name, orders: 0, qty: 0, amount: 0 }
-      const g = agg[i.name]
-      if (!seen.has(i.name)) { g.orders += 1; seen.add(i.name) }
-      g.qty += Number(i.qty || 0)
-      g.amount += Number(i.total || 0)
-    }
-  }
-  return Object.values(agg).sort((a, b) => b.amount - a.amount)
-})
-const filteredPurchasesByItem = computed(() => purchasesByItem.value.filter(i => matchText(purchaseKeyword.value, i.name)))
+// ---------- 按商品采购汇总：进价维度（采购单数/数量/金额，按编码分组） ----------
+const purchasesByItem = computed(() => aggregateByItem(filteredPurchases.value, items.value, { withOrders: true }))
+const filteredPurchasesByItem = computed(() => purchasesByItem.value.filter(i => matchText(purchaseKeyword.value, i.name, i.code)))
 
 // 表格底部合计：基于全部筛选结果
 const itemSummary = ({ columns, data }) => {
@@ -368,14 +347,16 @@ onMounted(async () => {
   // 先恢复上次筛选，再加载数据，保证刷新后筛选与数据同时就位
   restoreFilters()
   try {
-    const [p, s, st] = await Promise.all([api.getPurchases(), api.getSales(), api.getStock()])
+    const [p, s, st, it] = await Promise.all([api.getPurchases(), api.getSales(), api.getStock(), api.getItems()])
     purchases.value = p || []
     sales.value = s || []
     stock.value = st || {}
+    items.value = it || []
   } catch (e) {
     purchases.value = []
     sales.value = []
     stock.value = {}
+    items.value = []
   }
 })
 </script>

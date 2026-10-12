@@ -153,7 +153,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { grossOf, netOf as netOfOrder, ensurePayments } from '../utils/account'
-import { orderKindCount } from '../utils/catalog'
+import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'
 
@@ -177,6 +177,7 @@ const L = computed(() => props.kind === 'payable' ? {
 
 const list = ref([])
 const parties = ref([]) // 客户/供应商档案（用于汇总表取 code）
+const items = ref([]) // 商品档案（用于搜索按编码解析当前名）
 const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
@@ -188,6 +189,8 @@ const payOrder = ref({})
 
 const isPayable = computed(() => props.kind === 'payable')
 const partyKey = computed(() => isPayable.value ? 'supplier' : 'customer')
+// 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
+const nameMap = computed(() => itemNameMap(items.value))
 
 // 单笔口径：应收/应付 = 合计 − 优惠；未收/未付 = max(0, 应收/应付 − 累计实收/实付)
 const dueOf = (row) => grossOf(row)
@@ -199,7 +202,9 @@ const filtered = computed(() => (list.value || []).filter(row => {
   if (dateStart.value && (row.date || '') < dateStart.value) return false
   if (dateEnd.value && (row.date || '') > dateEnd.value) return false
   if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false
-  if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark, ...(row.items || []).map(i => i.name))) return false
+  // 搜索商品名时按编码解析为商品主数据当前名：单据快照名过期也能命中（改名后老单可搜）
+  if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark,
+    ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
   return true
 }))
 
@@ -317,14 +322,18 @@ async function onPaySaved(updated) {
 
 onMounted(async () => {
   try {
-    const [orders, ps] = await Promise.all(
-      isPayable.value ? [api.getPurchases(), api.getSuppliers()] : [api.getSales(), api.getCustomers()]
-    )
+    const [orders, ps, its] = await Promise.all([
+      isPayable.value ? api.getPurchases() : api.getSales(),
+      isPayable.value ? api.getSuppliers() : api.getCustomers(),
+      api.getItems()
+    ])
     list.value = orders || []
     parties.value = ps || []
+    items.value = its || []
   } catch (e) {
     list.value = []
     parties.value = []
+    items.value = []
   }
 })
 </script>

@@ -70,6 +70,7 @@ import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { receivableOf, grossOf, receivedSumOf, ensurePayments } from '../utils/account'
+import { lineDisplayName } from '../utils/catalog'
 
 const route = useRoute()
 const sales = ref([])
@@ -84,13 +85,13 @@ const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
 
 const detailItems = computed(() => {
-  const map = Object.fromEntries((items.value || []).map(i => [i.code, i]))
+  const nameMap = Object.fromEntries((items.value || []).map(i => [i.code, i.name || '']))
   return (sale.value.items || []).map(line => {
-    const base = map[line.code] || {}
+    const base = (items.value || []).find(i => i.code === line.code) || {}
     return {
       ...base,
       code: line.code,
-      name: line.name || base.name || line.code,
+      name: lineDisplayName(line, nameMap),
       suppliers: base.suppliers || [],
       purchaseHistory: base.purchaseHistory || [],
       saleHistory: base.saleHistory || [],
