@@ -17,7 +17,7 @@
         title="采购单"
         :subtitle="subtitle"
         :columns="exportColumns"
-        :rows="filtered"
+        :rows="paged"
       />
       <div class="table-wrap">
       <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
@@ -158,7 +158,7 @@ import PhotoUpload from '../components/PhotoUpload.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
-const PAGE_SIZE = 40
+const PAGE_SIZE = 60
 
 const list = ref([])
 const keyword = ref('')
@@ -202,10 +202,12 @@ const summaryAmount = ({ columns }) => {
 }
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, dateStart, dateEnd], () => { page.value = 1 })
 
+// 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
-  const parts = [`共 ${filtered.value.length} 单`]
+  const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
   if (keyword.value) parts.push('已按关键词筛选')
   return parts.join(' · ')

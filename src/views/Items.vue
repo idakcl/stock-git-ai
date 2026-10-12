@@ -10,11 +10,11 @@
       <TableToolbar
         filename="商品库"
         title="商品库"
-        :subtitle="`共 ${exportRows.length} 条`"
+        :subtitle="exportSubtitle"
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="items" search-placeholder="搜索编码 / 名称" show-price-tiers :page-size="40">
+      <ProductTable ref="tableRef" :items="items" search-placeholder="搜索编码 / 名称" show-price-tiers :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -62,8 +62,14 @@ const form = reactive({
   warning:0, remark:''
 })
 
-// 导出/打印使用当前搜索后的全部结果
-const exportRows = computed(() => (tableRef.value && tableRef.value.filtered) || items.value)
+// 导出/打印与列表当前页同步：取当前页数据，副标题标注输出范围（第 X/Y 页）
+const exportRows = computed(() => (tableRef.value && tableRef.value.pagedRows) || items.value)
+const exportSubtitle = computed(() => {
+  const total = (tableRef.value && tableRef.value.filtered ? tableRef.value.filtered.length : items.value.length) || 0
+  const p = (tableRef.value && tableRef.value.page) || 1
+  const pc = (tableRef.value && tableRef.value.pageCount) || 1
+  return `共 ${total} 条 · 导出当前第 ${p}/${pc} 页`
+})
 const exportColumns = [
   { label: '编码', prop: 'code' },
   { label: '名称', prop: 'name' },

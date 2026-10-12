@@ -16,7 +16,7 @@
         title="客户"
         :subtitle="subtitle"
         :columns="exportColumns"
-        :rows="filtered"
+        :rows="paged"
       />
       <div class="table-wrap">
       <el-table :data="paged" stripe>
@@ -85,7 +85,7 @@ import { nextEntityCode } from '../utils/code'
 import { receivableOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
-const PAGE_SIZE = 40
+const PAGE_SIZE = 60
 const CATEGORIES = ['批发', '零售', '安装师傅']
 
 const list = ref([])
@@ -101,10 +101,16 @@ const filtered = computed(() => list.value.filter(i => {
   return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)
 }))
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, categoryFilter], () => { page.value = 1 })
 
 const categoryTagType = (c) => ({ '批发': 'warning', '零售': 'success', '安装师傅': 'primary' }[c] || 'info')
-const subtitle = computed(() => `共 ${filtered.value.length} 条${categoryFilter.value ? ' · 类别：' + categoryFilter.value : ''}`)
+// 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
+const subtitle = computed(() => {
+  const parts = [`共 ${filtered.value.length} 条`, `导出当前第 ${page.value}/${pageCount.value} 页`]
+  if (categoryFilter.value) parts.push('类别：' + categoryFilter.value)
+  return parts.join(' · ')
+})
 const exportColumns = [
   { label: '编码', prop: 'code' },
   { label: '名称', prop: 'name' },

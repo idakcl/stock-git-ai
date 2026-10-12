@@ -28,7 +28,7 @@
         :title="L.title"
         :subtitle="subtitle"
         :columns="exportColumns"
-        :rows="filtered"
+        :rows="paged"
       />
 
       <div class="stat-grid">
@@ -152,7 +152,7 @@ const props = defineProps({
   kind: { type: String, default: 'receivable' }
 })
 
-const PAGE_SIZE = 40
+const PAGE_SIZE = 60
 
 // 文案与口径按 kind 派生
 const L = computed(() => props.kind === 'payable' ? {
@@ -194,6 +194,7 @@ const filtered = computed(() => (list.value || []).filter(row => {
 }))
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, dateStart, dateEnd, partyFilter], () => { page.value = 1 })
 
 // 汇总卡片
@@ -232,8 +233,9 @@ const byParty = computed(() => {
 // 下拉选项：全部单据中出现过的往来单位
 const partyOptions = computed(() => [...new Set((list.value || []).map(r => r[partyKey.value]).filter(Boolean))])
 
+// 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
-  const parts = [`共 ${filtered.value.length} 单`]
+  const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
   if (partyFilter.value) parts.push(partyFilter.value)
   return parts.join(' · ')

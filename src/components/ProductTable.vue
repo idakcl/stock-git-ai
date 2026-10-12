@@ -110,6 +110,7 @@ const filtered = computed(() => (props.items || []).filter(i => matchText(
 )))
 
 const page = ref(1)
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / props.pageSize)))
 const pagedRows = computed(() => {
   if (!props.pageSize) return filtered.value
   const start = (page.value - 1) * props.pageSize
@@ -120,8 +121,8 @@ watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
 
-// 供父组件获取当前筛选结果（用于导出/打印）
-defineExpose({ filtered })
+// 供父组件获取当前筛选结果与当前页数据（用于导出/打印）
+defineExpose({ filtered, pagedRows, page, pageCount })
 
 onMounted(async () => {
   try { suppliers.value = await api.getSuppliers() } catch (e) { suppliers.value = [] }

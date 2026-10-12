@@ -8,9 +8,9 @@
       <TableToolbar
         filename="供应商"
         title="供应商"
-        :subtitle="`共 ${filtered.length} 条`"
+        :subtitle="subtitle"
         :columns="exportColumns"
-        :rows="filtered"
+        :rows="paged"
       />
       <div class="table-wrap">
       <el-table :data="paged" stripe>
@@ -68,7 +68,7 @@ import { nextEntityCode } from '../utils/code'
 import { payableOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
-const PAGE_SIZE = 40
+const PAGE_SIZE = 60
 
 const list = ref([])
 const purchases = ref([])
@@ -78,7 +78,11 @@ const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
 const filtered = computed(() => list.value.filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)))
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch(keyword, () => { page.value = 1 })
+
+// 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
+const subtitle = computed(() => `共 ${filtered.value.length} 条 · 导出当前第 ${page.value}/${pageCount.value} 页`)
 
 const exportColumns = [
   { label: '编码', prop: 'code' },
