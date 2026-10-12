@@ -3,6 +3,7 @@
     <div class="pay-summary">
       <span>{{ kind === 'payable' ? '应付' : '应收' }}：<b>¥ {{ due.toFixed(2) }}</b></span>
       <span>累计{{ kind === 'payable' ? '实付' : '实收' }}：<b>¥ {{ paidSum.toFixed(2) }}</b>（{{ rows.length }} 笔）</span>
+      <span v-if="Number(order.discount || 0) > 0">抹零优惠：<b class="discount">¥ {{ Number(order.discount).toFixed(2) }}</b>（未实际{{ kind === 'payable' ? '付款' : '收款' }}）</span>
       <span>{{ kind === 'payable' ? '未付' : '未收' }}：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b></span>
     </div>
 
@@ -41,7 +42,7 @@
         <el-button @click="cancelEdit">取消编辑</el-button>
       </template>
     </div>
-    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「编辑」可修改已有记录；超额收付会被拒绝，少收/少付保存时会提示是否按优惠结清。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
+    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「编辑」可修改已有记录；超额收付会被拒绝，少收/少付保存时会把差额记为抹零优惠（不产生实际收付）并提示确认结清。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -199,6 +200,7 @@ function onClosed() {
 .pay-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .pay-hint { margin-top: 6px; color: #909399; font-size: 12px; }
 .editing-tip { margin-left: 6px; color: #e6a23c; }
+.discount { color: #67c23a; }
 .is-editing { font-weight: 600; }
 .debt { color: #f56c6c; }
 .zero { color: #67c23a; }

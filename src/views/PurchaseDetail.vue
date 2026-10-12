@@ -13,7 +13,7 @@
         <span>供应商：{{ purchase.supplier }}</span>
         <span>日期：{{ purchase.date }}</span>
         <span>合计：¥ {{ Number(purchase.total || 0).toFixed(2) }}</span>
-        <span>优惠：¥ {{ Number(purchase.discount || 0).toFixed(2) }}</span>
+        <span>优惠：¥ {{ Number(purchase.discount || 0).toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0">（抹零优惠，未实际付款）</template></span>
         <span>应付：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实付：¥ {{ paidSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
         <span>
@@ -43,7 +43,7 @@
     <el-card class="pay-card">
       <template #header>
         <div class="card-header">
-          <b>付款记录（{{ payments.length }} 笔 · 累计 ¥ {{ paidSum.toFixed(2) }} / 应付 ¥ {{ dueAmount.toFixed(2) }}）</b>
+          <b>付款记录（{{ payments.length }} 笔 · 累计 ¥ {{ paidSum.toFixed(2) }} / 应付 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(purchase.discount).toFixed(2) }}（未实际付款）</template>）</b>
           <el-button type="primary" size="small" @click="payDialog = true">记录付款</el-button>
         </div>
       </template>

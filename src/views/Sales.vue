@@ -40,7 +40,7 @@
         </el-table-column>
         <el-table-column label="优惠" width="100">
           <template #default="{ row }">
-            <span v-if="Number(row.discount || 0) > 0" class="discount">-{{ Number(row.discount).toFixed(2) }}</span>
+            <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
             <span v-else class="none">—</span>
           </template>
         </el-table-column>
@@ -166,7 +166,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine, orderKindCount } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { receivableOf, receivedSumOf, ensurePayments, appendPayment, grossOf } from '../utils/account'
+import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -416,17 +416,20 @@ async function onPaySaved(updated) {
 }
 
 async function toggleSettle(row) {
-  // 欠款以金额为准：标记结清时自动补一笔差额收款，保证状态与金额一致
+  // 欠款以金额为准：标记结清时，未收差额全部记为抹零优惠（不产生实际收款流水），保证状态与金额一致
   if ((row.settle || '挂账') !== '结清') {
     const due = grossOf(row)
     const unpaid = receivableOf(row)
     if (unpaid > 0) {
+      const received = receivedSumOf(row)
       try {
         await ElMessageBox.confirm(
-          `该单应收 ¥${due.toFixed(2)}，仍有未收 ¥${unpaid.toFixed(2)}。\n标记结清会自动记一笔 ¥${unpaid.toFixed(2)} 的收款（欠款以金额计算）。`,
+          `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${unpaid.toFixed(2)}。\n标记结清将把差额 ¥${unpaid.toFixed(2)} 记为抹零优惠（不产生实际收款，现金不增加），本单按 ¥${received.toFixed(2)} 结清。`,
           '标记结清', { type: 'warning' })
       } catch { return }
-      const updated = appendPayment(row, 'receivable', { date: new Date().toISOString().slice(0, 10), amount: unpaid, remark: '结清收款' })
+      // 抹零优惠：差额计入 discount 而非收款流水；syncPayments 按金额自动判定结清
+      const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+      const updated = syncPayments({ ...row, discount: round2(Number(row.discount || 0) + unpaid) }, 'receivable')
       const idx = list.value.findIndex(s => s.id === updated.id)
       if (idx >= 0) list.value[idx] = updated
     } else {

@@ -50,6 +50,12 @@
             <el-table-column label="实收" width="110">
               <template #default="{ row }">{{ receivedSumOf(row).toFixed(2) }}</template>
             </el-table-column>
+            <el-table-column label="优惠" width="100">
+              <template #default="{ row }">
+                <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
+                <span v-else class="none">—</span>
+              </template>
+            </el-table-column>
             <el-table-column label="结算" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>

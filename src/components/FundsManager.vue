@@ -41,6 +41,10 @@
           <div class="stat-sub">{{ stats.payCount }} 笔流水</div>
         </div>
         <div class="stat-item">
+          <el-statistic title="抹零优惠（未实际收款）" :value="stats.discount" :precision="2" prefix="¥" />
+          <div class="stat-sub">{{ stats.discountCount }} 单含优惠</div>
+        </div>
+        <div class="stat-item">
           <el-statistic :title="`${L.unpaid}合计`" :value="stats.unpaid" :precision="2" prefix="¥" value-style="color:#f56c6c" />
           <div class="stat-sub">{{ stats.openCount }} 单未结清</div>
         </div>
@@ -55,7 +59,7 @@
                 <router-link :to="`${L.detailPath}${row.id}`" class="link">{{ row.id }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="party" :label="L.party" min-width="150" show-overflow-tooltip />
+            <el-table-column :prop="partyKey" :label="L.party" min-width="150" show-overflow-tooltip />
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column :label="L.itemsLabel" width="100">
               <template #default="{ row }">{{ orderKindCount(row) }}</template>
@@ -67,6 +71,12 @@
               <template #default="{ row }">
                 <span>{{ paidSumOf(row).toFixed(2) }}</span>
                 <span v-if="payCountOf(row)" class="pay-count">（{{ payCountOf(row) }} 笔）</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="优惠" width="100">
+              <template #default="{ row }">
+                <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
+                <span v-else class="none">—</span>
               </template>
             </el-table-column>
             <el-table-column :label="L.unpaid" width="110">
@@ -198,7 +208,7 @@ const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / P
 watch([keyword, dateStart, dateEnd, partyFilter], () => { page.value = 1 })
 
 // 汇总卡片
-const stats = reactive({ due: 0, paid: 0, unpaid: 0, count: 0, payCount: 0, openCount: 0 })
+const stats = reactive({ due: 0, paid: 0, unpaid: 0, count: 0, payCount: 0, openCount: 0, discount: 0, discountCount: 0 })
 function recompute() {
   const rows = filtered.value
   stats.count = rows.length
@@ -207,6 +217,8 @@ function recompute() {
   stats.unpaid = rows.reduce((s, r) => s + netOf(r), 0)
   stats.payCount = rows.reduce((s, r) => s + payCountOf(r), 0)
   stats.openCount = rows.filter(r => netOf(r) > 0).length
+  stats.discount = rows.reduce((s, r) => s + Number(r.discount || 0), 0)
+  stats.discountCount = rows.filter(r => Number(r.discount || 0) > 0).length
 }
 watch(filtered, recompute, { immediate: true })
 
@@ -248,6 +260,7 @@ const exportColumns = computed(() => [
   { label: L.value.itemsLabel, value: r => orderKindCount(r) },
   { label: L.value.due, value: r => dueOf(r).toFixed(2) },
   { label: L.value.paid, value: r => { const n = payCountOf(r); return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
+  { label: '优惠', value: r => Number(r.discount || 0) > 0 ? '-' + Number(r.discount).toFixed(2) : '—' },
   { label: L.value.unpaid, value: r => netOf(r).toFixed(2) },
   { label: '结算', value: r => (r.settle || '挂账') },
   { label: '备注', prop: 'remark' }
@@ -262,6 +275,7 @@ const summaryAmount = ({ columns }) => {
     if (c.property === 'date') return ''
     if (c.label === L.value.due) return sum(dueOf).toFixed(2)
     if (c.label === L.value.paid) return sum(paidSumOf).toFixed(2)
+    if (c.label === '优惠') return sum(r => Number(r.discount || 0)).toFixed(2)
     if (c.label === L.value.unpaid) return sum(netOf).toFixed(2)
     return ''
   })
@@ -330,6 +344,7 @@ onMounted(async () => {
 .funds-tabs { margin-top: 12px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 .pay-count { color: #909399; font-size: 12px; margin-left: 2px; }
+.discount { color: #67c23a; }
 .none { color: #c0c4cc; }
 .debt { color: #f56c6c; font-weight: 600; }
 </style>

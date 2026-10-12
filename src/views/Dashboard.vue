@@ -57,6 +57,12 @@
           <el-table-column prop="total" label="金额" width="120">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
+          <el-table-column label="优惠" width="100">
+            <template #default="{ row }">
+              <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际付款">-{{ Number(row.discount).toFixed(2) }}</span>
+              <span v-else class="none">—</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
         </el-table>
       </div>
@@ -88,6 +94,12 @@
           <el-table-column prop="date" label="日期" width="120" />
           <el-table-column prop="total" label="金额" width="120">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+          </el-table-column>
+          <el-table-column label="优惠" width="100">
+            <template #default="{ row }">
+              <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
+              <span v-else class="none">—</span>
+            </template>
           </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
         </el-table>
@@ -297,4 +309,6 @@ onMounted(async () => {
 .filter-sep { color: #909399; }
 .search-input { margin: 8px 0 12px; max-width: 360px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
+.discount { color: #67c23a; }
+.none { color: #c0c4cc; }
 </style>

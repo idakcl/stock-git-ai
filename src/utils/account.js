@@ -58,6 +58,7 @@ export function sumFieldOf(kind) {
 }
 
 // 写回收付款流水：同步汇总字段(received/paid)，并按金额自动同步结算状态
+// settle 判定容忍浮点尘（1e-6 远小于 1 分钱）：实收合计因累加误差比应收少一丝尘时仍应判结清
 export function syncPayments(order, kind) {
   const field = sumFieldOf(kind)
   const payments = ensurePayments(order, field)
@@ -66,7 +67,7 @@ export function syncPayments(order, kind) {
     ...order,
     payments,
     [field]: total,
-    settle: total >= grossOf(order) ? '结清' : '挂账'
+    settle: total >= grossOf(order) - 1e-6 ? '结清' : '挂账'
   }
 }
 
