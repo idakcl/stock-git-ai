@@ -32,8 +32,11 @@
         <el-table-column prop="total" label="金额" width="110">
           <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
         </el-table-column>
-        <el-table-column label="实收" width="110">
-          <template #default="{ row }">{{ row.received != null ? Number(row.received).toFixed(2) : '—' }}</template>
+        <el-table-column label="实收" width="120">
+          <template #default="{ row }">
+            <span>{{ receivedSumOf(row).toFixed(2) }}</span>
+            <span v-if="(ensurePayments(row, 'received')).length" class="pay-count">（{{ ensurePayments(row, 'received').length }} 笔）</span>
+          </template>
         </el-table-column>
         <el-table-column label="优惠" width="100">
           <template #default="{ row }">
@@ -57,10 +60,11 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="190">
+        <el-table-column label="操作" width="250">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
             <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
+            <el-button size="small" type="success" @click="openPay(row)">收款</el-button>
             <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -104,7 +108,11 @@
           <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
         <el-form-item label="实收金额">
-          <el-input-number v-model="form.received" :min="0" :precision="2" :controls="false" placeholder="留空表示未填写" style="width:100%" />
+          <div class="paid-summary">
+            <span>累计实收：<b>{{ receivedSumOf(editOrder).toFixed(2) }}</b></span>
+            <span v-if="payCount > 0">（{{ payCount }} 笔，见「收款」流水）</span>
+            <span v-else class="hint">未收款，可在列表点「收款」分多笔记录</span>
+          </div>
         </el-form-item>
         <el-form-item label=" ">
           <div class="calc-line">
@@ -146,6 +154,8 @@
       </div>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存出库</el-button></template>
     </el-dialog>
+
+    <PaymentDialog v-model="payDialog" :order="payOrder" kind="receivable" @saved="onPaySaved" />
   </div>
 </template>
 
@@ -156,9 +166,10 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { resolveLine } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { receivableOf } from '../utils/account'
+import { receivableOf, receivedSumOf, ensurePayments, appendPayment, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import TableToolbar from '../components/TableToolbar.vue'
+import PaymentDialog from '../components/PaymentDialog.vue'
 
 const PAGE_SIZE = 40
 // 客户类别 → 商品上的对应分级售价字段
@@ -173,12 +184,18 @@ const itemOptions = ref([])
 const customerOptions = ref([])
 const dialog = ref(false)
 const editingId = ref('')
-const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], received:null, discount:0, lines:[] })
+const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, lines:[] })
+const payDialog = ref(false)
+const payOrder = ref({})
+
+// 编辑中的原始单据（用于展示累计实收，实收不在表单里改，统一走「收款」流水）
+const editOrder = computed(() => (editingId.value ? list.value.find(s => s.id === editingId.value) : null) || {})
+const payCount = computed(() => ensurePayments(editOrder.value, 'received').length)
 
 // 账务规则（与 src/utils/account.js 一致）：欠款按金额计算，与结算状态无关
-//   应收 = 合计 − 优惠 ；未收 = max(0, 应收 − 实收)
+//   应收 = 合计 − 优惠 ；未收 = max(0, 应收 − 累计实收[收款流水])
 const receivableTotal = computed(() => Math.max(0, totalAmount.value - Number(form.discount || 0)))
-const unpaidAmount = computed(() => Math.max(0, receivableTotal.value - (form.received != null ? Number(form.received) : 0)))
+const unpaidAmount = computed(() => Math.max(0, receivableTotal.value - receivedSumOf(editOrder.value)))
 
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
 const filtered = computed(() => list.value.filter(row => {
@@ -215,7 +232,7 @@ const exportColumns = [
   { label: '日期', prop: 'date' },
   { label: '商品', value: r => (r.items || []).map(i => `${i.name}×${i.qty}`).join('、') },
   { label: '金额', value: r => Number(r.total || 0).toFixed(2) },
-  { label: '实收', value: r => (r.received != null ? Number(r.received).toFixed(2) : '') },
+  { label: '实收', value: r => { const n = ensurePayments(r, 'received').length; return receivedSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未收', value: r => receivableOf(r).toFixed(2) },
   { label: '结算', value: r => (r.settle || '挂账') },
@@ -282,13 +299,12 @@ function openDialog(row) {
       remark: row.remark || '',
       settle: row.settle || '挂账',
       photos: [...(row.photos || [])],
-      received: row.received ?? null,
       discount: Number(row.discount || 0),
       lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price }))
     })
   } else {
     editingId.value = ''
-    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], received:null, discount:0, lines: [{code:'', name:'', qty:1, price:0}] })
+    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0}] })
   }
   dialog.value = true
 }
@@ -328,29 +344,34 @@ async function save() {
   if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
   const amount = resolved.reduce((s, l) => s + l.total, 0)
   const discountVal = Number(form.discount || 0)
-  const dueAfter = Math.max(0, amount - discountVal)
-  // 标记为结清时，实收必须等于应收金额，避免"状态结清但金额仍欠"
-  const receivedVal = (form.settle === '结清' && (form.received == null || Number(form.received) < dueAfter))
-    ? dueAfter
-    : (form.received != null ? Number(form.received) : null)
   const isEdit = !!editingId.value
-  const payload = {
+  const origin = isEdit ? list.value.find(s => s.id === editingId.value) : null
+  // 收付款统一走 payments 流水（编辑时保留原流水）；标记结清时自动补一笔差额收款，保证状态与金额一致
+  let entry = {
+    ...(origin || {}),
     customer: form.customer,
     date: form.date,
     remark: form.remark || '',
     settle: form.settle || '挂账',
     photos: [...(form.photos || [])],
-    received: receivedVal,
-    discount: Number(form.discount || 0),
+    discount: discountVal,
     items: resolved,
     total: amount
   }
+  if (!isEdit) {
+    entry = { id: genOrderId('X', list.value, form.date), ...entry, payments: [], received: 0 }
+  }
+  if (form.settle === '结清') {
+    const unpaid = receivableOf({ total: amount, discount: discountVal, received: receivedSumOf(entry) })
+    if (unpaid > 0) entry = appendPayment(entry, 'receivable', { date: form.date, amount: unpaid, remark: '结清收款' })
+  }
+  entry.received = receivedSumOf(entry)
   // 编辑时沿用原单号，新增才生成新单号
   if (isEdit) {
     const idx = list.value.findIndex(s => s.id === editingId.value)
-    if (idx >= 0) list.value[idx] = { ...list.value[idx], ...payload }
+    if (idx >= 0) list.value[idx] = entry
   } else {
-    list.value.push({ id: genOrderId('X', list.value, form.date), ...payload })
+    list.value.push(entry)
   }
   await api.saveSales(list.value)
   // 商品销售价历史、库存均由后端自动推导
@@ -362,20 +383,37 @@ async function save() {
   ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
 }
 
+// 打开某单的收款流水弹窗
+function openPay(row) {
+  payOrder.value = row
+  payDialog.value = true
+}
+
+async function onPaySaved(updated) {
+  const idx = list.value.findIndex(s => s.id === updated.id)
+  if (idx >= 0) list.value[idx] = updated
+  await api.saveSales(list.value)
+  list.value = await api.getSales().catch(() => list.value)
+  ElMessage.success('已保存收款流水')
+}
+
 async function toggleSettle(row) {
-  // 欠款以金额为准：标记结清时自动把「实收」补足为应收金额，保证状态与金额一致
+  // 欠款以金额为准：标记结清时自动补一笔差额收款，保证状态与金额一致
   if ((row.settle || '挂账') !== '结清') {
-    const due = Math.max(0, Number(row.total || 0) - Number(row.discount || 0))
+    const due = grossOf(row)
     const unpaid = receivableOf(row)
     if (unpaid > 0) {
       try {
         await ElMessageBox.confirm(
-          `该单应收 ¥${due.toFixed(2)}，仍有未收 ¥${unpaid.toFixed(2)}。\n标记结清会把实收金额补足为 ¥${due.toFixed(2)}（欠款以金额计算）。`,
+          `该单应收 ¥${due.toFixed(2)}，仍有未收 ¥${unpaid.toFixed(2)}。\n标记结清会自动记一笔 ¥${unpaid.toFixed(2)} 的收款（欠款以金额计算）。`,
           '标记结清', { type: 'warning' })
       } catch { return }
-      row.received = due
+      const updated = appendPayment(row, 'receivable', { date: new Date().toISOString().slice(0, 10), amount: unpaid, remark: '结清收款' })
+      const idx = list.value.findIndex(s => s.id === updated.id)
+      if (idx >= 0) list.value[idx] = updated
+    } else {
+      row.settle = '结清'
     }
-    row.settle = '结清'
   } else {
     row.settle = '挂账'
   }
@@ -407,4 +445,7 @@ async function remove(row) {
 .debt{color:#f56c6c;font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:#606266;font-size:13px;}
 .calc-hint{color:#909399;font-weight:400;}
+.paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:#606266;font-size:13px;align-items:baseline;}
+.paid-summary .hint{color:#c0c4cc;}
+.pay-count{color:#909399;font-size:12px;margin-left:2px;}
 </style>

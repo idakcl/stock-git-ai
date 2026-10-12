@@ -109,7 +109,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
-import { payableOf } from '../utils/account'
+import { payableOf, paidSumOf } from '../utils/account'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -156,7 +156,7 @@ const ledgerRows = computed(() => {
     .map(p => {
       const amount = Number(p.total || 0)
       const discount = Number(p.discount || 0)
-      const paid = p.paid != null ? Number(p.paid) : 0
+      const paid = paidSumOf(p)
       const unpaid = Math.max(0, amount - discount - paid)
       balance += unpaid
       return { date: p.date, id: p.id, summary: '采购入库', amount, discount, paid, unpaid, balance, settle: p.settle || '挂账' }
