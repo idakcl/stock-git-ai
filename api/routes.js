@@ -164,9 +164,15 @@ async function syncDerived(env, { purchases, sales }) {
   const s = sales != null ? sales : curS
   const { items: newItems, suppliers: newSuppliers } = derive(items, suppliers, p, s)
   const stock = rebuildStock(p, s, newItems)
-  await writeJSON(env, 'items.json', newItems, 'derive items')
-  await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers')
-  await writeJSON(env, 'stock.json', stock, 'derive stock')
+  // 三个文件顺序写入，无跨文件事务：中途失败时前面的文件已落库。
+  // derive 是纯函数（由单据重建），重新保存一次采购单/销售单即可自动修复，故失败时给出明确修复指引。
+  try {
+    await writeJSON(env, 'items.json', newItems, 'derive items')
+    await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers')
+    await writeJSON(env, 'stock.json', stock, 'derive stock')
+  } catch (e) {
+    throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
+  }
 }
 
 export async function handleApi(req, url, env) {

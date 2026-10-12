@@ -375,7 +375,16 @@ async function save() {
   } else {
     list.value.push(entry)
   }
-  await api.saveSales(list.value)
+  // 保存失败（如 GitHub 写入出错）时明确报错，弹窗不关闭、本地回滚为线上数据
+  try {
+    await api.saveSales(list.value)
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+    list.value = s
+    itemOptions.value = it
+    return
+  }
   // 商品销售价历史、库存均由后端自动推导
   const [s, it] = await Promise.all([api.getSales(), api.getItems()])
   list.value = s
@@ -394,8 +403,15 @@ function openPay(row) {
 async function onPaySaved(updated) {
   const idx = list.value.findIndex(s => s.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
-  await api.saveSales(list.value)
+  // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
+  try {
+    await api.saveSales(list.value)
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
   list.value = await api.getSales().catch(() => list.value)
+  payDialog.value = false
   ElMessage.success('已保存收款流水')
 }
 
@@ -419,8 +435,19 @@ async function toggleSettle(row) {
   } else {
     row.settle = '挂账'
   }
-  await api.saveSales(list.value)
-  ElMessage.success(row.settle === '结清' ? '已标记为结清' : '已改回挂账')
+  // 保存失败时明确报错并回滚，避免页面显示已结清但线上未生效
+  try {
+    await api.saveSales(list.value)
+  } catch (e) {
+    ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+    list.value = s
+    itemOptions.value = it
+    return
+  }
+  // 以保存后的最新状态判断提示（差额收款路径下 row 本身未被就地修改）
+  const fresh = list.value.find(s => s.id === row.id)
+  ElMessage.success(fresh && fresh.settle === '结清' ? '已标记为结清' : '已改回挂账')
 }
 
 async function remove(row) {
@@ -428,7 +455,15 @@ async function remove(row) {
     await ElMessageBox.confirm(`确定删除销售单 ${row.id}?\n删除后库存与历史价会自动重算。`, '提示', { type: 'warning' })
   } catch { return }
   list.value = list.value.filter(s => s.id !== row.id)
-  await api.saveSales(list.value)
+  try {
+    await api.saveSales(list.value)
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+    list.value = s
+    itemOptions.value = it
+    return
+  }
   const [s, it] = await Promise.all([api.getSales(), api.getItems()])
   list.value = s
   itemOptions.value = it

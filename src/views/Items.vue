@@ -105,16 +105,31 @@ async function save() {
   const { brand, ...rest } = form
   if (idx >= 0) items.value[idx] = { ...items.value[idx], ...rest, brand: undefined }
   else items.value.push({ ...rest, brand: undefined })
-  await api.saveItems(items.value)
+  // 保存失败（如 GitHub 写入出错）时明确报错，并回滚为线上数据，避免本地与线上不一致
+  try {
+    await api.saveItems(items.value)
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    await load()
+    return
+  }
   dialog.value = false
   ElMessage.success('已保存')
   load()
 }
 
 async function remove(row) {
-  await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
+  try {
+    await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
+  } catch { return }
   items.value = items.value.filter(i => i.code !== row.code)
-  await api.saveItems(items.value)
+  try {
+    await api.saveItems(items.value)
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    await load()
+    return
+  }
   ElMessage.success('已删除')
   load()
 }

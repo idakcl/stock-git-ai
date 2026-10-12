@@ -98,8 +98,8 @@ function addOne() {
 function saveAll() {
   // 以当前行覆盖原单 payments，并同步汇总字段(received/paid)与结算状态
   const updated = syncPayments({ ...props.order, payments: rows.value.map(p => ({ ...p })) }, props.kind)
+  // 不在此处关闭弹窗：由父组件保存成功后关闭，失败时弹窗保持打开便于重试
   emit('saved', updated)
-  visible.value = false
 }
 
 function onClosed() {

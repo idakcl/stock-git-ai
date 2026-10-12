@@ -287,10 +287,17 @@ function openPay(row) {
 async function onPaySaved(updated) {
   const idx = list.value.findIndex(r => r.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
-  const save = isPayable.value ? api.savePurchases(list.value) : api.saveSales(list.value)
-  await save
+  // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
+  try {
+    const save = isPayable.value ? api.savePurchases(list.value) : api.saveSales(list.value)
+    await save
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
   // 重新拉取，保证与后端一致
   list.value = isPayable.value ? await api.getPurchases() : await api.getSales()
+  payDialog.value = false
   ElMessage.success(`已保存${L.value.payBtn}流水`)
 }
 

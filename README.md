@@ -17,6 +17,16 @@
 
 数据仓由 Worker 直接读写，是系统的**唯一数据源**。
 
+## 保存链路与错误处理
+
+一次「保存」的完整链路：**页面按钮 → 前端 `src/api/index.js` → Worker `web/index.js` → `api/routes.js` → `api/github.js`（GitHub Contents API）→ 数据仓 JSON 提交**。
+
+- **后端不静默**：GitHub 读写任何一步失败（token 失效、仓库不存在、网络异常、5xx），`gh()` 都会抛出带状态码的错误（如 `GitHub 401: Bad credentials`），由 `handleApi` 统一捕获并返回 **HTTP 500 + 明确 error 文案**，前端 `request()` 收到非 2xx 即抛错。
+- **前端明确报错**：所有保存/删除/登记收付款函数均有 try/catch，失败时弹出红色错误提示（含后端错误原因），**不显示"已保存"假成功**，弹窗保持打开可重试，同时本地列表回滚为线上数据，避免界面与数据仓不一致。
+- **瞬时故障重试**：`writeJSON` 对网络异常与 GitHub 5xx 自动重试一次（重试前重新获取文件 sha）；4xx（鉴权/参数错误）立即失败，不无意义重试。
+- **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
+- 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
+
 ## 编码规则
 
 | 类型 | 格式 | 示例 | 生成方式 |

@@ -34,11 +34,24 @@ export async function writeJSON(env, file, data, message) {
     content: b64(payload),
     branch: env.GITHUB_BRANCH || 'main'
   }
-  try {
-    const existing = await gh(`/contents/${file}`, env, 'GET')
-    body.sha = existing.sha
-  } catch {
-    // 文件不存在，不传 sha
+  // 网络异常或 GitHub 5xx 时重试一次（重试前重新拉取 sha，避免过期）；
+  // 4xx（鉴权/参数问题）重试无意义，直接抛出
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      try {
+        const existing = await gh(`/contents/${file}`, env, 'GET')
+        body.sha = existing.sha
+      } catch {
+        // 文件不存在，不传 sha
+        delete body.sha
+      }
+      return await gh(`/contents/${file}`, env, 'PUT', body)
+    } catch (e) {
+      const msg = String(e && e.message || e)
+      const status = Number((/GitHub (\d{3})/.exec(msg) || [])[1])
+      const retryable = !status || status >= 500
+      if (attempt === 2 || !retryable) throw e
+      await new Promise(r => setTimeout(r, 600))
+    }
   }
-  return gh(`/contents/${file}`, env, 'PUT', body)
 }
