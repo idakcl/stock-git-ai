@@ -286,4 +286,8 @@ npx wrangler secret put GITHUB_TOKEN
 ```
 `wrangler.json` 中已配置 `GITHUB_OWNER` / `GITHUB_REPO` / `GITHUB_BRANCH`，对应数据仓 `idakcl/stock-git-ai-data@main`。
 
-> 提示：`*.workers.dev` 域名在国内常被网络干扰，建议为该 Worker 绑定自定义域名（Custom Domain）以获得稳定访问。
+**访问地址**（两个都可用，自定义域名为主）：
+- 自定义域名：https://stock-git-ai.1234.nyc.mn/ （已固化在 `wrangler.json` 的 `routes.custom_domain`，部署不会丢失）
+- workers.dev：https://stock-git-ai.dakcl.workers.dev/
+
+> 提示：`*.workers.dev` 域名在国内常被网络干扰，已为该 Worker 绑定自定义域名（Custom Domain）以获得稳定访问。
