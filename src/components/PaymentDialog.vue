@@ -44,7 +44,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ensurePayments, grossOf, syncPayments } from '../utils/account'
 
@@ -107,11 +107,15 @@ async function saveAll() {
   const action = isPay ? '付款' : '收款'
   const order = { ...props.order, payments: rows.value.map(p => ({ ...p })) }
   if (gap > 0.005) {
-    // 少收/少付：提示确认是否把差额作为优惠并结清
+    // 少收/少付：提示确认是否把差额作为优惠并结清（VNode 分行展示，金额确认更清晰）
     try {
       await ElMessageBox.confirm(
-        `本单${isPay ? '应付' : '应收'} ¥${due.toFixed(2)}，本次${action}合计 ¥${paidSum.toFixed(2)}，差额 ¥${gap.toFixed(2)}。\n` +
-        `确认后差额作为优惠入账，本单按 ¥${paidSum.toFixed(2)} 结清；\n取消则仅记部分${action}，账单保持挂账。`,
+        // ElMessageBox 挂载到 body，scoped 样式不生效，故用内联样式分行展示
+        h('div', null, [
+          h('p', { style: 'margin:0 0 6px;line-height:1.6' }, `本单${isPay ? '应付' : '应收'} ¥${due.toFixed(2)}，本次${action}合计 ¥${paidSum.toFixed(2)}，差额 ¥${gap.toFixed(2)}。`),
+          h('p', { style: 'margin:0 0 6px;line-height:1.6' }, `确认后差额作为优惠入账，本单按 ¥${paidSum.toFixed(2)} 结清。`),
+          h('p', { style: 'margin:0;color:#909399;font-size:12px;line-height:1.6' }, `取消则仅记部分${action}，账单保持挂账。`)
+        ]),
         '优惠结清确认',
         { type: 'warning', confirmButtonText: '确认优惠结清', cancelButtonText: `仅记部分${action}`, distinguishCancelAndClose: true }
       )
