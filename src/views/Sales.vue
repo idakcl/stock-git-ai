@@ -26,8 +26,8 @@
         </el-table-column>
         <el-table-column prop="customer" label="客户" width="150" />
         <el-table-column prop="date" label="日期" width="120" />
-        <el-table-column label="商品" min-width="200">
-          <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
+        <el-table-column label="商品数量" width="100">
+          <template #default="{ row }">{{ orderKindCount(row) }}</template>
         </el-table-column>
         <el-table-column prop="total" label="金额" width="110">
           <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
@@ -164,7 +164,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { resolveLine } from '../utils/catalog'
+import { resolveLine, orderKindCount } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { receivableOf, receivedSumOf, ensurePayments, appendPayment, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
@@ -230,7 +230,7 @@ const exportColumns = [
   { label: '单号', prop: 'id' },
   { label: '客户', prop: 'customer' },
   { label: '日期', prop: 'date' },
-  { label: '商品', value: r => (r.items || []).map(i => `${i.name}×${i.qty}`).join('、') },
+  { label: '商品数量', value: r => orderKindCount(r) },
   { label: '金额', value: r => Number(r.total || 0).toFixed(2) },
   { label: '实收', value: r => { const n = ensurePayments(r, 'received').length; return receivedSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },

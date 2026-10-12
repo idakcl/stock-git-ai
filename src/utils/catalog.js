@@ -1,3 +1,8 @@
+// 单据商品种类数（按编码去重，无编码时按名称）
+export function orderKindCount(order) {
+  return new Set((order?.items || []).map(i => i.code || i.name || '')).size
+}
+
 export function ensureCatalogItem(items, input, index = 0) {
   const text = String(input.code || input.name || '').trim()
   if (!text) return { items, item: null }

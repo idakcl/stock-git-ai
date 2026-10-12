@@ -57,8 +57,8 @@
             </el-table-column>
             <el-table-column prop="party" :label="L.party" min-width="150" show-overflow-tooltip />
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column :label="L.itemsLabel" min-width="200" show-overflow-tooltip>
-              <template #default="{ row }">{{ (row.items || []).map(i => `${i.name}×${i.qty}`).join('、') }}</template>
+            <el-table-column :label="L.itemsLabel" width="100">
+              <template #default="{ row }">{{ orderKindCount(row) }}</template>
             </el-table-column>
             <el-table-column :label="L.due" width="110">
               <template #default="{ row }">{{ dueOf(row).toFixed(2) }}</template>
@@ -143,6 +143,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { grossOf, netOf as netOfOrder, ensurePayments } from '../utils/account'
+import { orderKindCount } from '../utils/catalog'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'
 
@@ -156,11 +157,11 @@ const PAGE_SIZE = 40
 // 文案与口径按 kind 派生
 const L = computed(() => props.kind === 'payable' ? {
   title: '应付款管理', subtitle: '按供应商管理与登记采购付款',
-  party: '供应商', itemsLabel: '商品', due: '应付', paid: '实付', unpaid: '未付',
+  party: '供应商', itemsLabel: '商品数量', due: '应付', paid: '实付', unpaid: '未付',
   payBtn: '付款', detailPath: '/purchase/', partyPath: '/supplier/'
 } : {
   title: '应收款管理', subtitle: '按客户管理与登记销售收款',
-  party: '客户', itemsLabel: '商品', due: '应收', paid: '实收', unpaid: '未收',
+  party: '客户', itemsLabel: '商品数量', due: '应收', paid: '实收', unpaid: '未收',
   payBtn: '收款', detailPath: '/sale/', partyPath: '/customer/'
 })
 
@@ -242,7 +243,7 @@ const exportColumns = computed(() => [
   { label: '单号', prop: 'id' },
   { label: L.value.party, prop: partyKey.value },
   { label: '日期', prop: 'date' },
-  { label: L.value.itemsLabel, value: r => (r.items || []).map(i => `${i.name}×${i.qty}`).join('、') },
+  { label: L.value.itemsLabel, value: r => orderKindCount(r) },
   { label: L.value.due, value: r => dueOf(r).toFixed(2) },
   { label: L.value.paid, value: r => { const n = payCountOf(r); return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: L.value.unpaid, value: r => netOf(r).toFixed(2) },

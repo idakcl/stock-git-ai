@@ -41,14 +41,14 @@
               <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column label="商品" min-width="200">
-              <template #default="{ row }">{{ row.items.map(i => `${i.name}×${i.qty}`).join('、') }}</template>
+            <el-table-column label="商品数量" width="100">
+              <template #default="{ row }">{{ orderKindCount(row) }}</template>
             </el-table-column>
             <el-table-column prop="total" label="金额" width="110">
               <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
             </el-table-column>
             <el-table-column label="实收" width="110">
-              <template #default="{ row }">{{ row.received != null ? Number(row.received).toFixed(2) : '—' }}</template>
+              <template #default="{ row }">{{ receivedSumOf(row).toFixed(2) }}</template>
             </el-table-column>
             <el-table-column label="结算" width="100">
               <template #default="{ row }">
@@ -116,6 +116,7 @@ import { useRoute } from 'vue-router'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import { receivableOf, receivedSumOf } from '../utils/account'
+import { orderKindCount } from '../utils/catalog'
 
 const route = useRoute()
 const customers = ref([])
