@@ -49,7 +49,6 @@
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column label="名称" min-width="220">
           <template #default="{ row }">
-            <span v-if="row.brand" class="brand-tag">{{ row.brand }}</span>
             <span>{{ row.name }}</span>
           </template>
         </el-table-column>
@@ -107,7 +106,7 @@ const supplierMap = computed(() => {
   return m
 })
 const filtered = computed(() => (props.items || []).filter(i => matchText(
-  keyword.value, i.code, i.name, i.unit, i.brand, i.remark, ...(i.suppliers || [])
+  keyword.value, i.code, i.name, i.unit, i.remark, ...(i.suppliers || [])
 )))
 
 const page = ref(1)
@@ -134,15 +133,4 @@ onMounted(async () => {
 .pager { margin-top: 12px; justify-content: flex-end; }
 .history { padding: 8px 16px; }
 .history-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
-.brand-tag {
-  display: inline-block;
-  margin-right: 6px;
-  padding: 0 6px;
-  border-radius: 3px;
-  background: #fdf3e6;
-  color: #e6a23c;
-  font-size: 12px;
-  line-height: 18px;
-  vertical-align: middle;
-}
 </style>

@@ -27,7 +27,6 @@
         <el-form-item label="编码"><el-input v-model="form.code" /></el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="单位"><el-input v-model="form.unit" /></el-form-item>
-        <el-form-item label="品牌"><el-input v-model="form.brand" /></el-form-item>
         <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="批发价"><el-input-number v-model="form.priceWholesale" :min="0" :precision="2" /></el-form-item>
@@ -58,7 +57,7 @@ const items = ref([])
 const dialog = ref(false)
 const tableRef = ref(null)
 const form = reactive({
-  code:'', name:'', unit:'', brand:'', photos:[],
+  code:'', name:'', unit:'', photos:[],
   cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0,
   warning:0, remark:''
 })
@@ -67,7 +66,6 @@ const form = reactive({
 const exportRows = computed(() => (tableRef.value && tableRef.value.filtered) || items.value)
 const exportColumns = [
   { label: '编码', prop: 'code' },
-  { label: '品牌', prop: 'brand' },
   { label: '名称', prop: 'name' },
   { label: '单位', prop: 'unit' },
   { label: '进价', prop: 'cost' },
@@ -85,18 +83,22 @@ async function load() {
 }
 
 function openDialog(row) {
-  if (row) Object.assign(form, row)
-  else Object.assign(form, {
-    code: nextEntityCode(items.value, 'P'), name:'', unit:'', brand:'', photos:[],
-    cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0, warning:0, remark:''
+  // 先重置为默认值再覆盖，避免上次编辑残留；品牌字段已废弃，读入时剥离
+  const { brand, ...rest } = row || {}
+  Object.assign(form, {
+    code: nextEntityCode(items.value, 'P'), name:'', unit:'', photos:[],
+    cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0, warning:0, remark:'',
+    ...rest
   })
   dialog.value = true
 }
 
 async function save() {
   const idx = items.value.findIndex(i => i.code === form.code)
-  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...form }
-  else items.value.push({ ...form })
+  // 品牌字段已废弃：保存时剥离，数据中不再写入
+  const { brand, ...rest } = form
+  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...rest, brand: undefined }
+  else items.value.push({ ...rest, brand: undefined })
   await api.saveItems(items.value)
   dialog.value = false
   ElMessage.success('已保存')
