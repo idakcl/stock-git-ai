@@ -1,12 +1,10 @@
 import { readJSON, writeJSON } from './github.js'
+import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 
-function json(res, status = 200) {
+function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
     status,
-    headers: {
-      'Content-Type': 'application/json',
-      'Access-Control-Allow-Origin': '*'
-    }
+    headers: { 'Content-Type': 'application/json', ...corsHeaders(req, env) }
   })
 }
 
@@ -180,75 +178,92 @@ export async function handleApi(req, url, env) {
   const method = req.method
 
   if (method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      }
-    })
+    return new Response(null, { status: 204, headers: corsHeaders(req, env) })
+  }
+
+  // 登录接口：唯一无需会话即可访问的写接口
+  if (path === '/login' && method === 'POST') {
+    try {
+      const body = await req.json()
+      const r = await checkLogin(req, env, body)
+      if (r.ok) return json(req, env, { ok: true, token: r.token, expiresIn: r.expiresIn })
+      if (r.misconfigured) return json(req, env, { error: '服务端未配置登录密钥，请联系管理员' }, 500)
+      if (r.lockedFor) return json(req, env, { error: `登录尝试过多，请 ${r.lockedFor} 秒后重试` }, 429)
+      return json(req, env, { error: `密码错误，还可尝试 ${r.remain} 次` }, 401)
+    } catch (e) {
+      return json(req, env, { error: e.message || '登录失败' }, 500)
+    }
+  }
+  // 会话状态查询（前端启动时判断是否需要重新登录）
+  if (path === '/session' && method === 'GET') {
+    return json(req, env, { ok: await verifyToken(bearer(req), env) })
+  }
+
+  // 其余接口一律要求登录态
+  if (!(await verifyToken(bearer(req), env))) {
+    return json(req, env, { error: '未登录或登录已过期' }, 401)
   }
 
   try {
-    if (path === '/items' && method === 'GET') return json(await readJSON(env, 'items.json'))
-    if (path === '/suppliers' && method === 'GET') return json(await readJSON(env, 'suppliers.json'))
-    if (path === '/customers' && method === 'GET') return json(await readJSON(env, 'customers.json'))
-    if (path === '/purchases' && method === 'GET') return json(await readJSON(env, 'purchases.json'))
-    if (path === '/sales' && method === 'GET') return json(await readJSON(env, 'sales.json'))
-    if (path === '/stock' && method === 'GET') return json(await readJSON(env, 'stock.json'))
-    if (path === '/logs' && method === 'GET') return json(await readJSON(env, 'logs.json'))
+    if (path === '/items' && method === 'GET') return json(req, env, await readJSON(env, 'items.json'))
+    if (path === '/suppliers' && method === 'GET') return json(req, env, await readJSON(env, 'suppliers.json'))
+    if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))
+    if (path === '/purchases' && method === 'GET') return json(req, env, await readJSON(env, 'purchases.json'))
+    if (path === '/sales' && method === 'GET') return json(req, env, await readJSON(env, 'sales.json'))
+    if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
+    if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
 
     // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端
     if (path === '/upload' && method === 'POST') {
-      if (!env.IMGBED_AUTH_CODE) return json({ error: '未配置图床密钥 IMGBED_AUTH_CODE' }, 500)
+      if (!env.IMGBED_AUTH_CODE) return json(req, env, { error: '未配置图床密钥 IMGBED_AUTH_CODE' }, 500)
       const form = await req.formData()
       const file = form.get('file')
-      if (!file) return json({ error: '缺少文件' }, 400)
+      if (!file) return json(req, env, { error: '缺少文件' }, 400)
       const fd = new FormData()
       fd.append('file', file)
       const upstream = `https://netpan.1234.nyc.mn/upload?authCode=${encodeURIComponent(env.IMGBED_AUTH_CODE)}&returnFormat=full`
       const res = await fetch(upstream, { method: 'POST', body: fd })
-      const data = await res.json().catch(() => ({}))
+      const data = await res.json(req, env, ).catch(() => ({}))
       const src = Array.isArray(data) ? (data[0] && data[0].src) : data.src
-      if (!src) return json({ error: '图床上传失败' }, 502)
-      return json({ url: src })
+      if (!src) return json(req, env, { error: '图床上传失败' }, 502)
+      return json(req, env, { url: src })
     }
 
     if (method === 'POST') {
-      const body = await req.json()
+      const body = await req.json(req, env, )
 
       if (path === '/items') {
         await writeJSON(env, 'items.json', body.items || [], 'update items')
-        return json({ ok: true })
+        return json(req, env, { ok: true })
       }
       if (path === '/suppliers') {
         await writeJSON(env, 'suppliers.json', body.suppliers || [], 'update suppliers')
-        return json({ ok: true })
+        return json(req, env, { ok: true })
       }
       if (path === '/customers') {
         await writeJSON(env, 'customers.json', body.customers || [], 'update customers')
-        return json({ ok: true })
+        return json(req, env, { ok: true })
       }
       if (path === '/purchases') {
         const purchases = body.purchases || []
         await writeJSON(env, 'purchases.json', purchases, 'update purchases')
         await syncDerived(env, { purchases })
-        return json({ ok: true })
+        return json(req, env, { ok: true })
       }
       if (path === '/sales') {
         const sales = body.sales || []
         await writeJSON(env, 'sales.json', sales, 'update sales')
         await syncDerived(env, { sales })
-        return json({ ok: true })
+        return json(req, env, { ok: true })
       }
+      // 库存是采购/销售的派生数据（由 rebuildStock 全量重算），禁止直接覆盖，
+      // 否则会与单据脱节产生漂移——需要修正请改为重新保存对应单据，由系统重建。
       if (path === '/stock') {
-        await writeJSON(env, 'stock.json', body.stock || {}, 'update stock')
-        return json({ ok: true })
+        return json(req, env, { error: '库存为派生数据，不支持直接写入；请重新保存采购单/销售单由系统自动重建' }, 403)
       }
       if (path === '/import') {
         const text = typeof body.text === 'string' ? body.text : ''
-        if (!text.trim()) return json({ error: '导入内容为空' }, 400)
+        if (!text.trim()) return json(req, env, { error: '导入内容为空' }, 400)
 
         const parsed = extractData(text)
         const results = []
@@ -272,12 +287,12 @@ export async function handleApi(req, url, env) {
         logs.push({ time: new Date().toISOString(), source: 'ai', results })
         await writeJSON(env, 'logs.json', logs, 'append log')
 
-        return json({ ok: true, results })
+        return json(req, env, { ok: true, results })
       }
     }
 
-    return json({ error: 'Not Found' }, 404)
+    return json(req, env, { error: 'Not Found' }, 404)
   } catch (e) {
-    return json({ error: e.message || String(e) }, 500)
+    return json(req, env, { error: e.message || String(e) }, 500)
   }
 }

@@ -1,14 +1,33 @@
 <template>
-  <el-container class="layout">
+  <!-- 未登录：只显示登录页，不渲染业务数据 -->
+  <Login v-if="!authed" @success="authed = true" />
+
+  <!-- 已登录：主界面 -->
+  <el-container v-else class="layout">
     <el-header class="header">
       <el-button class="menu-btn" text @click="drawer = true">
         <el-icon :size="22"><Menu /></el-icon>
       </el-button>
-      <div class="header-title">进销存</div>
+      <div class="header-title">
+        <span class="logo-dot">进</span>进销存
+      </div>
+      <div class="header-right">
+        <span class="build-tag">构建 {{ buildTime }}</span>
+        <el-button text class="logout-btn" @click="onLogout">
+          <el-icon><SwitchButton /></el-icon>
+          <span class="logout-text">退出登录</span>
+        </el-button>
+      </div>
     </el-header>
     <el-container class="body">
-      <el-aside width="220px" class="aside desktop-only">
-        <div class="logo">进销存</div>
+      <el-aside width="224px" class="aside desktop-only">
+        <div class="logo">
+          <span class="logo-mark">进</span>
+          <div class="logo-text">
+            <div class="logo-title">进销存</div>
+            <div class="logo-sub">管理系统</div>
+          </div>
+        </div>
         <AppMenu />
         <div class="build-info">构建 {{ buildTime }}</div>
       </el-aside>
@@ -16,8 +35,14 @@
         <router-view />
       </el-main>
     </el-container>
-    <el-drawer v-model="drawer" direction="ltr" size="220px" :with-header="false">
-      <div class="logo">进销存</div>
+    <el-drawer v-model="drawer" direction="ltr" size="224px" :with-header="false">
+      <div class="logo">
+        <span class="logo-mark">进</span>
+        <div class="logo-text">
+          <div class="logo-title">进销存</div>
+          <div class="logo-sub">管理系统</div>
+        </div>
+      </div>
       <AppMenu @select="drawer = false" />
       <div class="build-info">构建 {{ buildTime }}</div>
     </el-drawer>
@@ -25,47 +50,163 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { Menu } from '@element-plus/icons-vue'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { ElMessageBox, ElMessage } from 'element-plus'
+import { Menu, SwitchButton } from '@element-plus/icons-vue'
 import AppMenu from './components/AppMenu.vue'
+import Login from './views/Login.vue'
+import { api, auth } from './api'
 
 const drawer = ref(false)
 const buildTime = __BUILD_TIME__
+// 有票据不等于有效：启动时调 /session 自检一次
+const authed = ref(false)
+
+async function check() {
+  if (!auth.get()) { authed.value = false; return }
+  try {
+    const r = await api.verify()
+    authed.value = !!r.ok
+  } catch (e) {
+    authed.value = false
+  }
+}
+
+// 任何接口返回 401（会话过期）都会广播此事件
+function onExpired() {
+  authed.value = false
+  ElMessage.warning('登录已过期，请重新登录')
+}
+onMounted(() => {
+  check()
+  window.addEventListener('auth:expired', onExpired)
+})
+onUnmounted(() => window.removeEventListener('auth:expired', onExpired))
+
+async function onLogout() {
+  try {
+    await ElMessageBox.confirm('确定退出登录？', '提示', { type: 'warning', confirmButtonText: '退出', cancelButtonText: '取消' })
+  } catch { return }
+  auth.clear()
+  authed.value = false
+}
 </script>
 
 <style>
+/* ---------- 全局基础 ---------- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f7fa; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
+  background: #f5f7fa;
+  color: #303133;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- 布局 ---------- */
 .layout { height: 100%; flex-direction: column; }
 .body { flex: 1; min-height: 0; }
+
+/* 顶栏：桌面/移动统一显示，承载系统名与退出登录 */
 .header {
-  display: none;
-  height: 48px;
-  padding: 0 8px;
+  height: 56px;
+  padding: 0 12px 0 8px;
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   background: #fff;
-  border-bottom: 1px solid #e4e7ed;
+  border-bottom: 1px solid #ebeef5;
+  flex: none;
 }
-.header-title { font-size: 16px; font-weight: 700; color: #409eff; }
-.menu-btn { padding: 8px; }
-.aside { background: #fff; border-right: 1px solid #e4e7ed; overflow-y: auto; display: flex; flex-direction: column; }
-.logo { height: 56px; line-height: 56px; text-align: center; font-size: 18px; font-weight: 700; color: #409eff; flex: none; }
+.header-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #303133;
+}
+.logo-dot {
+  width: 26px; height: 26px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #409eff, #2f7fe0);
+  color: #fff;
+  font-size: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.header-right { display: flex; align-items: center; gap: 10px; }
+.build-tag { color: #c0c4cc; font-size: 12px; }
+.logout-btn { color: #606266; }
+.logout-btn:hover { color: #f56c6c; }
+
+/* 侧边栏 */
+.aside {
+  background: #fff;
+  border-right: 1px solid #ebeef5;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: none;
+  border-bottom: 1px solid #f5f7fa;
+}
+.logo-mark {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #409eff, #2f7fe0);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  font-weight: 700;
+}
+.logo-text { line-height: 1.2; }
+.logo-title { font-size: 16px; font-weight: 700; color: #303133; }
+.logo-sub { font-size: 11px; color: #a8abb2; }
 .aside .menu { flex: 1; }
-.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f0f2f5; flex: none; }
+.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f5f7fa; flex: none; }
 .main { padding: 16px; overflow-y: auto; min-width: 0; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
-.stat-item { min-width: 0; }
+.menu-btn { padding: 8px; }
+
+/* ---------- 统一风格：卡片 / 统计块 / 表格 / 链接 ---------- */
+.el-card {
+  border-radius: 10px !important;
+  border: 1px solid #ebeef5 !important;
+  box-shadow: 0 1px 3px rgba(31, 45, 61, 0.04) !important;
+}
+.el-card + .el-card { margin-top: 14px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+
 .table-wrap { overflow-x: auto; }
+.el-table { font-size: 13px; }
+.el-table th.el-table__cell { background: #fafbfc !important; color: #606266; font-weight: 600; }
+
 .link { color: #409eff; cursor: pointer; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 
 @media (max-width: 768px) {
   .desktop-only { display: none; }
-  .header { display: flex; }
   .main { padding: 12px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .build-tag { display: none; }
+}
+@media (min-width: 769px) {
+  .menu-btn { display: none; }
+  .header { padding-left: 20px; }
 }
 </style>

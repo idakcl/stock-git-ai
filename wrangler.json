@@ -18,7 +18,8 @@
   "vars": {
     "GITHUB_OWNER": "idakcl",
     "GITHUB_REPO": "stock-git-ai-data",
-    "GITHUB_BRANCH": "main"
+    "GITHUB_BRANCH": "main",
+    "ALLOWED_ORIGINS": "https://stock-git-ai.1234.nyc.mn,http://localhost:5173,http://localhost:4173"
   },
 
   "observability": {

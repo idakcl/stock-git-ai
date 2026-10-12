@@ -301,3 +301,36 @@ npx wrangler secret put GITHUB_TOKEN
 - **详情页 / 列表搜索 / 应收应付搜索**：按编码取商品主数据当前名，旧单也显示新名，用新名或编码都能搜到旧单。
 - **统计报表按商品汇总**：按**编码**分组（无编码的历史行退化为按名字），同一商品只出一行，改名不会让汇总裂成两行。
 - 存储层不动历史快照（审计需要），仅展示层解析；如确需连快照一起改，可对数据仓执行一次性订正。
+
+## 登录与安全（重要）
+
+系统已启用登录保护。打开站点会先进入登录页，验证通过后才加载任何业务数据。
+
+### 登录方式
+- 打开站点 → 输入**管理密码** → 登录（默认勾选「记住登录」，30 天内免登录）
+- 登录态保存在浏览器本地；点右上角「退出登录」立即失效
+- 会话默认 12 小时过期，勾选记住我则为 30 天；过期后任意操作会提示重新登录
+
+### 修改密码
+密码与签名密钥保存在 Cloudflare Worker Secret（**不写入代码、不进仓库**）：
+
+```bash
+npx wrangler secret put APP_PASSWORD      # 登录密码
+npx wrangler secret put SESSION_SECRET    # 会话签名密钥（随机串即可）
+```
+
+`SESSION_SECRET` 可用 `openssl rand -hex 32` 生成。修改 `SESSION_SECRET` 会使所有已登录会话立即失效。
+
+### 安全设计
+| 措施 | 说明 |
+|---|---|
+| 全站鉴权 | 除 `/api/login` 外，所有读、写接口均校验 `Authorization: Bearer <票据>` |
+| 票据签名 | HMAC-SHA256 自签票据，含过期时间；密钥在 Secret 中，前端不可见 |
+| 常量时间比对 | 密码与签名比对均为常量时间，避免时序侧信道 |
+| 登录节流 | 同一来源连续失败 6 次锁定 15 分钟，返回剩余尝试次数 |
+| CORS 白名单 | 仅允许 `ALLOWED_ORIGINS` 中配置的域名，不再对全网开放 |
+| 派生数据保护 | 库存为采购/销售派生数据，禁止直接写入（返回 403），须由单据重建 |
+| 安全响应头 | `X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` |
+| 数据仓私有 | 数据仓应设为 private（`gh repo edit idakcl/stock-git-ai-data --visibility private`） |
+
+> 注意：GitHub Token 与登录密码均存放于 Worker Secret，仓库代码里没有任何凭据。
