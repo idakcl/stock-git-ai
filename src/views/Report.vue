@@ -1,29 +1,70 @@
 <template>
   <div>
+    <!-- 全局筛选：时间段对上下两个分区同时生效 -->
     <el-card>
-      <template #header><b>统计报表</b></template>
+      <template #header>
+        <div class="card-header">
+          <b>统计报表</b>
+          <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除时间段</el-button>
+        </div>
+      </template>
       <div class="filter-row">
         <span class="filter-label">时间段</span>
         <el-date-picker v-model="dateStart" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width:150px" />
         <span class="filter-sep">至</span>
         <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
-        <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
+        <el-tag v-if="dateStart || dateEnd" type="info" effect="plain" size="small">{{ dateStart || '不限' }} ~ {{ dateEnd || '不限' }}</el-tag>
+        <span class="filter-hint">时间段对下方采购、销售两个分区同时生效</span>
       </div>
+    </el-card>
+
+    <!-- 采购与应付款：供应商筛选只作用于本分区 -->
+    <el-card class="section-card">
+      <template #header>
+        <div class="card-header">
+          <b>采购与应付款</b>
+          <span class="section-sub">供应商：{{ supplierFilter || '全部' }}<template v-if="dateStart || dateEnd"> · {{ dateStart || '不限' }} ~ {{ dateEnd || '不限' }}</template></span>
+        </div>
+      </template>
       <div class="filter-row">
         <span class="filter-label">供应商</span>
-        <el-select v-model="supplierFilter" clearable filterable placeholder="全部供应商（影响采购与应付款）" style="width:280px">
+        <el-select v-model="supplierFilter" clearable filterable placeholder="全部供应商" style="width:260px">
           <el-option v-for="s in supplierOptions" :key="s" :label="s" :value="s" />
         </el-select>
-        <span class="filter-label" style="margin-left:16px">客户</span>
-        <el-select v-model="customerFilter" clearable filterable placeholder="全部客户（影响销售与应收款）" style="width:280px">
-          <el-option v-for="c in customerOptions" :key="c" :label="c" :value="c" />
-        </el-select>
+        <span class="filter-hint">只影响本分区的采购与应付款数据</span>
       </div>
       <div class="stat-grid">
         <div class="stat-item">
           <el-statistic title="采购总额" :value="stats.purchaseTotal" :precision="2" prefix="¥" />
           <div class="stat-sub">{{ filteredPurchases.length }} 单</div>
         </div>
+        <div class="stat-item">
+          <el-statistic title="累计实付" :value="stats.purchasePaid" :precision="2" prefix="¥" />
+          <div class="stat-sub">{{ stats.purchasePayCount }} 笔付款流水</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="应付款（未付合计）" :value="stats.payable" :precision="2" prefix="¥" value-style="color:#f56c6c" />
+          <div class="stat-sub">共 {{ stats.payableCount }} 单 · 未付清 {{ stats.payableOpen }} 单</div>
+        </div>
+      </div>
+    </el-card>
+
+    <!-- 销售与应收款：客户筛选只作用于本分区 -->
+    <el-card class="section-card">
+      <template #header>
+        <div class="card-header">
+          <b>销售与应收款</b>
+          <span class="section-sub">客户：{{ customerFilter || '全部' }}<template v-if="dateStart || dateEnd"> · {{ dateStart || '不限' }} ~ {{ dateEnd || '不限' }}</template></span>
+        </div>
+      </template>
+      <div class="filter-row">
+        <span class="filter-label">客户</span>
+        <el-select v-model="customerFilter" clearable filterable placeholder="全部客户" style="width:260px">
+          <el-option v-for="c in customerOptions" :key="c" :label="c" :value="c" />
+        </el-select>
+        <span class="filter-hint">只影响本分区及下方商品销售汇总</span>
+      </div>
+      <div class="stat-grid">
         <div class="stat-item">
           <el-statistic title="销售总额" :value="stats.saleTotal" :precision="2" prefix="¥" />
           <div class="stat-sub">{{ filteredSales.length }} 单</div>
@@ -33,16 +74,20 @@
           <div class="stat-sub">销售总额 − 销售成本</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="应付款（未付合计）" :value="stats.payable" :precision="2" prefix="¥" value-style="color:#f56c6c" />
-          <div class="stat-sub">共 {{ stats.payableCount }} 单 · 未付清 {{ stats.payableOpen }} 单</div>
-        </div>
-        <div class="stat-item">
           <el-statistic title="应收款（未收合计）" :value="stats.receivable" :precision="2" prefix="¥" value-style="color:#f56c6c" />
           <div class="stat-sub">共 {{ stats.receivableCount }} 单 · 未收清 {{ stats.receivableOpen }} 单</div>
         </div>
       </div>
-      <el-divider />
-      <b>按商品销售汇总</b>
+    </el-card>
+
+    <!-- 按商品销售汇总：随客户 + 时间段 + 关键词联动 -->
+    <el-card class="section-card">
+      <template #header>
+        <div class="card-header">
+          <b>按商品销售汇总</b>
+          <span class="section-sub">随「客户 + 时间段」筛选联动</span>
+        </div>
+      </template>
       <el-input v-model="keyword" clearable placeholder="搜索商品名称" class="search-input" />
       <div class="table-wrap">
       <el-table :data="filteredSalesByItem" stripe style="margin-top:8px" show-summary :summary-method="itemSummary">
@@ -62,7 +107,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { receivableOf, payableOf } from '../utils/account'
+import { receivableOf, payableOf, ensurePayments } from '../utils/account'
 
 const purchases = ref([])
 const sales = ref([])
@@ -92,12 +137,13 @@ const supplierOptions = computed(() => [...new Set((purchases.value || []).map(p
 const customerOptions = computed(() => [...new Set((sales.value || []).map(s => s.customer).filter(Boolean))])
 
 const stats = reactive({
-  purchaseTotal: 0, saleTotal: 0, profit: 0,
+  purchaseTotal: 0, purchasePaid: 0, purchasePayCount: 0,
+  saleTotal: 0, profit: 0,
   payable: 0, payableCount: 0, payableOpen: 0,
   receivable: 0, receivableCount: 0, receivableOpen: 0
 })
 
-// 采购/销售/应收/应付均随筛选实时重算
+// 所有指标随筛选实时重算（watch 监听筛选后的计算结果）
 function recompute() {
   const pList = filteredPurchases.value
   const sList = filteredSales.value
@@ -110,6 +156,10 @@ function recompute() {
   const totalCost = sList.reduce((sum, s) =>
     sum + (s.items || []).reduce((c, i) => c + i.qty * (costMap[i.code] || 0), 0), 0)
   stats.profit = stats.saleTotal - totalCost
+
+  // 采购：累计实付与流水笔数（付款流水）
+  stats.purchasePaid = pList.reduce((s, p) => s + ensurePayments(p, 'paid').reduce((t, x) => t + Number(x.amount || 0), 0), 0)
+  stats.purchasePayCount = pList.reduce((s, p) => s + ensurePayments(p, 'paid').length, 0)
 
   // 应收/应付：按金额规则（与 src/utils/account.js 一致），欠款与结算状态解耦
   stats.payable = pList.reduce((sum, p) => sum + payableOf(p), 0)
@@ -160,11 +210,17 @@ onMounted(async () => {
 })
 </script>
 <style scoped>
+.card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.section-card { margin-top: 16px; }
+.section-sub { color: #909399; font-size: 12px; font-weight: 400; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .filter-label { color: #606266; font-size: 14px; }
 .filter-sep { color: #909399; }
+.filter-hint { color: #c0c4cc; font-size: 12px; }
 .search-input { margin: 8px 0 12px; max-width: 360px; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; }
+.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+.stat-item .el-statistic__head,
+.stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 </style>
