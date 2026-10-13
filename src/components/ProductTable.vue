@@ -53,8 +53,8 @@
           </template>
         </el-table-column>
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column label="供应商" min-width="160">
-          <template #default="{ row }">{{ (row.suppliers || []).map(c => supplierMap[c] || c).join('、') || '—' }}</template>
+        <el-table-column label="供应商" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ supplierNames(row) }}</template>
         </el-table-column>
         <el-table-column prop="cost" label="进价" width="100" />
         <el-table-column prop="price" label="售价" width="100" />
@@ -120,6 +120,13 @@ const pagedRows = computed(() => {
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
+// 供应商列显示：按名称去重后再拼接（档案中存在同名不同码的重复建档），
+// 避免同一家供应商在商品行里重复出现、把列撑得过长
+// 注意：supplierMap 是 computed ref，在 script 函数中须用 .value 取值
+const supplierNames = (row) => {
+  const names = (row.suppliers || []).map(c => supplierMap.value[c] || c).filter(Boolean)
+  return [...new Set(names)].join('、') || '—'
+}
 
 // 供父组件获取当前筛选结果与当前页数据（用于导出/打印）
 defineExpose({ filtered, pagedRows, page, pageCount })
@@ -132,6 +139,7 @@ onMounted(async () => {
 <style scoped>
 .search-input { margin-bottom: 12px; max-width: 360px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
-.history { padding: 8px 16px; }
-.history-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
+/* 展开区与商品行保持同一字号字重：标题不再加粗变色，避免折叠内容显得比商品行大 */
+.history { padding: 8px 16px; font-size: 13px; color: #606266; }
+.history-title { font-weight: 400; margin-bottom: 6px; color: #303133; }
 </style>
