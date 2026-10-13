@@ -13,28 +13,28 @@
           <template #default="{ row }">
             <div class="history">
               <div class="history-title">历史采购价</div>
-              <el-table :data="sortedHistory(row.purchaseHistory)" border>
+              <el-table :data="sortedHistory(row.purchaseHistory)" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="采购单" width="190" show-overflow-tooltip>
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
-                <el-table-column label="供应商" min-width="160" show-overflow-tooltip>
+                <el-table-column label="供应商" width="150" show-overflow-tooltip>
                   <template #default="{ row: h }">{{ h.supplierName || (supplierMap[h.supplier] || h.supplier || '') }}</template>
                 </el-table-column>
                 <el-table-column prop="qty" label="数量" width="80" />
                 <el-table-column prop="price" label="单价" width="90" />
-                <el-table-column prop="total" label="金额" width="100" />
+                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney" />
               </el-table>
               <div class="history-title" style="margin-top:12px">历史销售价</div>
-              <el-table :data="sortedHistory(row.saleHistory)" border>
+              <el-table :data="sortedHistory(row.saleHistory)" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="销售单" width="190" show-overflow-tooltip>
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
-                <el-table-column prop="customer" label="客户" min-width="160" show-overflow-tooltip />
+                <el-table-column prop="customer" label="客户" width="150" show-overflow-tooltip />
                 <el-table-column prop="qty" label="数量" width="80" />
                 <el-table-column prop="price" label="单价" width="90" />
-                <el-table-column prop="total" label="金额" width="100" />
+                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney" />
               </el-table>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
               <div class="history-title" style="margin-top:12px">
@@ -124,6 +124,8 @@ const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
 // 后端 derive 已排序，这里前端兜底：存量数据在重建前也按时间展示
 const byTimeDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || ''))
 const sortedHistory = (arr) => [...(arr || [])].sort(byTimeDesc)
+// 金额显示去除浮点精度残留（如 5×1.91=9.549999...→9.55）
+const fmtMoney = (row, col, val) => (val == null || val === '' ? '—' : Math.round(Number(val) * 100) / 100)
 // 供应商列显示：按名称去重后再拼接（档案中存在同名不同码的重复建档），
 // 避免同一家供应商在商品行里重复出现、把列撑得过长
 // 注意：supplierMap 是 computed ref，在 script 函数中须用 .value 取值
@@ -146,9 +148,9 @@ onMounted(async () => {
 /* 展开区与商品行保持同一字号字重：标题不再加粗变色，避免折叠内容显得比商品行大 */
 .history { padding: 8px 16px; font-size: 13px; color: #606266; }
 .history-title { font-weight: 400; margin-bottom: 6px; color: #303133; }
-/* 内表与商品行完全同规格：不使用 EP small（其行高仅 32px、默认 12px 会让同样 13px 的字显得撑满）。
-   这里显式钉死字号/字重/颜色/字体族，防止将来样式顺序或 size 变化导致内表字体漂移 */
-.history :deep(.el-table) { font-size: 13px; color: #606266; font-family: inherit; }
-.history :deep(.el-table th.el-table__cell) { font-size: 13px; font-weight: 600; color: #606266; }
-.history :deep(.el-table td.el-table__cell) { font-size: 13px; font-weight: 400; }
+/* 内表是从属信息：比商品行（13px）小一号为 12px，行高收紧，且 :fit="false" 不铺满容器右侧留白，
+   避免弹性列被拉到 800+px 后「宽框里几个字」显得字大又空 */
+.history :deep(.el-table) { font-size: 12px; color: #606266; font-family: inherit; }
+.history :deep(.el-table th.el-table__cell) { font-size: 12px; font-weight: 600; color: #606266; }
+.history :deep(.el-table td.el-table__cell) { font-size: 12px; font-weight: 400; padding: 8px 0; }
 </style>
