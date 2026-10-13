@@ -59,11 +59,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="250">
+        <el-table-column label="操作" width="300">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/purchase/${row.id}`)">查看</el-button>
             <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
             <el-button size="small" type="success" @click="openPay(row)">付款</el-button>
+            <el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button>
             <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
@@ -143,6 +144,9 @@
     </el-dialog>
 
     <PaymentDialog v-model="payDialog" :order="payOrder" kind="payable" @saved="onPaySaved" />
+
+    <!-- 轻量补照片：给已有单据传原始单据照片，只更新 photos 字段 -->
+    <OrderPhotoDialog v-model="photoDialog" :order="photoOrder" @saved="onPhotosSaved" />
   </div>
 </template>
 
@@ -155,6 +159,7 @@ import { resolveLine, lineDisplayName, itemNameMap } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, paidSumOf, ensurePayments, appendPayment, syncPayments, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
+import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
@@ -172,6 +177,9 @@ const form = reactive({ supplier:'', date:'', remark:'', settle:'挂账', photos
 const photoUpload = ref(null)
 const payDialog = ref(false)
 const payOrder = ref({})
+// 轻量补照片弹窗（不改动单据其他信息，仅合并 photos 字段）
+const photoDialog = ref(false)
+const photoOrder = ref(null)
 
 // 编辑中的原始单据（用于展示累计实付，实付不在表单里改，统一走「付款」流水）
 const editOrder = computed(() => (editingId.value ? list.value.find(p => p.id === editingId.value) : null) || {})
@@ -340,6 +348,31 @@ async function save() {
 function openPay(row) {
   payOrder.value = row
   payDialog.value = true
+}
+
+// 打开某单的轻量补照片弹窗
+function openPhotos(row) {
+  photoOrder.value = row
+  photoDialog.value = true
+}
+
+// 保存照片：仅合并 photos 字段后整单保存，单号/金额/明细/流水等一律不动
+async function onPhotosSaved(photos) {
+  const order = photoOrder.value
+  const idx = list.value.findIndex(p => p.id === order?.id)
+  if (idx < 0) return
+  const origin = list.value[idx]
+  list.value[idx] = { ...origin, photos }
+  try {
+    await api.savePurchases(list.value)
+  } catch (e) {
+    list.value[idx] = origin
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
+  photoDialog.value = false
+  photoOrder.value = null
+  ElMessage.success('已更新单据照片')
 }
 
 async function onPaySaved(updated) {

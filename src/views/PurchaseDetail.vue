@@ -27,9 +27,14 @@
         </span>
         <span v-if="purchase.remark">备注：{{ purchase.remark }}</span>
       </div>
-      <div v-if="(purchase.photos || []).length" class="photos-block">
-        <div class="photos-title">原始单据照片（{{ (purchase.photos || []).length }} 张）</div>
-        <PhotoThumbs :value="purchase.photos" />
+      <div class="photos-block">
+        <div class="photos-title">
+          <span>原始单据照片<template v-if="(purchase.photos || []).length">（{{ (purchase.photos || []).length }} 张）</template></span>
+          <el-button size="small" type="primary" @click="photoDialog = true">
+            {{ (purchase.photos || []).length ? '添加照片' : '上传原始单据照片' }}
+          </el-button>
+        </div>
+        <PhotoThumbs v-if="(purchase.photos || []).length" :value="purchase.photos" />
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
         <template #extra>
@@ -58,6 +63,9 @@
     </el-card>
 
     <PaymentDialog v-model="payDialog" :order="purchase" kind="payable" @saved="onPaySaved" />
+
+    <!-- 轻量补照片：仅更新本单 photos 字段 -->
+    <OrderPhotoDialog v-model="photoDialog" :order="purchase" @saved="onPhotosSaved" />
   </div>
 </template>
 
@@ -68,6 +76,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
+import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { payableOf, grossOf, paidSumOf, ensurePayments } from '../utils/account'
 import { lineDisplayName } from '../utils/catalog'
@@ -76,6 +85,7 @@ const route = useRoute()
 const purchases = ref([])
 const items = ref([])
 const payDialog = ref(false)
+const photoDialog = ref(false)
 const purchase = computed(() => purchases.value.find(p => p.id === route.params.id) || { id: route.params.id, supplier: '', date: '', total: 0, items: [] })
 
 // 应付(合计−优惠) 与 未付(应付−累计实付)，与全站统一规则一致
@@ -113,6 +123,24 @@ async function onPaySaved(updated) {
   ElMessage.success('已保存付款流水')
 }
 
+// 保存照片：仅合并 photos 字段，单据其他信息与付款流水不动
+async function onPhotosSaved(photos) {
+  const cur = purchase.value
+  const idx = purchases.value.findIndex(p => p.id === cur.id)
+  if (idx < 0) return
+  const origin = purchases.value[idx]
+  purchases.value[idx] = { ...origin, photos }
+  try {
+    await api.savePurchases(purchases.value)
+  } catch (e) {
+    purchases.value[idx] = origin
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
+  photoDialog.value = false
+  ElMessage.success('已更新单据照片')
+}
+
 onMounted(async () => {
   try {
     const [p, it] = await Promise.all([api.getPurchases(), api.getItems()])
@@ -126,7 +154,7 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; align-items: center; }
 .photos-block { margin-bottom: 12px; }
-.photos-title { font-weight: 600; margin-bottom: 6px; color: #409eff; }
+.photos-title { font-weight: 600; margin-bottom: 6px; color: #409eff; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pay-card { margin-top: 12px; }
 .debt { color: #f56c6c; }
 .zero { color: #67c23a; }
