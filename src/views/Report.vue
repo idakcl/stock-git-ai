@@ -637,12 +637,12 @@ onMounted(async () => {
 .trend-col { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; position: relative; cursor: pointer; }
 .trend-col:hover .trend-bar { filter: brightness(0.92); }
 .trend-col.active .trend-bar { filter: brightness(0.82); }
-.trend-val { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 10.5px; font-weight: 700; background: rgba(255, 255, 255, .92); padding: 0 3px; border-radius: 2px; z-index: 2; pointer-events: none; }
+.trend-val { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: var(--fs-mini); font-weight: 700; background: rgba(255, 255, 255, .92); padding: 0 3px; border-radius: 2px; z-index: 2; pointer-events: none; }
 .trend-bar { flex: 1; min-width: 0; border-radius: 2px 2px 0 0; background: #e6a23c; transition: height .2s; }
 .trend-bar.sale { background: #409eff; }
 .trend-bar.is-zero { height: 2px; background: #ebeef5; }
 .trend-labels { display: flex; gap: 3px; margin-top: 4px; }
-.trend-labels span { flex: 1; min-width: 0; text-align: center; font-size: 10px; color: #c0c4cc; white-space: nowrap; overflow: hidden; }
+.trend-labels span { flex: 1; min-width: 0; text-align: center; font-size: var(--fs-mini); color: var(--text-placeholder); white-space: nowrap; overflow: hidden; }
 .trend-labels span.active { color: #606266; font-weight: 700; }
 /* 汇总表排序切换 */
 .sort-group { display: inline-flex; align-items: center; gap: 6px; }

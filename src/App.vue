@@ -93,13 +93,38 @@ async function onLogout() {
 </script>
 
 <style>
+/* ---------- 设计变量：全站字体/间距/配色的唯一来源 ---------- */
+:root {
+  /* 字号四档：正文 14 / 表格 13 / 次要 12 / 辅助 11（不再出现零散数值） */
+  --fs-base: 14px;
+  --fs-table: 13px;
+  --fs-sub: 12px;
+  --fs-mini: 11px;
+  /* 间距：4px 栅格 */
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 12px;
+  --gap-lg: 16px;
+  --gap-xl: 24px;
+  /* 文字 / 线条 / 背景 */
+  --text-primary: #303133;
+  --text-regular: #606266;
+  --text-secondary: #909399;
+  --text-placeholder: #c0c4cc;
+  --border-color: #ebeef5;
+  --bg-page: #f5f7fa;
+  --bg-soft: #fafbfc;
+}
+
 /* ---------- 全局基础 ---------- */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
-  background: #f5f7fa;
-  color: #303133;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-size: var(--fs-base);
+  line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -183,7 +208,7 @@ body {
   border: 1px solid #ebeef5 !important;
   box-shadow: 0 1px 3px rgba(31, 45, 61, 0.04) !important;
 }
-.el-card + .el-card { margin-top: 14px; }
+.el-card + .el-card { margin-top: var(--gap-lg); }
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
@@ -193,8 +218,11 @@ body {
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 
 .table-wrap { overflow-x: auto; }
-.el-table { font-size: 13px; }
-.el-table th.el-table__cell { background: #fafbfc !important; color: #606266; font-weight: 600; }
+/* 表格统一：无论各页是否单独写了 size="small"，行高与字号都收敛到同一档 */
+.el-table { font-size: var(--fs-table); }
+.el-table td.el-table__cell { padding: 10px 0; }
+.el-table th.el-table__cell { background: var(--bg-soft) !important; color: var(--text-regular); font-weight: 600; font-size: var(--fs-table); }
+.el-table .cell { line-height: 1.5; }
 
 .link { color: #409eff; cursor: pointer; text-decoration: none; }
 .link:hover { text-decoration: underline; }

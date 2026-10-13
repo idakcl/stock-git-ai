@@ -110,7 +110,8 @@ const filtered = computed(() => (props.items || []).filter(i => matchText(
 )))
 
 const page = ref(1)
-const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / props.pageSize)))
+// pageSize 为 0 表示不分页：此时不能做除法（会得到 Infinity），页数固定为 1
+const pageCount = computed(() => (props.pageSize ? Math.max(1, Math.ceil(filtered.value.length / props.pageSize)) : 1))
 const pagedRows = computed(() => {
   if (!props.pageSize) return filtered.value
   const start = (page.value - 1) * props.pageSize

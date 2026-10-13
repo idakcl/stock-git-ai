@@ -75,6 +75,14 @@ function cachedGet(path) {
 
 function invalidate(path) { readCache.delete(path) }
 
+// 保存采购单/销售单时，服务端会同步重算派生数据（商品档案、库存、供应商链接）。
+// 这些路径必须一并失效，否则 15 秒缓存窗口内报表/看板/库存看到的还是旧成本、旧库存、旧历史价。
+function invalidateAfterOrderSave() {
+  invalidate('/items')
+  invalidate('/stock')
+  invalidate('/suppliers')
+}
+
 export const api = {
   login: (password, remember = false) =>
     request('/login', { method: 'POST', body: JSON.stringify({ password, remember }) }),
@@ -103,12 +111,14 @@ export const api = {
   savePurchases: async (purchases) => {
     const r = await request('/purchases', { method: 'POST', body: JSON.stringify({ purchases }) })
     invalidate('/purchases')
+    invalidateAfterOrderSave()
     return r
   },
   getSales: () => cachedGet('/sales'),
   saveSales: async (sales) => {
     const r = await request('/sales', { method: 'POST', body: JSON.stringify({ sales }) })
     invalidate('/sales')
+    invalidateAfterOrderSave()
     return r
   },
   getStock: () => cachedGet('/stock'),

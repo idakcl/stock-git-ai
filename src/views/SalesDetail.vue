@@ -120,7 +120,16 @@ const detailItems = computed(() => {
 async function onPaySaved(updated) {
   const idx = sales.value.findIndex(s => s.id === updated.id)
   if (idx >= 0) sales.value[idx] = updated
-  await api.saveSales(sales.value)
+  try {
+    await api.saveSales(sales.value)
+  } catch (e) {
+    // 保存失败要回滚并明确报错：否则界面显示已收款、线上其实没变，且弹窗不关可重复提交
+    const fresh = await api.getSales().catch(() => null)
+    if (fresh) sales.value = fresh
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚`)
+    return
+  }
+  payDialog.value = false
   ElMessage.success('已保存收款流水')
 }
 

@@ -89,7 +89,16 @@ export function derive(items, suppliers, purchases, sales) {
   // 历史由单据「重建」（幂等），不从已有 history 追加
   const purchaseHist = {}
   const saleHist = {}
-  for (const p of (purchases || [])) {
+  // 数值清洗：非数字（空串/乱码）统一归 0，金额统一保留 2 位，
+  // 消除 5×1.91=9.549999999999999 这类浮点残留在数据仓里沉淀
+  const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
+  const money2 = (v) => Math.round(num(v) * 100) / 100
+  // 按日期升序遍历：保证商品成本价/售价取自「日期最新」的单据，
+  // 而不是数组里的最后一条（数组顺序取决于录入先后，未必与日期一致）
+  const byDateAsc = (a, b) => String(a.date || '').localeCompare(String(b.date || '')) || String(a.id || '').localeCompare(String(b.id || ''))
+  const orderedPurchases = [...(purchases || [])].sort(byDateAsc)
+  const orderedSales = [...(sales || [])].sort(byDateAsc)
+  for (const p of orderedPurchases) {
     const supName = p.supplier || ''
     let sCode = nameToCode[supName]
     if (!sCode) { const s = ensureSupplier(supName); sCode = s.code; nameToCode[supName] = sCode }
@@ -99,20 +108,20 @@ export function derive(items, suppliers, purchases, sales) {
       ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
         id: p.id,
         date: p.date, supplier: sCode, supplierName: supName,
-        qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
+        qty: num(l.qty), price: money2(l.price), total: money2(l.total)
       })
-      if (l.price != null) it.cost = Number(l.price)
+      if (l.price != null && Number.isFinite(Number(l.price))) it.cost = money2(l.price)
     }
   }
-  for (const s of (sales || [])) {
+  for (const s of orderedSales) {
     for (const l of (s.items || [])) {
       const it = ensureItem(l.code, l.name)
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
         id: s.id,
         date: s.date, customer: s.customer || '',
-        qty: Number(l.qty || 0), price: Number(l.price || 0), total: Number(l.total || 0)
+        qty: num(l.qty), price: money2(l.price), total: money2(l.total)
       })
-      if (l.price != null) it.price = Number(l.price)
+      if (l.price != null && Number.isFinite(Number(l.price))) it.price = money2(l.price)
     }
   }
   // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）
@@ -137,19 +146,24 @@ export function derive(items, suppliers, purchases, sales) {
 export function rebuildStock(purchases, sales, items) {
   const stock = {}
   const costByCode = {}
+  // 缺编码或数量非数字的行无法归属到具体商品：直接跳过。
+  // 否则会全部归到 "undefined" 这个键下，库存与成本全部算错（且 NaN 序列化成 null 污染后续计算）
+  const num2 = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
   for (const p of (purchases || [])) {
     for (const l of (p.items || [])) {
       const code = l.code
+      if (!code) continue
       stock[code] = stock[code] || { qty: 0, cost: 0 }
-      stock[code].qty += Number(l.qty || 0)
-      if (l.price != null) costByCode[code] = Number(l.price)
+      stock[code].qty += num2(l.qty)
+      if (l.price != null && Number.isFinite(Number(l.price))) costByCode[code] = Number(l.price)
     }
   }
   for (const s of (sales || [])) {
     for (const l of (s.items || [])) {
       const code = l.code
+      if (!code) continue
       stock[code] = stock[code] || { qty: 0, cost: 0 }
-      stock[code].qty -= Number(l.qty || 0)
+      stock[code].qty -= num2(l.qty)
     }
   }
   const itemCost = {}
@@ -168,6 +182,12 @@ async function syncDerived(env, { purchases, sales }) {
   const p = purchases != null ? purchases : curP
   const s = sales != null ? sales : curS
   const { items: newItems, suppliers: newSuppliers } = derive(items, suppliers, p, s)
+  // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
+  // 一旦出现，说明上游读取异常（例如 GitHub 对大文件返回空内容），
+  // 此时宁可报错中止，也不能把空数组写回去覆盖真实数据。
+  if (items.length && !newItems.length) {
+    throw new Error('派生结果为空，疑似上游数据读取异常，已中止以避免覆盖商品档案')
+  }
   const stock = rebuildStock(p, s, newItems)
   // 三个文件顺序写入，无跨文件事务：中途失败时前面的文件已落库。
   // derive 是纯函数（由单据重建），重新保存一次采购单/销售单即可自动修复，故失败时给出明确修复指引。
@@ -226,18 +246,29 @@ export async function handleApi(req, url, env) {
       const form = await req.formData()
       const file = form.get('file')
       if (!file) return json(req, env, { error: '缺少文件' }, 400)
+      // 限制大小与类型：避免超大文件拖垮 Worker、避免非图片内容被塞进图床
+      const MAX_UPLOAD = 10 * 1024 * 1024
+      if (typeof file.size === 'number' && file.size > MAX_UPLOAD) {
+        return json(req, env, { error: '图片不能超过 10MB' }, 400)
+      }
+      if (file.type && !/^image\//i.test(file.type)) {
+        return json(req, env, { error: '只允许上传图片文件' }, 400)
+      }
       const fd = new FormData()
       fd.append('file', file)
       const upstream = `https://netpan.1234.nyc.mn/upload?authCode=${encodeURIComponent(env.IMGBED_AUTH_CODE)}&returnFormat=full`
-      const res = await fetch(upstream, { method: 'POST', body: fd })
-      const data = await res.json(req, env, ).catch(() => ({}))
+      const res = await fetch(upstream, { method: 'POST', body: fd, signal: AbortSignal.timeout(25000) })
+      const data = await res.json().catch(() => ({}))
       const src = Array.isArray(data) ? (data[0] && data[0].src) : data.src
-      if (!src) return json(req, env, { error: '图床上传失败' }, 502)
+      // 校验返回值：只接受 http(s) 链接，防止异常内容被当作图片地址存进单据
+      if (!src || typeof src !== 'string' || !/^https?:\/\//i.test(src)) {
+        return json(req, env, { error: '图床上传失败' }, 502)
+      }
       return json(req, env, { url: src })
     }
 
     if (method === 'POST') {
-      const body = await req.json(req, env, )
+      const body = await req.json()
 
       if (path === '/items') {
         await writeJSON(env, 'items.json', body.items || [], 'update items')
@@ -272,27 +303,42 @@ export async function handleApi(req, url, env) {
         const text = typeof body.text === 'string' ? body.text : ''
         if (!text.trim()) return json(req, env, { error: '导入内容为空' }, 400)
 
+        // 体积与条数上限：避免超大文本拖垮 Worker（CPU 超时/OOM），
+        // 也避免一次脏数据把整个数据仓覆盖
+        if (text.length > 1024 * 1024) {
+          return json(req, env, { error: '导入内容超过 1MB，请分批导入' }, 400)
+        }
+
         const parsed = extractData(text)
         const results = []
         for (const key of ['items', 'suppliers', 'customers', 'purchases', 'sales']) {
-          if (parsed[key]?.length) {
-            await writeJSON(env, `${key}.json`, parsed[key], `ai import ${key}`)
-            results.push({ key, count: parsed[key].length })
+          const arr = parsed[key]
+          if (!Array.isArray(arr) || !arr.length) continue
+          if (arr.length > 5000) {
+            return json(req, env, { error: `${key} 超过 5000 条上限，请分批导入` }, 400)
           }
+          if (arr.some(x => !x || typeof x !== 'object' || Array.isArray(x))) {
+            return json(req, env, { error: `${key} 中存在非对象记录，已中止导入` }, 400)
+          }
+          await writeJSON(env, `${key}.json`, arr, `ai import ${key}`)
+          results.push({ key, count: arr.length })
         }
-        if (Object.keys(parsed.stock).length) {
-          await writeJSON(env, 'stock.json', parsed.stock, 'ai import stock')
-          results.push({ key: 'stock', count: Object.keys(parsed.stock).length })
-        }
+        // 库存是采购/销售的派生数据，导入时不再直接写入（与 /stock 禁止直写的策略一致），
+        // 由下面的 syncDerived 按单据重建，避免与单据脱节产生漂移
 
-        if ((parsed.purchases && parsed.purchases.length) || (parsed.sales && parsed.sales.length)) {
-          await syncDerived(env, { purchases: parsed.purchases, sales: parsed.sales })
+        // 关键：只把「本次确实导入了」的单据类型传给 syncDerived。
+        // 若把空数组传进去，会用空销售重算 → 库存只加不减、商品销售历史被清空。
+        const pImport = (parsed.purchases && parsed.purchases.length) ? parsed.purchases : undefined
+        const sImport = (parsed.sales && parsed.sales.length) ? parsed.sales : undefined
+        if (pImport || sImport) {
+          await syncDerived(env, { purchases: pImport, sales: sImport })
           results.push({ key: 'derived', count: 3 })
         }
 
         const logs = await readJSON(env, 'logs.json')
         logs.push({ time: new Date().toISOString(), source: 'ai', results })
-        await writeJSON(env, 'logs.json', logs, 'append log')
+        // 只保留最近 200 条：日志无上限增长会让文件突破 GitHub 的读取上限
+        await writeJSON(env, 'logs.json', logs.slice(-200), 'append log')
 
         return json(req, env, { ok: true, results })
       }

@@ -293,7 +293,9 @@ onMounted(async () => {
     const warnMap = {}
     ;(itemList || []).forEach(i => { warnMap[i.code] = i.warning || 0 })
     lowStock.value = Object.entries(stockObj)
-      .filter(([, v]) => (v.qty || 0) <= (warnMap[v.code] || 0))
+      // 注意：库存对象 {qty,cost} 里没有 code，阈值必须用 entries 的 key 取；
+      // 用 v.code 会恒为 undefined → 阈值变 0 → 设了预警值的商品全部不显示
+      .filter(([code, v]) => (v.qty || 0) <= (warnMap[code] || 0))
       .map(([code, v]) => ({ ...v, code, stock: v.qty, warning: warnMap[code] || 0 }))
   } catch (e) {
     console.error(e)

@@ -140,7 +140,7 @@
         <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
         <span class="calc-hint" style="margin-left:12px">应付 {{ payableTotal.toFixed(2) }} · 未付 {{ unpaidAmount.toFixed(2) }}</span>
       </div>
-      <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存入库</el-button></template>
+      <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存入库</el-button></template>
     </el-dialog>
 
     <PaymentDialog v-model="payDialog" :order="payOrder" kind="payable" @saved="onPaySaved" />
@@ -172,6 +172,8 @@ const dateEnd = ref('')
 const page = ref(1)
 const itemOptions = ref([])
 const dialog = ref(false)
+// 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
+const saving = ref(false)
 const editingId = ref('')
 const form = reactive({ supplier:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, lines:[] })
 const photoUpload = ref(null)
@@ -282,7 +284,7 @@ function onItemChange(row) {
   }
 }
 
-async function save() {
+async function doSave() {
   if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
   if (!form.supplier) return ElMessage.warning('请填写供应商')
   if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning('请完整填写采购明细')
@@ -342,6 +344,17 @@ async function save() {
   dialog.value = false
   editingId.value = ''
   ElMessage.success(isEdit ? '已保存修改' : '采购入库成功')
+}
+
+// 保存入口：加锁 + 按钮 loading，双击只会执行一次
+async function save() {
+  if (saving.value) return
+  saving.value = true
+  try {
+    await doSave()
+  } finally {
+    saving.value = false
+  }
 }
 
 // 打开某单的付款流水弹窗
@@ -445,6 +458,8 @@ async function remove(row) {
   const [p, it] = await loadAll()
   list.value = p
   itemOptions.value = it
+  // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
+  if (page.value > pageCount.value) page.value = pageCount.value
   ElMessage.success('已删除')
 }
 </script>

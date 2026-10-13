@@ -24,7 +24,24 @@ export async function readJSON(env, file) {
   let content = ''
   if (data.encoding === 'base64') content = b64d(data.content)
   else if (typeof data.content === 'string') content = data.content
-  try { return JSON.parse(content || '[]') } catch { return [] }
+
+  // GitHub /contents 对大于 1MB 的文件只返回 sha/size，content 为空字符串。
+  // 若此时静默返回 []，下一次 writeJSON 就会用空数组把整份数据仓覆盖掉 —— 历史数据全丢。
+  // 因此先改用 git blob API 取真实内容；仍取不到就抛错，宁可报错也绝不静默变空。
+  if (!content && data.sha && data.size > 0) {
+    const blob = await gh(`/git/blobs/${data.sha}`, env, 'GET')
+    if (blob && blob.encoding === 'base64' && blob.content) content = b64d(blob.content)
+  }
+  if (!content) {
+    // 只有文件确实为空（size 为 0，如新建仓库）才允许当作空数组
+    if (!data.size) return []
+    throw new Error(`读取 ${file} 失败：GitHub 返回空内容但文件有 ${data.size} 字节，已中止以避免覆盖数据`)
+  }
+  try {
+    return JSON.parse(content)
+  } catch (e) {
+    throw new Error(`读取 ${file} 失败：内容不是合法 JSON（${e.message}），已中止以避免覆盖数据`)
+  }
 }
 
 export async function writeJSON(env, file, data, message) {
