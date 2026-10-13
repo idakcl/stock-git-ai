@@ -160,17 +160,19 @@
       </el-table-v2>
       </div>
       <div class="pager-row">
-        <el-pagination
-          v-model:current-page="salePage"
-          :page-size="saleSize"
-          :page-sizes="[60, 100, 200]"
-          :total="filteredSalesByItem.length"
-          layout="total, sizes, prev, pager, next"
-          background
-        />
-        <el-button text type="primary" @click="saleAll = !saleAll">
-          {{ saleAll ? '恢复分页' : `展示全部 ${filteredSalesByItem.length} 项` }}
-        </el-button>
+        <div class="pager-nav">
+          <el-button size="default" :disabled="salePage <= 1 || saleAll" @click="salePage--">‹ 上一页</el-button>
+          <span class="pager-pos">{{ saleAll ? `全部 ${filteredSalesByItem.length} 项` : `第 ${salePage} / ${salePageCount} 页` }}</span>
+          <el-button size="default" :disabled="salePage >= salePageCount || saleAll" @click="salePage++">下一页 ›</el-button>
+          <el-select v-model="saleSize" size="default" class="size-select">
+            <el-option :value="60" label="60 条/页" />
+            <el-option :value="100" label="100 条/页" />
+            <el-option :value="200" label="200 条/页" />
+          </el-select>
+          <el-button text type="primary" @click="saleAll = !saleAll">
+            {{ saleAll ? '恢复分页' : '显示全部' }}
+          </el-button>
+        </div>
       </div>
       <el-empty v-if="!filteredSalesByItem.length" description="暂无销售数据" />
     </el-card>
@@ -218,17 +220,19 @@
       </el-table-v2>
       </div>
       <div class="pager-row">
-        <el-pagination
-          v-model:current-page="purchasePage"
-          :page-size="purchaseSize"
-          :page-sizes="[60, 100, 200]"
-          :total="filteredPurchasesByItem.length"
-          layout="total, sizes, prev, pager, next"
-          background
-        />
-        <el-button text type="primary" @click="purchaseAll = !purchaseAll">
-          {{ purchaseAll ? '恢复分页' : `展示全部 ${filteredPurchasesByItem.length} 项` }}
-        </el-button>
+        <div class="pager-nav">
+          <el-button size="default" :disabled="purchasePage <= 1 || purchaseAll" @click="purchasePage--">‹ 上一页</el-button>
+          <span class="pager-pos">{{ purchaseAll ? `全部 ${filteredPurchasesByItem.length} 项` : `第 ${purchasePage} / ${purchasePageCount} 页` }}</span>
+          <el-button size="default" :disabled="purchasePage >= purchasePageCount || purchaseAll" @click="purchasePage++">下一页 ›</el-button>
+          <el-select v-model="purchaseSize" size="default" class="size-select">
+            <el-option :value="60" label="60 条/页" />
+            <el-option :value="100" label="100 条/页" />
+            <el-option :value="200" label="200 条/页" />
+          </el-select>
+          <el-button text type="primary" @click="purchaseAll = !purchaseAll">
+            {{ purchaseAll ? '恢复分页' : '显示全部' }}
+          </el-button>
+        </div>
       </div>
       <el-empty v-if="!filteredPurchasesByItem.length" description="暂无采购数据" />
     </el-card>
@@ -410,8 +414,9 @@ const pagedPurchasesByItem = computed(() => purchaseAll.value
   ? filteredPurchasesByItem.value
   : filteredPurchasesByItem.value.slice((purchasePage.value - 1) * purchaseSize.value, purchasePage.value * purchaseSize.value))
 const purchasePageCount = computed(() => Math.max(1, Math.ceil(filteredPurchasesByItem.value.length / purchaseSize.value)))
-// 筛选条件变化时回到第一页
+// 筛选条件或每页条数变化时回到第一页，避免停在空白页
 watch([filteredSalesByItem, filteredPurchasesByItem], () => { salePage.value = 1; purchasePage.value = 1 })
+watch([saleSize, purchaseSize], () => { salePage.value = 1; purchasePage.value = 1 })
 
 // ---------- 虚拟滚动表格：列定义 / 高度 / 宽度自适应 ----------
 const saleWrap = ref(null)
@@ -544,6 +549,9 @@ onMounted(async () => {
 .pager-info { color: #909399; font-size: 12px; margin-bottom: 6px; }
 .pager-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .pager-row :deep(.el-pagination) { padding: 0; }
+.pager-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pager-pos { color: #606266; font-size: 13px; min-width: 96px; text-align: center; font-variant-numeric: tabular-nums; }
+.size-select { width: 116px; }
 /* 虚拟滚动表格：外观对齐普通表格 */
 .v2-table { border: 1px solid #ebeef5; border-radius: 6px; overflow: hidden; margin-top: 8px; }
 .v2-table :deep(.el-table-v2__header-row) { background: #fafbfc; font-weight: 600; color: #606266; }
