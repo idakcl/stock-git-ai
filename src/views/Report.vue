@@ -139,14 +139,25 @@
         />
       </div>
       <div class="pager-info">共 {{ filteredSalesByItem.length }} 项{{ saleAll ? '（当前展示全部）' : ` · 第 ${salePage}/${salePageCount} 页，每页 ${saleSize} 条` }}</div>
-      <div class="table-wrap">
-      <el-table :data="pagedSalesByItem" stripe style="margin-top:8px" show-summary :summary-method="itemSummary">
-        <el-table-column prop="name" label="商品" />
-        <el-table-column prop="qty" label="销量" width="100" />
-        <el-table-column prop="amount" label="金额" width="140">
-          <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wrap" ref="saleWrap">
+      <el-table-v2
+        v-if="saleWidth"
+        :columns="saleColumns"
+        :data="pagedSalesByItem"
+        :width="saleWidth"
+        :height="saleHeight"
+        :row-height="36"
+        fixed
+        class="v2-table"
+      >
+        <template #footer>
+          <div class="v2-footer">
+            <span class="f-flex">合计（全部 {{ filteredSalesByItem.length }} 项）</span>
+            <span class="f-num">{{ saleFoot.qty }}</span>
+            <span class="f-num strong">{{ saleFoot.amount }}</span>
+          </div>
+        </template>
+      </el-table-v2>
       </div>
       <div class="pager-row">
         <el-pagination
@@ -183,18 +194,28 @@
         />
       </div>
       <div class="pager-info">共 {{ filteredPurchasesByItem.length }} 项{{ purchaseAll ? '（当前展示全部）' : ` · 第 ${purchasePage}/${purchasePageCount} 页，每页 ${purchaseSize} 条` }}</div>
-      <div class="table-wrap">
-      <el-table :data="pagedPurchasesByItem" stripe style="margin-top:8px" show-summary :summary-method="purchaseItemSummary">
-        <el-table-column prop="name" label="商品" />
-        <el-table-column prop="orders" label="采购单数" width="110" />
-        <el-table-column prop="qty" label="采购数量" width="110" />
-        <el-table-column prop="avgPrice" label="平均进价" width="120">
-          <template #default="{ row }">{{ row.qty > 0 ? (row.amount / row.qty).toFixed(2) : '—' }}</template>
-        </el-table-column>
-        <el-table-column prop="amount" label="采购金额" width="140">
-          <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
-        </el-table-column>
-      </el-table>
+      <div class="table-wrap" ref="purchaseWrap">
+      <!-- 虚拟滚动表格：只渲染可视区域的行，1228 行也保持流畅 -->
+      <el-table-v2
+        v-if="purchaseWidth"
+        :columns="purchaseColumns"
+        :data="pagedPurchasesByItem"
+        :width="purchaseWidth"
+        :height="purchaseHeight"
+        :row-height="36"
+        fixed
+        class="v2-table"
+      >
+        <template #footer>
+          <div class="v2-footer">
+            <span class="f-flex">合计（全部 {{ filteredPurchasesByItem.length }} 项）</span>
+            <span class="f-num">{{ purchaseFoot.orders }}</span>
+            <span class="f-num">{{ purchaseFoot.qty }}</span>
+            <span class="f-num">{{ purchaseFoot.avg }}</span>
+            <span class="f-num strong">{{ purchaseFoot.amount }}</span>
+          </div>
+        </template>
+      </el-table-v2>
       </div>
       <div class="pager-row">
         <el-pagination
@@ -215,7 +236,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { aggregateByItem } from '../utils/catalog'
@@ -392,6 +413,55 @@ const purchasePageCount = computed(() => Math.max(1, Math.ceil(filteredPurchases
 // 筛选条件变化时回到第一页
 watch([filteredSalesByItem, filteredPurchasesByItem], () => { salePage.value = 1; purchasePage.value = 1 })
 
+// ---------- 虚拟滚动表格：列定义 / 高度 / 宽度自适应 ----------
+const saleWrap = ref(null)
+const purchaseWrap = ref(null)
+const saleWidth = ref(0)
+const purchaseWidth = ref(0)
+// 行数少时表格自适应变矮，行数多时封顶并启用虚拟滚动（只渲染可视行）
+const tableHeight = (n) => Math.min(520, Math.max(120, n * 36 + 44))
+const saleHeight = computed(() => tableHeight(pagedSalesByItem.value.length))
+const purchaseHeight = computed(() => tableHeight(pagedPurchasesByItem.value.length))
+
+const fmtMoney = n => Number(n || 0).toFixed(2)
+const saleColumns = [
+  { key: 'name', dataKey: 'name', title: '商品', flexGrow: 1, width: 200 },
+  { key: 'qty', dataKey: 'qty', title: '销量', width: 100, align: 'right' },
+  { key: 'amount', dataKey: 'amount', title: '金额', width: 140, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) }
+]
+const purchaseColumns = [
+  { key: 'name', dataKey: 'name', title: '商品', flexGrow: 1, width: 220 },
+  { key: 'orders', dataKey: 'orders', title: '采购单数', width: 100, align: 'right' },
+  { key: 'qty', dataKey: 'qty', title: '采购数量', width: 100, align: 'right' },
+  { key: 'avgPrice', dataKey: 'avgPrice', title: '平均进价', width: 110, align: 'right',
+    cellRenderer: ({ rowData }) => h('span', rowData.qty > 0 ? (rowData.amount / rowData.qty).toFixed(2) : '—') },
+  { key: 'amount', dataKey: 'amount', title: '采购金额', width: 130, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) }
+]
+
+// 合计行：始终基于全部筛选结果，不随分页/虚拟滚动变化
+const saleFoot = computed(() => {
+  const rows = filteredSalesByItem.value
+  return { qty: rows.reduce((s, r) => s + Number(r.qty || 0), 0), amount: money(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }
+})
+const purchaseFoot = computed(() => {
+  const rows = filteredPurchasesByItem.value
+  const orders = rows.reduce((s, r) => s + Number(r.orders || 0), 0)
+  const qty = rows.reduce((s, r) => s + Number(r.qty || 0), 0)
+  const amount = rows.reduce((s, r) => s + Number(r.amount || 0), 0)
+  return { orders, qty, amount: fmtMoney(amount), avg: qty > 0 ? (amount / qty).toFixed(2) : '—' }
+})
+
+// 虚拟表格需要显式宽度：按容器实测，随窗口变化更新
+function measure() {
+  if (saleWrap.value) saleWidth.value = saleWrap.value.clientWidth || 0
+  if (purchaseWrap.value) purchaseWidth.value = purchaseWrap.value.clientWidth || 0
+}
+onMounted(() => {
+  measure()
+  window.addEventListener('resize', measure)
+})
+onUnmounted(() => window.removeEventListener('resize', measure))
+
 // ---------- 导出/打印：输出当前筛选后的全部数据（不受分页限制） ----------
 const saleExportColumns = [
   { label: '商品', prop: 'name' },
@@ -474,6 +544,17 @@ onMounted(async () => {
 .pager-info { color: #909399; font-size: 12px; margin-bottom: 6px; }
 .pager-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .pager-row :deep(.el-pagination) { padding: 0; }
+/* 虚拟滚动表格：外观对齐普通表格 */
+.v2-table { border: 1px solid #ebeef5; border-radius: 6px; overflow: hidden; margin-top: 8px; }
+.v2-table :deep(.el-table-v2__header-row) { background: #fafbfc; font-weight: 600; color: #606266; }
+.v2-table :deep(.el-table-v2__row) { font-size: 13px; }
+.v2-table :deep(.el-table-v2__row:hover) { background: #f5f7fa; }
+.v2-table :deep(.el-table-v2__footer) { background: #fafbfc; font-size: 13px; }
+.v2-footer { display: flex; align-items: center; width: 100%; height: 100%; padding: 0 12px; font-size: 13px; color: #606266; }
+.v2-footer .f-flex { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.v2-footer .f-num { flex: none; text-align: right; padding-right: 12px; }
+.v2-footer .f-num:nth-of-type(1) { width: 100px; }
+.v2-footer .strong { font-weight: 700; color: #303133; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
 .stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
