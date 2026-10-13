@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div v-loading="loading">
     <el-card>
       <template #header>
         <div class="card-header">
@@ -84,6 +84,8 @@ import { lineDisplayName } from '../utils/catalog'
 const route = useRoute()
 const sales = ref([])
 const items = ref([])
+// 数据加载中：全量单据/商品拉取期间显示遮罩，避免白屏被误判为"点了没反应"
+const loading = ref(true)
 const payDialog = ref(false)
 const photoDialog = ref(false)
 const sale = computed(() => sales.value.find(s => s.id === route.params.id) || { id: route.params.id, customer: '', date: '', total: 0, items: [] })
@@ -146,6 +148,7 @@ onMounted(async () => {
     sales.value = s
     items.value = it
   } catch (e) { sales.value = []; items.value = [] }
+  finally { loading.value = false }
 })
 </script>
 
