@@ -13,7 +13,7 @@
           <template #default="{ row }">
             <div class="history">
               <div class="history-title">历史采购价</div>
-              <el-table :data="row.purchaseHistory || []" size="small" border>
+              <el-table :data="sortedHistory(row.purchaseHistory)" size="small" border>
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="采购单" width="160">
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
@@ -26,7 +26,7 @@
                 <el-table-column prop="total" label="金额" width="100" />
               </el-table>
               <div class="history-title" style="margin-top:12px">历史销售价</div>
-              <el-table :data="row.saleHistory || []" size="small" border>
+              <el-table :data="sortedHistory(row.saleHistory)" size="small" border>
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="销售单" width="160">
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
@@ -120,6 +120,10 @@ const pagedRows = computed(() => {
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
+// 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）。
+// 后端 derive 已排序，这里前端兜底：存量数据在重建前也按时间展示
+const byTimeDesc = (a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id || '').localeCompare(String(a.id || ''))
+const sortedHistory = (arr) => [...(arr || [])].sort(byTimeDesc)
 // 供应商列显示：按名称去重后再拼接（档案中存在同名不同码的重复建档），
 // 避免同一家供应商在商品行里重复出现、把列撑得过长
 // 注意：supplierMap 是 computed ref，在 script 函数中须用 .value 取值

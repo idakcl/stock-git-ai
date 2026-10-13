@@ -115,6 +115,13 @@ export function derive(items, suppliers, purchases, sales) {
       if (l.price != null) it.price = Number(l.price)
     }
   }
+  // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）
+  const byTimeDesc = (a, b) => {
+    const d = String(b.date || '').localeCompare(String(a.date || ''))
+    return d || String(b.id || '').localeCompare(String(a.id || ''))
+  }
+  for (const k in purchaseHist) purchaseHist[k].sort(byTimeDesc)
+  for (const k in saleHist) saleHist[k].sort(byTimeDesc)
   for (const it of items) {
     it.purchaseHistory = purchaseHist[it.code] || []
     it.saleHistory = saleHist[it.code] || []
