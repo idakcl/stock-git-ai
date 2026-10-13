@@ -18,7 +18,7 @@
                 <el-table-column label="采购单" width="160">
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
-                <el-table-column label="供应商" min-width="160">
+                <el-table-column label="供应商" min-width="160" show-overflow-tooltip>
                   <template #default="{ row: h }">{{ h.supplierName || (supplierMap[h.supplier] || h.supplier || '') }}</template>
                 </el-table-column>
                 <el-table-column prop="qty" label="数量" width="80" />
@@ -31,7 +31,7 @@
                 <el-table-column label="销售单" width="160">
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
-                <el-table-column prop="customer" label="客户" min-width="160" />
+                <el-table-column prop="customer" label="客户" min-width="160" show-overflow-tooltip />
                 <el-table-column prop="qty" label="数量" width="80" />
                 <el-table-column prop="price" label="单价" width="90" />
                 <el-table-column prop="total" label="金额" width="100" />
@@ -142,4 +142,6 @@ onMounted(async () => {
 /* 展开区与商品行保持同一字号字重：标题不再加粗变色，避免折叠内容显得比商品行大 */
 .history { padding: 8px 16px; font-size: 13px; color: #606266; }
 .history-title { font-weight: 400; margin-bottom: 6px; color: #303133; }
+/* 内表显式钉死与商品行相同的字号：EP small 默认 12px，防止样式顺序变化时内表字号漂移 */
+.history :deep(.el-table) { font-size: 13px; }
 </style>
