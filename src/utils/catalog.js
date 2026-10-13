@@ -33,22 +33,25 @@ export function withCurrentNames(order, items) {
 
 // 按商品汇总单据明细：按编码分组（商品改名不裂行），显示主数据当前名
 // withOrders: 是否统计「覆盖单数」（同一单内同一编码只计一次）
+// lastDate: 该商品在筛选范围内最近一次出现的单据日期（供报表按时间排序）
 export function aggregateByItem(orders, items, { withOrders = false } = {}) {
   const nameMap = itemNameMap(items)
   const agg = {}
   for (const o of (orders || [])) {
     const seen = new Set()
+    const oDate = o.date || ''
     for (const i of (o.items || [])) {
       const key = i.code || i.name || ''
       if (!agg[key]) {
         agg[key] = withOrders
-          ? { code: i.code || '', name: lineDisplayName(i, nameMap), orders: 0, qty: 0, amount: 0 }
-          : { code: i.code || '', name: lineDisplayName(i, nameMap), qty: 0, amount: 0 }
+          ? { code: i.code || '', name: lineDisplayName(i, nameMap), orders: 0, qty: 0, amount: 0, lastDate: '' }
+          : { code: i.code || '', name: lineDisplayName(i, nameMap), qty: 0, amount: 0, lastDate: '' }
       }
       const g = agg[key]
       if (withOrders && !seen.has(key)) { g.orders += 1; seen.add(key) }
       g.qty += Number(i.qty || 0)
       g.amount += Number(i.total || 0)
+      if (oDate && oDate > g.lastDate) g.lastDate = oDate
     }
   }
   return Object.values(agg).sort((a, b) => b.amount - a.amount)

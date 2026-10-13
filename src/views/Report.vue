@@ -47,24 +47,35 @@
           <div class="stat-sub">共 {{ stats.payableCount }} 单 · 未付清 {{ stats.payableOpen }} 单</div>
         </div>
       </div>
-      <!-- 迷你趋势条：按月采购金额，随本分区筛选联动 -->
+      <!-- 月度趋势条：按月采购金额，随本分区筛选联动；点击柱子显示当月数额 -->
       <div class="trend-block">
         <div class="trend-head">
           <span class="trend-title">月度采购趋势</span>
-          <span class="trend-caption">{{ trendMonths[0] }} ~ {{ trendMonths[trendMonths.length - 1] }} · 合计 ¥{{ purchaseTrendTotal }}</span>
+          <span class="trend-caption">
+            <template v-if="purchaseSelected">
+              {{ purchaseSelected.month }} 采购 <b class="trend-strong">¥{{ fmtAmt(purchaseSelected.amount) }}</b> · {{ purchaseSelected.orders }} 单
+              <el-button text type="primary" size="small" @click="purchaseSelectedMonth = ''">取消</el-button>
+            </template>
+            <template v-else>
+              {{ trendMonths[0] }} ~ {{ trendMonths[trendMonths.length - 1] }} · 合计 ¥{{ purchaseTrendTotal }} · 点击柱子查看当月数额
+            </template>
+          </span>
         </div>
         <div class="trend-bars">
           <div
             v-for="b in purchaseTrend"
             :key="b.month"
-            class="trend-bar"
-            :class="{ 'is-zero': b.amount <= 0 }"
-            :style="b.amount > 0 ? { height: Math.max(6, b.pct) + '%' } : {}"
-            :title="`${b.month} 采购 ¥${b.amount.toFixed(2)}`"
-          />
+            class="trend-col"
+            :class="{ active: purchaseSelectedMonth === b.month }"
+            :title="`${b.month} 采购 ¥${fmtAmt(b.amount)} · ${b.orders} 单`"
+            @click="togglePurchaseMonth(b.month)"
+          >
+            <span v-if="purchaseSelectedMonth === b.month" class="trend-val" :style="trendValStyle(b, 'purchase')">¥{{ fmtAmt(b.amount) }}</span>
+            <div class="trend-bar" :class="{ 'is-zero': b.amount <= 0 }" :style="b.amount > 0 ? { height: Math.max(6, b.pct) + '%' } : {}" />
+          </div>
         </div>
         <div class="trend-labels">
-          <span v-for="b in purchaseTrend" :key="b.month">{{ b.month.slice(5) }}月</span>
+          <span v-for="b in purchaseTrend" :key="b.month" :class="{ active: purchaseSelectedMonth === b.month }">{{ b.month.slice(5) }}月</span>
         </div>
       </div>
     </el-card>
@@ -98,24 +109,35 @@
           <div class="stat-sub">共 {{ stats.receivableCount }} 单 · 未收清 {{ stats.receivableOpen }} 单</div>
         </div>
       </div>
-      <!-- 迷你趋势条：按月销售金额，随本分区筛选联动 -->
+      <!-- 月度趋势条：按月销售金额，随本分区筛选联动；点击柱子显示当月数额 -->
       <div class="trend-block">
         <div class="trend-head">
           <span class="trend-title">月度销售趋势</span>
-          <span class="trend-caption">{{ trendMonths[0] }} ~ {{ trendMonths[trendMonths.length - 1] }} · 合计 ¥{{ saleTrendTotal }}</span>
+          <span class="trend-caption">
+            <template v-if="saleSelected">
+              {{ saleSelected.month }} 销售 <b class="trend-strong">¥{{ fmtAmt(saleSelected.amount) }}</b> · {{ saleSelected.orders }} 单
+              <el-button text type="primary" size="small" @click="saleSelectedMonth = ''">取消</el-button>
+            </template>
+            <template v-else>
+              {{ trendMonths[0] }} ~ {{ trendMonths[trendMonths.length - 1] }} · 合计 ¥{{ saleTrendTotal }} · 点击柱子查看当月数额
+            </template>
+          </span>
         </div>
         <div class="trend-bars">
           <div
             v-for="b in saleTrend"
             :key="b.month"
-            class="trend-bar sale"
-            :class="{ 'is-zero': b.amount <= 0 }"
-            :style="b.amount > 0 ? { height: Math.max(6, b.pct) + '%' } : {}"
-            :title="`${b.month} 销售 ¥${b.amount.toFixed(2)}`"
-          />
+            class="trend-col"
+            :class="{ active: saleSelectedMonth === b.month }"
+            :title="`${b.month} 销售 ¥${fmtAmt(b.amount)} · ${b.orders} 单`"
+            @click="toggleSaleMonth(b.month)"
+          >
+            <span v-if="saleSelectedMonth === b.month" class="trend-val" :style="trendValStyle(b, 'sale')">¥{{ fmtAmt(b.amount) }}</span>
+            <div class="trend-bar sale" :class="{ 'is-zero': b.amount <= 0 }" :style="b.amount > 0 ? { height: Math.max(6, b.pct) + '%' } : {}" />
+          </div>
         </div>
         <div class="trend-labels">
-          <span v-for="b in saleTrend" :key="b.month">{{ b.month.slice(5) }}月</span>
+          <span v-for="b in saleTrend" :key="b.month" :class="{ active: saleSelectedMonth === b.month }">{{ b.month.slice(5) }}月</span>
         </div>
       </div>
     </el-card>
@@ -130,15 +152,22 @@
       </template>
       <div class="tool-row">
         <el-input v-model="keyword" clearable placeholder="搜索商品名称 / 编码" class="search-input" />
+        <div class="sort-group">
+          <span class="filter-label">排序</span>
+          <el-radio-group v-model="saleSort" size="small">
+            <el-radio-button label="amount">按金额</el-radio-button>
+            <el-radio-button label="time">按时间</el-radio-button>
+          </el-radio-group>
+        </div>
         <TableToolbar
           filename="按商品销售汇总"
           title="按商品销售汇总"
           :subtitle="saleSubtitle"
           :columns="saleExportColumns"
-          :rows="filteredSalesByItem"
+          :rows="sortedSalesByItem"
         />
       </div>
-      <div class="pager-info">共 {{ filteredSalesByItem.length }} 项{{ saleAll ? '（当前展示全部）' : ` · 第 ${salePage}/${salePageCount} 页，每页 ${saleSize} 条` }}</div>
+      <div class="pager-info">共 {{ filteredSalesByItem.length }} 项 · 当前按{{ saleSort === 'time' ? '最近销售时间' : '金额' }}排序{{ saleAll ? '（当前展示全部）' : ` · 第 ${salePage}/${salePageCount} 页，每页 ${saleSize} 条` }}</div>
       <div class="table-wrap" ref="saleWrap">
       <el-table-v2
         v-if="saleWidth"
@@ -153,8 +182,9 @@
         <template #footer>
           <div class="v2-footer">
             <span class="f-flex">合计（全部 {{ filteredSalesByItem.length }} 项）</span>
-            <span class="f-num">{{ saleFoot.qty }}</span>
-            <span class="f-num strong">{{ saleFoot.amount }}</span>
+            <span class="f-num" style="width:100px">{{ saleFoot.qty }}</span>
+            <span class="f-num" style="width:140px">{{ saleFoot.amount }}</span>
+            <span class="f-num" style="width:120px"></span>
           </div>
         </template>
       </el-table-v2>
@@ -187,15 +217,22 @@
       </template>
       <div class="tool-row">
         <el-input v-model="purchaseKeyword" clearable placeholder="搜索商品名称 / 编码" class="search-input" />
+        <div class="sort-group">
+          <span class="filter-label">排序</span>
+          <el-radio-group v-model="purchaseSort" size="small">
+            <el-radio-button label="amount">按金额</el-radio-button>
+            <el-radio-button label="time">按时间</el-radio-button>
+          </el-radio-group>
+        </div>
         <TableToolbar
           filename="按商品采购汇总"
           title="按商品采购汇总"
           :subtitle="purchaseSubtitle"
           :columns="purchaseExportColumns"
-          :rows="filteredPurchasesByItem"
+          :rows="sortedPurchasesByItem"
         />
       </div>
-      <div class="pager-info">共 {{ filteredPurchasesByItem.length }} 项{{ purchaseAll ? '（当前展示全部）' : ` · 第 ${purchasePage}/${purchasePageCount} 页，每页 ${purchaseSize} 条` }}</div>
+      <div class="pager-info">共 {{ filteredPurchasesByItem.length }} 项 · 当前按{{ purchaseSort === 'time' ? '最近采购时间' : '金额' }}排序{{ purchaseAll ? '（当前展示全部）' : ` · 第 ${purchasePage}/${purchasePageCount} 页，每页 ${purchaseSize} 条` }}</div>
       <div class="table-wrap" ref="purchaseWrap">
       <!-- 虚拟滚动表格：只渲染可视区域的行，1228 行也保持流畅 -->
       <el-table-v2
@@ -211,10 +248,11 @@
         <template #footer>
           <div class="v2-footer">
             <span class="f-flex">合计（全部 {{ filteredPurchasesByItem.length }} 项）</span>
-            <span class="f-num">{{ purchaseFoot.orders }}</span>
-            <span class="f-num">{{ purchaseFoot.qty }}</span>
-            <span class="f-num">{{ purchaseFoot.avg }}</span>
-            <span class="f-num strong">{{ purchaseFoot.amount }}</span>
+            <span class="f-num" style="width:100px">{{ purchaseFoot.orders }}</span>
+            <span class="f-num" style="width:100px">{{ purchaseFoot.qty }}</span>
+            <span class="f-num" style="width:110px">{{ purchaseFoot.avg }}</span>
+            <span class="f-num strong" style="width:130px">{{ purchaseFoot.amount }}</span>
+            <span class="f-num" style="width:120px"></span>
           </div>
         </template>
       </el-table-v2>
@@ -266,6 +304,18 @@ const purchasePage = ref(1)
 const purchaseSize = ref(60)
 const purchaseAll = ref(false)
 
+// ---------- 汇总表排序：按金额（默认）/ 按时间（最近一次交易日期，新的在前） ----------
+const saleSort = ref('amount')
+const purchaseSort = ref('amount')
+watch(saleSort, () => { salePage.value = 1 })
+watch(purchaseSort, () => { purchasePage.value = 1 })
+
+// ---------- 趋势图选中月份：点击柱子显示当月数额，再点一次取消 ----------
+const purchaseSelectedMonth = ref('')
+const saleSelectedMonth = ref('')
+const togglePurchaseMonth = (m) => { purchaseSelectedMonth.value = purchaseSelectedMonth.value === m ? '' : m }
+const toggleSaleMonth = (m) => { saleSelectedMonth.value = saleSelectedMonth.value === m ? '' : m }
+
 // ---------- 搜索防抖：避免每敲一个字都对上千行重算过滤 ----------
 const debouncedKeyword = ref('')
 const debouncedPurchaseKeyword = ref('')
@@ -280,7 +330,8 @@ function saveFilters() {
     localStorage.setItem(FILTERS_KEY, JSON.stringify({
       dateStart: dateStart.value, dateEnd: dateEnd.value,
       supplierFilter: supplierFilter.value, customerFilter: customerFilter.value,
-      keyword: keyword.value, purchaseKeyword: purchaseKeyword.value
+      keyword: keyword.value, purchaseKeyword: purchaseKeyword.value,
+      saleSort: saleSort.value, purchaseSort: purchaseSort.value
     }))
   } catch (e) { /* 隐私模式等场景下忽略 */ }
 }
@@ -294,9 +345,11 @@ function restoreFilters() {
     customerFilter.value = saved.customerFilter || ''
     keyword.value = saved.keyword || ''
     purchaseKeyword.value = saved.purchaseKeyword || ''
+    saleSort.value = saved.saleSort === 'time' ? 'time' : 'amount'
+    purchaseSort.value = saved.purchaseSort === 'time' ? 'time' : 'amount'
   } catch (e) { /* 数据损坏时按默认空筛选 */ }
 }
-watch([dateStart, dateEnd, supplierFilter, customerFilter, keyword, purchaseKeyword], saveFilters)
+watch([dateStart, dateEnd, supplierFilter, customerFilter, keyword, purchaseKeyword, saleSort, purchaseSort], saveFilters)
 
 // 筛选口径：时间段对采购/销售同时生效；供应商只影响采购与应付款，客户只影响销售与应收款
 const filteredPurchases = computed(() => (purchases.value || []).filter(p => {
@@ -328,6 +381,8 @@ const money = (n) => {
   const v = Math.round((Number(n) + Number.EPSILON) * 100) / 100
   return v === 0 ? 0 : v
 }
+// 千分位金额（趋势图标签与标题栏明细用）
+const fmtAmt = (n) => Number(money(n)).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 // 所有指标随筛选实时重算（watch 监听筛选后的计算结果）
 function recompute() {
@@ -380,16 +435,17 @@ const trendMonths = computed(() => {
   return monthRange(start, end)
 })
 function buildTrend(list) {
-  const map = {}
+  const map = {}, orderMap = {}
   for (const row of list) {
     const k = (row.date || '').slice(0, 7)
     if (!k) continue
     map[k] = (map[k] || 0) + Number(row.total || 0)
+    orderMap[k] = (orderMap[k] || 0) + 1
   }
   const max = Object.values(map).reduce((a, b) => Math.max(a, b), 0)
   return trendMonths.value.map(m => {
     const amount = map[m] || 0
-    return { month: m, amount, pct: max > 0 ? amount / max * 100 : 0 }
+    return { month: m, amount, orders: orderMap[m] || 0, pct: max > 0 ? amount / max * 100 : 0 }
   })
 }
 const purchaseTrend = computed(() => buildTrend(filteredPurchases.value))
@@ -397,22 +453,47 @@ const saleTrend = computed(() => buildTrend(filteredSales.value))
 const purchaseTrendTotal = computed(() => purchaseTrend.value.reduce((s, b) => s + b.amount, 0).toFixed(2))
 const saleTrendTotal = computed(() => saleTrend.value.reduce((s, b) => s + b.amount, 0).toFixed(2))
 
+// 选中月份明细：筛选变化导致该月不在趋势范围时自动失效（返回 null，标题栏回退为合计）
+const purchaseSelected = computed(() => {
+  if (!purchaseSelectedMonth.value) return null
+  return purchaseTrend.value.find(b => b.month === purchaseSelectedMonth.value) || null
+})
+const saleSelected = computed(() => {
+  if (!saleSelectedMonth.value) return null
+  return saleTrend.value.find(b => b.month === saleSelectedMonth.value) || null
+})
+// 数额浮动标签：贴在柱子上方（矮柱）或柱内顶部（高柱，白字）；无金额的月份贴在图元底部
+const trendValStyle = (b, type) => {
+  const color = type === 'sale' ? '#409eff' : '#e6a23c'
+  if (b.amount <= 0) return { bottom: '6px', color }
+  if (b.pct >= 80) return { bottom: `calc(${b.pct}% - 18px)`, color: '#fff', background: 'transparent' }
+  return { bottom: `calc(${Math.max(6, b.pct)}% + 4px)`, color }
+}
+
 // ---------- 按商品销售汇总（按编码分组，显示商品主数据当前名，改名不裂行） ----------
 const salesByItem = computed(() => aggregateByItem(filteredSales.value, items.value))
 const filteredSalesByItem = computed(() => salesByItem.value.filter(i => matchText(debouncedKeyword.value, i.name, i.code)))
+// 排序：默认金额降序（aggregateByItem 已排好）；按时间时取最近销售日期降序，同日期按金额兜底
+const sortedSalesByItem = computed(() => saleSort.value === 'time'
+  ? [...filteredSalesByItem.value].sort((a, b) => (b.lastDate || '').localeCompare(a.lastDate || '') || b.amount - a.amount)
+  : filteredSalesByItem.value)
 
 // ---------- 按商品采购汇总：进价维度（采购单数/数量/金额，按编码分组） ----------
 const purchasesByItem = computed(() => aggregateByItem(filteredPurchases.value, items.value, { withOrders: true }))
 const filteredPurchasesByItem = computed(() => purchasesByItem.value.filter(i => matchText(debouncedPurchaseKeyword.value, i.name, i.code)))
+// 排序：默认金额降序；按时间时取最近采购日期降序，同日期按金额兜底
+const sortedPurchasesByItem = computed(() => purchaseSort.value === 'time'
+  ? [...filteredPurchasesByItem.value].sort((a, b) => (b.lastDate || '').localeCompare(a.lastDate || '') || b.amount - a.amount)
+  : filteredPurchasesByItem.value)
 
 // ---------- 分页切片（合计行仍基于全部筛选结果，不受分页影响） ----------
 const pagedSalesByItem = computed(() => saleAll.value
-  ? filteredSalesByItem.value
-  : filteredSalesByItem.value.slice((salePage.value - 1) * saleSize.value, salePage.value * saleSize.value))
+  ? sortedSalesByItem.value
+  : sortedSalesByItem.value.slice((salePage.value - 1) * saleSize.value, salePage.value * saleSize.value))
 const salePageCount = computed(() => Math.max(1, Math.ceil(filteredSalesByItem.value.length / saleSize.value)))
 const pagedPurchasesByItem = computed(() => purchaseAll.value
-  ? filteredPurchasesByItem.value
-  : filteredPurchasesByItem.value.slice((purchasePage.value - 1) * purchaseSize.value, purchasePage.value * purchaseSize.value))
+  ? sortedPurchasesByItem.value
+  : sortedPurchasesByItem.value.slice((purchasePage.value - 1) * purchaseSize.value, purchasePage.value * purchaseSize.value))
 const purchasePageCount = computed(() => Math.max(1, Math.ceil(filteredPurchasesByItem.value.length / purchaseSize.value)))
 // 筛选条件或每页条数变化时回到第一页，避免停在空白页
 watch([filteredSalesByItem, filteredPurchasesByItem], () => { salePage.value = 1; purchasePage.value = 1 })
@@ -432,7 +513,8 @@ const fmtMoney = n => Number(n || 0).toFixed(2)
 const saleColumns = [
   { key: 'name', dataKey: 'name', title: '商品', flexGrow: 1, width: 200 },
   { key: 'qty', dataKey: 'qty', title: '销量', width: 100, align: 'right' },
-  { key: 'amount', dataKey: 'amount', title: '金额', width: 140, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) }
+  { key: 'amount', dataKey: 'amount', title: '金额', width: 140, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) },
+  { key: 'lastDate', dataKey: 'lastDate', title: '最近销售', width: 120, align: 'center', cellRenderer: ({ cellData }) => h('span', cellData || '—') }
 ]
 const purchaseColumns = [
   { key: 'name', dataKey: 'name', title: '商品', flexGrow: 1, width: 220 },
@@ -440,16 +522,17 @@ const purchaseColumns = [
   { key: 'qty', dataKey: 'qty', title: '采购数量', width: 100, align: 'right' },
   { key: 'avgPrice', dataKey: 'avgPrice', title: '平均进价', width: 110, align: 'right',
     cellRenderer: ({ rowData }) => h('span', rowData.qty > 0 ? (rowData.amount / rowData.qty).toFixed(2) : '—') },
-  { key: 'amount', dataKey: 'amount', title: '采购金额', width: 130, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) }
+  { key: 'amount', dataKey: 'amount', title: '采购金额', width: 130, align: 'right', cellRenderer: ({ cellData }) => h('span', fmtMoney(cellData)) },
+  { key: 'lastDate', dataKey: 'lastDate', title: '最近采购', width: 120, align: 'center', cellRenderer: ({ cellData }) => h('span', cellData || '—') }
 ]
 
-// 合计行：始终基于全部筛选结果，不随分页/虚拟滚动变化
+// 合计行：始终基于全部筛选结果，不随分页/虚拟滚动/排序变化
 const saleFoot = computed(() => {
-  const rows = filteredSalesByItem.value
+  const rows = sortedSalesByItem.value
   return { qty: rows.reduce((s, r) => s + Number(r.qty || 0), 0), amount: money(rows.reduce((s, r) => s + Number(r.amount || 0), 0)) }
 })
 const purchaseFoot = computed(() => {
-  const rows = filteredPurchasesByItem.value
+  const rows = sortedPurchasesByItem.value
   const orders = rows.reduce((s, r) => s + Number(r.orders || 0), 0)
   const qty = rows.reduce((s, r) => s + Number(r.qty || 0), 0)
   const amount = rows.reduce((s, r) => s + Number(r.amount || 0), 0)
@@ -467,56 +550,33 @@ onMounted(() => {
 })
 onUnmounted(() => window.removeEventListener('resize', measure))
 
-// ---------- 导出/打印：输出当前筛选后的全部数据（不受分页限制） ----------
+// ---------- 导出/打印：输出当前筛选后的全部数据（不受分页限制，顺序随当前排序） ----------
 const saleExportColumns = [
   { label: '商品', prop: 'name' },
   { label: '销量', prop: 'qty' },
-  { label: '金额', value: r => Number(r.amount || 0).toFixed(2) }
+  { label: '金额', value: r => Number(r.amount || 0).toFixed(2) },
+  { label: '最近销售', prop: 'lastDate' }
 ]
 const purchaseExportColumns = [
   { label: '商品', prop: 'name' },
   { label: '采购单数', prop: 'orders' },
   { label: '采购数量', prop: 'qty' },
   { label: '平均进价', value: r => (r.qty > 0 ? (r.amount / r.qty).toFixed(2) : '—') },
-  { label: '采购金额', value: r => Number(r.amount || 0).toFixed(2) }
+  { label: '采购金额', value: r => Number(r.amount || 0).toFixed(2) },
+  { label: '最近采购', prop: 'lastDate' }
 ]
 const saleSubtitle = computed(() => {
-  const parts = [`共 ${filteredSalesByItem.value.length} 项`]
+  const parts = [`共 ${filteredSalesByItem.value.length} 项`, saleSort.value === 'time' ? '按最近销售时间排序' : '按金额排序']
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
   if (customerFilter.value) parts.push(customerFilter.value)
   return parts.join(' · ')
 })
 const purchaseSubtitle = computed(() => {
-  const parts = [`共 ${filteredPurchasesByItem.value.length} 项`]
+  const parts = [`共 ${filteredPurchasesByItem.value.length} 项`, purchaseSort.value === 'time' ? '按最近采购时间排序' : '按金额排序']
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
   if (supplierFilter.value) parts.push(supplierFilter.value)
   return parts.join(' · ')
 })
-
-// 表格底部合计：基于全部筛选结果
-const itemSummary = ({ columns, data }) => {
-  const qty = (data || []).reduce((s, r) => s + Number(r.qty || 0), 0)
-  const amount = (data || []).reduce((s, r) => s + Number(r.amount || 0), 0)
-  return columns.map((c, idx) => {
-    if (idx === 0) return '合计'
-    if (c.property === 'qty') return qty
-    if (c.property === 'amount') return amount.toFixed(2)
-    return ''
-  })
-}
-const purchaseItemSummary = ({ columns, data }) => {
-  const orders = (data || []).reduce((s, r) => s + Number(r.orders || 0), 0)
-  const qty = (data || []).reduce((s, r) => s + Number(r.qty || 0), 0)
-  const amount = (data || []).reduce((s, r) => s + Number(r.amount || 0), 0)
-  return columns.map((c, idx) => {
-    if (idx === 0) return '合计'
-    if (c.property === 'orders') return orders
-    if (c.property === 'qty') return qty
-    if (c.property === 'avgPrice') return qty > 0 ? (amount / qty).toFixed(2) : '—'
-    if (c.property === 'amount') return amount.toFixed(2)
-    return ''
-  })
-}
 
 onMounted(async () => {
   // 先恢复上次筛选，再加载数据，保证刷新后筛选与数据同时就位
@@ -561,22 +621,30 @@ onMounted(async () => {
 .v2-footer { display: flex; align-items: center; width: 100%; height: 100%; padding: 0 12px; font-size: 13px; color: #606266; }
 .v2-footer .f-flex { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .v2-footer .f-num { flex: none; text-align: right; padding-right: 12px; }
-.v2-footer .f-num:nth-of-type(1) { width: 100px; }
 .v2-footer .strong { font-weight: 700; color: #303133; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
 .stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
-/* 迷你趋势条：纯 CSS 柱状图，随分区筛选联动 */
+/* 迷你趋势条：纯 CSS 柱状图，随分区筛选联动；点击柱子显示当月数额 */
 .trend-block { margin-top: 12px; border-top: 1px dashed #ebeef5; padding-top: 10px; }
-.trend-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.trend-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .trend-title { font-size: 13px; color: #606266; font-weight: 600; }
-.trend-caption { font-size: 12px; color: #909399; }
+.trend-caption { font-size: 12px; color: #909399; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.trend-caption .trend-strong { color: #303133; font-weight: 700; }
 .trend-bars { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
+.trend-col { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; position: relative; cursor: pointer; }
+.trend-col:hover .trend-bar { filter: brightness(0.92); }
+.trend-col.active .trend-bar { filter: brightness(0.82); }
+.trend-val { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: 10.5px; font-weight: 700; background: rgba(255, 255, 255, .92); padding: 0 3px; border-radius: 2px; z-index: 2; pointer-events: none; }
 .trend-bar { flex: 1; min-width: 0; border-radius: 2px 2px 0 0; background: #e6a23c; transition: height .2s; }
 .trend-bar.sale { background: #409eff; }
 .trend-bar.is-zero { height: 2px; background: #ebeef5; }
 .trend-labels { display: flex; gap: 3px; margin-top: 4px; }
 .trend-labels span { flex: 1; min-width: 0; text-align: center; font-size: 10px; color: #c0c4cc; white-space: nowrap; overflow: hidden; }
+.trend-labels span.active { color: #606266; font-weight: 700; }
+/* 汇总表排序切换 */
+.sort-group { display: inline-flex; align-items: center; gap: 6px; }
+.sort-group .el-radio-button--small .el-radio-button__inner { padding: 5px 12px; font-size: 12px; }
 </style>
