@@ -45,6 +45,17 @@
         <el-form-item label="编码"><el-input v-model="form.code" /></el-form-item>
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="单位"><el-input v-model="form.unit" /></el-form-item>
+        <el-form-item label="供应商">
+          <el-select
+            v-model="form.suppliers"
+            multiple filterable clearable
+            placeholder="可多选，留空表示暂未指定"
+            style="width:100%"
+          >
+            <el-option v-for="s in supplierOptions" :key="s.code" :label="s.label" :value="s.code" />
+          </el-select>
+          <div class="field-hint">更换供应商后，商品行的供应商列会同步更新；下次录入该商品的采购单时仍会自动补充新供应商</div>
+        </el-form-item>
         <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="批发价"><el-input-number v-model="form.priceWholesale" :min="0" :precision="2" /></el-form-item>
@@ -73,8 +84,22 @@ import { nextEntityCode } from '../utils/code'
 
 const items = ref([])
 const stock = ref({})
+const suppliers = ref([])
 const dialog = ref(false)
 const tableRef = ref(null)
+// 正在编辑的商品原始编码：用于拦截「改成他人编码」导致覆盖对方商品
+const editingCode = ref('')
+
+// 供应商选项：存在同名不同码的重复档案（如 S00001/S00039 都叫湖南利接管件），
+// 同名的在选项里补上编码后缀，避免选错
+const supplierOptions = computed(() => {
+  const nameCount = {}
+  ;(suppliers.value || []).forEach(s => { nameCount[s.name] = (nameCount[s.name] || 0) + 1 })
+  return (suppliers.value || []).map(s => ({
+    code: s.code,
+    label: nameCount[s.name] > 1 ? `${s.name}（${s.code}）` : s.name
+  }))
+})
 
 // ---------- 商品库汇总：条目总数、库存数量/货值、预警数 ----------
 const itemCount = computed(() => items.value.length)
@@ -98,7 +123,7 @@ const warningCount = computed(() => items.value.filter(i => {
   return qty <= w
 }).length)
 const form = reactive({
-  code:'', name:'', unit:'', photos:[],
+  code:'', name:'', unit:'', photos:[], suppliers:[],
   cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0,
   warning:0, remark:''
 })
@@ -127,32 +152,42 @@ const exportColumns = [
 onMounted(load)
 async function load() {
   try {
-    const [it, st] = await Promise.all([api.getItems(), api.getStock()])
+    const [it, st, sp] = await Promise.all([api.getItems(), api.getStock(), api.getSuppliers()])
     items.value = it || []
     stock.value = st || {}
+    suppliers.value = sp || []
   } catch (e) {
     items.value = []
     stock.value = {}
+    suppliers.value = []
   }
 }
 
 function openDialog(row) {
+  editingCode.value = row ? row.code : ''
   // 先重置为默认值再覆盖，避免上次编辑残留；品牌字段已废弃，读入时剥离
   const { brand, ...rest } = row || {}
   Object.assign(form, {
-    code: nextEntityCode(items.value, 'P'), name:'', unit:'', photos:[],
+    code: nextEntityCode(items.value, 'P'), name:'', unit:'', photos:[], suppliers:[],
     cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0, warning:0, remark:'',
     ...rest
   })
+  // 供应商始终是数组，避免历史脏数据（字符串/null）导致多选组件异常
+  form.suppliers = Array.isArray(form.suppliers) ? [...form.suppliers] : []
   dialog.value = true
 }
 
 async function save() {
+  // 把编码改成别人的编码会把对方商品整条覆盖掉，先拦下来
+  if (form.code && form.code !== editingCode.value && items.value.some(i => i.code === form.code)) {
+    return ElMessage.error(`编码 ${form.code} 已被其他商品使用，请换一个编码`)
+  }
   const idx = items.value.findIndex(i => i.code === form.code)
   // 品牌字段已废弃：保存时剥离，数据中不再写入
   const { brand, ...rest } = form
-  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...rest, brand: undefined }
-  else items.value.push({ ...rest, brand: undefined })
+  const payload = { ...rest, suppliers: Array.isArray(rest.suppliers) ? [...rest.suppliers] : [] }
+  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...payload, brand: undefined }
+  else items.value.push({ ...payload, brand: undefined })
   // 保存失败（如 GitHub 写入出错）时明确报错，并回滚为线上数据，避免本地与线上不一致
   try {
     await api.saveItems(items.value)
@@ -190,4 +225,5 @@ async function remove(row) {
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.field-hint { margin-top: var(--gap-xs); color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.5; }
 </style>
