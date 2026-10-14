@@ -25,6 +25,20 @@
           <div class="stat-sub">{{ zeroStockCount }} 项零库存</div>
         </div>
       </div>
+      <div class="filter-row">
+        <span class="filter-label">供应商</span>
+        <el-select v-model="filterSupplier" clearable filterable placeholder="全部供应商" class="filter-select">
+          <el-option v-for="s in supplierOptions" :key="s.code" :label="s.label" :value="s.code" />
+        </el-select>
+        <span class="filter-label">客户</span>
+        <el-select v-model="filterCustomer" clearable filterable placeholder="全部客户" class="filter-select">
+          <el-option v-for="c in customerOptions" :key="c" :label="c" :value="c" />
+        </el-select>
+        <span v-if="filterSupplier || filterCustomer" class="filter-count">
+          筛出 {{ filteredItems.length }} / {{ items.length }} 条
+        </span>
+        <el-button v-if="filterSupplier || filterCustomer" size="small" text @click="clearFilter">清除筛选</el-button>
+      </div>
       <TableToolbar
         filename="商品库"
         title="商品库"
@@ -32,7 +46,7 @@
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="items" search-placeholder="搜索编码 / 名称" show-price-tiers :page-size="60">
+      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" show-price-tiers :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -85,6 +99,10 @@ import { nextEntityCode } from '../utils/code'
 const items = ref([])
 const stock = ref({})
 const suppliers = ref([])
+const customers = ref([])
+// 列表筛选：按供应商；按客户（筛出「买过该商品的客户」，客户维度来自商品销售历史）
+const filterSupplier = ref('')
+const filterCustomer = ref('')
 const dialog = ref(false)
 const tableRef = ref(null)
 // 正在编辑的商品原始编码：用于拦截「改成他人编码」导致覆盖对方商品
@@ -101,22 +119,40 @@ const supplierOptions = computed(() => {
   }))
 })
 
+// 筛选后的商品：传给表格，统计数据也跟着筛选范围走
+const filteredItems = computed(() => items.value.filter(i => {
+  if (filterSupplier.value && !(i.suppliers || []).includes(filterSupplier.value)) return false
+  if (filterCustomer.value && !(i.saleHistory || []).some(h => (h.customer || '') === filterCustomer.value)) return false
+  return true
+}))
+function clearFilter() { filterSupplier.value = ''; filterCustomer.value = '' }
+// 客户选项：客户档案 + 商品销售历史里实际出现过的客户并集，避免档案不全导致选不到
+const customerOptions = computed(() => {
+  const set = new Set()
+  ;(customers.value || []).forEach(c => { if (c.name) set.add(c.name) })
+  items.value.forEach(i => (i.saleHistory || []).forEach(h => { if (h.customer) set.add(h.customer) }))
+  return [...set].sort((a, b) => String(a).localeCompare(String(b), 'zh'))
+})
+
 // ---------- 商品库汇总：条目总数、库存数量/货值、预警数 ----------
-const itemCount = computed(() => items.value.length)
+const itemCount = computed(() => filteredItems.value.length)
 // 当前筛选条数跟随表格搜索联动（分页前的实际命中数）
 const filteredCount = computed(() => (tableRef.value && tableRef.value.filtered ? tableRef.value.filtered.length : itemCount.value) || 0)
 const stockMap = computed(() => (stock.value && !Array.isArray(stock.value) ? stock.value : {}))
-const stockQty = computed(() => Object.values(stockMap.value).reduce((s, v) => s + Number(v && v.qty || 0), 0))
+const stockQty = computed(() => filteredItems.value.reduce((s, i) => s + Number((stockMap.value[i.code] || {}).qty || 0), 0))
 // 库存货值：Σ 数量 × 最近进价，抹掉浮点尘避免显示 -0.00
 const stockValue = computed(() => {
-  const v = Object.values(stockMap.value).reduce((s, x) => s + Number(x && x.qty || 0) * Number(x && x.cost || 0), 0)
+  const v = filteredItems.value.reduce((s, i) => {
+    const st = stockMap.value[i.code] || {}
+    return s + Number(st.qty || 0) * Number(st.cost || 0)
+  }, 0)
   const rounded = Math.round((v + Number.EPSILON) * 100) / 100
   return rounded === 0 ? 0 : rounded
 })
-const inStockCount = computed(() => items.value.filter(i => Number((stockMap.value[i.code] || {}).qty || 0) > 0).length)
+const inStockCount = computed(() => filteredItems.value.filter(i => Number((stockMap.value[i.code] || {}).qty || 0) > 0).length)
 const zeroStockCount = computed(() => itemCount.value - inStockCount.value)
 // 预警：设置了预警值且库存不高于预警线
-const warningCount = computed(() => items.value.filter(i => {
+const warningCount = computed(() => filteredItems.value.filter(i => {
   const w = Number(i.warning || 0)
   if (w <= 0) return false
   const qty = Number((stockMap.value[i.code] || {}).qty || 0)
@@ -152,14 +188,16 @@ const exportColumns = [
 onMounted(load)
 async function load() {
   try {
-    const [it, st, sp] = await Promise.all([api.getItems(), api.getStock(), api.getSuppliers()])
+    const [it, st, sp, cu] = await Promise.all([api.getItems(), api.getStock(), api.getSuppliers(), api.getCustomers()])
     items.value = it || []
     stock.value = st || {}
     suppliers.value = sp || []
+    customers.value = cu || []
   } catch (e) {
     items.value = []
     stock.value = {}
     suppliers.value = []
+    customers.value = []
   }
 }
 
@@ -225,5 +263,9 @@ async function remove(row) {
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.filter-row { display:flex; align-items:center; gap:var(--gap-sm); flex-wrap:wrap; margin-bottom:var(--gap-md); }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
+.filter-select { width:220px; }
+.filter-count { color:var(--text-secondary); font-size:var(--fs-sub); }
 .field-hint { margin-top: var(--gap-xs); color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.5; }
 </style>
