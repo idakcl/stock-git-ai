@@ -271,7 +271,21 @@ export async function handleApi(req, url, env) {
       const body = await req.json()
 
       if (path === '/items') {
-        await writeJSON(env, 'items.json', body.items || [], 'update items')
+        const newItems = body.items || []
+        await writeJSON(env, 'items.json', newItems, 'update items')
+        // 商品改了挂靠供应商后，必须同步供应商档案里的商品列表：
+        // products 是派生字段，原本只在保存采购/销售单时重算，
+        // 会造成「商品库看得到这家供应商、供应商详情页却显示没有商品」。
+        try {
+          const suppliers = await readJSON(env, 'suppliers.json')
+          const synced = (suppliers || []).map(s => ({
+            ...s,
+            products: newItems.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
+          }))
+          await writeJSON(env, 'suppliers.json', synced, 'sync supplier products')
+        } catch (e) {
+          return json(req, env, { error: `商品已保存，但供应商的商品列表同步失败（${e.message || e}）。请重新保存一次商品，系统会自动重建` }, 500)
+        }
         return json(req, env, { ok: true })
       }
       if (path === '/suppliers') {

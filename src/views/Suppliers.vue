@@ -113,6 +113,12 @@ async function load() {
 }
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'S'), name:'', contact:'', phone:'', remark:'' }); dialog.value = true }
 async function save() {
+  // 供应商不允许同名：采购单是按「名称」匹配供应商档案的，
+  // 重名会让单据挂到错误的档案上（历史上出现过 S00001/S00039 重复建档，商品被拆到两个码下）
+  const name = (form.name || '').trim()
+  if (!name) return ElMessage.warning('请填写供应商名称')
+  const dup = list.value.find(i => i.code !== form.code && (i.name || '').trim() === name)
+  if (dup) return ElMessage.error(`已存在同名供应商「${name}」（${dup.code}），请换一个名称，或直接在原档案上修改`)
   const idx = list.value.findIndex(i => i.code === form.code)
   if (idx >= 0) list.value[idx] = { ...list.value[idx], ...form }
   else list.value.push({ ...form })

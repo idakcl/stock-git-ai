@@ -93,6 +93,8 @@ export const api = {
   saveItems: async (items) => {
     const r = await request('/items', { method: 'POST', body: JSON.stringify({ items }) })
     invalidate('/items')
+    // 服务端会同步供应商档案里的商品列表，一并失效避免看到旧数据
+    invalidate('/suppliers')
     return r
   },
   getSuppliers: () => cachedGet('/suppliers'),
