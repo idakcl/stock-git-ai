@@ -73,7 +73,6 @@
         <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="批发价"><el-input-number v-model="form.priceWholesale" :min="0" :precision="2" /></el-form-item>
-        <el-form-item label="零售价"><el-input-number v-model="form.priceRetail" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="安装师傅价"><el-input-number v-model="form.priceInstaller" :min="0" :precision="2" /></el-form-item>
         <el-form-item label="预警值"><el-input-number v-model="form.warning" :min="0" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
@@ -160,7 +159,7 @@ const warningCount = computed(() => filteredItems.value.filter(i => {
 }).length)
 const form = reactive({
   code:'', name:'', unit:'', photos:[], suppliers:[],
-  cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0,
+  cost:0, price:0, priceWholesale:0, priceInstaller:0,
   warning:0, remark:''
 })
 
@@ -179,7 +178,6 @@ const exportColumns = [
   { label: '进价', prop: 'cost' },
   { label: '售价', prop: 'price' },
   { label: '批发价', prop: 'priceWholesale' },
-  { label: '零售价', prop: 'priceRetail' },
   { label: '安装师傅价', prop: 'priceInstaller' },
   { label: '预警值', prop: 'warning' },
   { label: '备注', prop: 'remark' }
@@ -207,7 +205,7 @@ function openDialog(row) {
   const { brand, ...rest } = row || {}
   Object.assign(form, {
     code: nextEntityCode(items.value, 'P'), name:'', unit:'', photos:[], suppliers:[],
-    cost:0, price:0, priceWholesale:0, priceRetail:0, priceInstaller:0, warning:0, remark:'',
+    cost:0, price:0, priceWholesale:0, priceInstaller:0, warning:0, remark:'',
     ...rest
   })
   // 供应商始终是数组，避免历史脏数据（字符串/null）导致多选组件异常
@@ -221,8 +219,8 @@ async function save() {
     return ElMessage.error(`编码 ${form.code} 已被其他商品使用，请换一个编码`)
   }
   const idx = items.value.findIndex(i => i.code === form.code)
-  // 品牌字段已废弃：保存时剥离，数据中不再写入
-  const { brand, ...rest } = form
+  // 品牌字段已废弃、零售价已并入售价：保存时剥离，数据中不再写入
+  const { brand, priceRetail, ...rest } = form
   const payload = { ...rest, suppliers: Array.isArray(rest.suppliers) ? [...rest.suppliers] : [] }
   if (idx >= 0) items.value[idx] = { ...items.value[idx], ...payload, brand: undefined }
   else items.value.push({ ...payload, brand: undefined })

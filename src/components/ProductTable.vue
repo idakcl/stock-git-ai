@@ -38,7 +38,7 @@
               </el-table>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
               <div class="history-title" style="margin-top:12px">
-                分级售价：批发 {{ fmt(row.priceWholesale) }} / 零售 {{ fmt(row.priceRetail) }} / 安装师傅 {{ fmt(row.priceInstaller) }}
+                分级售价：批发 {{ fmt(row.priceWholesale) }} / 零售 {{ fmt(row.price) }} / 安装师傅 {{ fmt(row.priceInstaller) }}
               </div>
               <div v-if="row.remark" class="history-title" style="margin-top:12px">备注：{{ row.remark }}</div>
               <div v-if="(row.photos || []).length" class="history-title" style="margin-top:12px">商品照片</div>
@@ -60,7 +60,6 @@
         <el-table-column prop="price" label="售价" width="100" />
         <template v-if="showPriceTiers">
           <el-table-column prop="priceWholesale" label="批发价" width="100" />
-          <el-table-column prop="priceRetail" label="零售价" width="100" />
           <el-table-column prop="priceInstaller" label="安装师傅价" width="110" />
         </template>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
@@ -92,7 +91,7 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   searchable: { type: Boolean, default: true },
   searchPlaceholder: { type: String, default: '搜索编码 / 名称' },
-  // 是否显示批发价/零售价/安装师傅价三列
+  // 是否显示批发价/安装师傅价两列（零售价已并入「售价」，不再单列）
   showPriceTiers: { type: Boolean, default: false },
   // 每页条数，0 表示不分页
   pageSize: { type: Number, default: 0 }

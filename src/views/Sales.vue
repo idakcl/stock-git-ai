@@ -178,7 +178,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 
 const PAGE_SIZE = 60
 // 客户类别 → 商品上的对应分级售价字段
-const CATEGORY_PRICE_FIELD = { '批发': 'priceWholesale', '零售': 'priceRetail', '安装师傅': 'priceInstaller' }
+const CATEGORY_PRICE_FIELD = { '批发': 'priceWholesale', '零售': 'price', '安装师傅': 'priceInstaller' }
 
 const list = ref([])
 const keyword = ref('')
@@ -262,7 +262,7 @@ const customerCategory = computed(() => {
   return c && c.category ? c.category : ''
 })
 
-// 按客户类别取对应分级售价（批发→批发价 / 零售→零售价 / 安装师傅→安装师傅价）
+// 按客户类别取对应分级售价（批发→批发价 / 零售→售价 / 安装师傅→安装师傅价）
 function tierPriceFor(item) {
   const field = CATEGORY_PRICE_FIELD[customerCategory.value]
   if (!field) return null

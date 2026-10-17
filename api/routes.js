@@ -132,6 +132,13 @@ export function derive(items, suppliers, purchases, sales) {
   for (const k in purchaseHist) purchaseHist[k].sort(byTimeDesc)
   for (const k in saleHist) saleHist[k].sort(byTimeDesc)
   for (const it of items) {
+    // 取消「零售价」独立字段：零售价即售价（price）。存量数据若仍有 priceRetail，
+    // 并入 price（售价优先；售价缺失则用零售价补），随后删除该字段，避免冗余字段长期漂移
+    if (it && 'priceRetail' in it) {
+      const retail = Number(it.priceRetail) || 0
+      if (!Number(it.price) && retail) it.price = retail
+      delete it.priceRetail
+    }
     it.purchaseHistory = purchaseHist[it.code] || []
     it.saleHistory = saleHist[it.code] || []
   }
