@@ -207,7 +207,11 @@ body {
   border-radius: 10px !important;
   border: 1px solid #ebeef5 !important;
   box-shadow: 0 1px 3px rgba(31, 45, 61, 0.04) !important;
+  /* 卡片默认是 overflow:hidden，会把内部表格的 sticky 表头「困」在卡片里而永不吸顶 */
+  overflow: visible !important;
 }
+/* 卡片主体默认 overflow:auto 同理，必须一并解除；卡片内宽表改由 .main 横向滚动承接 */
+.el-card__body { overflow: visible !important; }
 .el-card + .el-card { margin-top: var(--gap-lg); }
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 
