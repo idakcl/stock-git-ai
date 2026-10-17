@@ -81,13 +81,15 @@ function onExpired() {
   ElMessage.warning('登录已过期，请重新登录')
 }
 // ---- 宽表自适应 ------------------------------------------------------------
-// 表格内容宽超出容器时打上 is-scrollable，改为表格在卡片内横向滑动；
-// 放得下时保持「整页滚动 + 列标题吸顶」。按实际宽度判定，覆盖手机竖屏/横屏与小尺寸窗口。
+// 取舍：
+//   窄屏（手机/小平板，≤1024）——优先「页面左右对齐 + 能滑动看全列」，
+//     此时表格在卡片内横滑，而局部滚动容器会困住 sticky，表头不吸顶（改为常驻表体顶部）；
+//   宽屏（笔记本/桌面）——保持整页滚动，sticky 列标题正常吸顶；
+//     若列总宽仍超出，用内容区横向滚动条查看（桌面有滚动条/触控板，不影响对齐观感）。
 function syncTableScroll() {
+  const narrow = window.innerWidth <= 1024
   document.querySelectorAll('.table-wrap').forEach((wrap) => {
-    const table = wrap.querySelector('.el-table')
-    if (!table) return
-    wrap.classList.toggle('is-scrollable', table.scrollWidth > wrap.clientWidth + 2)
+    wrap.classList.toggle('is-scrollable', narrow)
   })
 }
 let rafId = 0

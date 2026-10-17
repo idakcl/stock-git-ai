@@ -53,7 +53,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column label="供应商" min-width="160" show-overflow-tooltip>
+        <el-table-column v-if="showSupplier" label="供应商" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ supplierNames(row) }}</template>
         </el-table-column>
         <el-table-column v-if="showCost" prop="cost" label="进价" width="100"  align="right"/>
@@ -98,6 +98,8 @@ const props = defineProps({
   priceColumns: { type: Array, default: () => [{ prop: 'price', label: '售价' }] },
   // 是否显示「进价」列；商品/供应商/客户列表无需展示成本时传 false 隐藏
   showCost: { type: Boolean, default: true },
+  // 是否显示「供应商」列；供应商详情页整页就是同一家的商品，该列冗余，可传 false 收窄表格
+  showSupplier: { type: Boolean, default: true },
   // 每页条数，0 表示不分页
   pageSize: { type: Number, default: 0 }
 })
