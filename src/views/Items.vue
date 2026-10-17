@@ -46,7 +46,7 @@
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns" :page-size="60">
+      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns" :page-size="60" fill-viewport>
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>

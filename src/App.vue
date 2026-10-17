@@ -217,7 +217,8 @@ body {
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 
-.table-wrap { overflow-x: auto; }
+/* 表格容器：默认横向可滚动（宽表不溢出卡片）；设置 max-height 的表格会纵向也滚动、表头在盒内吸顶 */
+.table-wrap { overflow: auto; }
 /* 表格统一：无论各页是否单独写了 size="small"，行高与字号都收敛到同一档 */
 .el-table { font-size: var(--fs-table); }
 .el-table td.el-table__cell { padding: 10px 0; }

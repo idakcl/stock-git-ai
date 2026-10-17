@@ -7,7 +7,7 @@
       :placeholder="searchPlaceholder"
       class="search-input"
     />
-    <div class="table-wrap">
+    <div class="table-wrap" :style="maxHeightStyle">
       <el-table :data="pagedRows" stripe>
         <el-table-column type="expand">
           <template #default="{ row }">
@@ -84,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import PhotoThumbs from './PhotoThumbs.vue'
@@ -99,7 +99,11 @@ const props = defineProps({
   // 是否显示「进价」列；商品/供应商/客户列表无需展示成本时传 false 隐藏
   showCost: { type: Boolean, default: true },
   // 每页条数，0 表示不分页
-  pageSize: { type: Number, default: 0 }
+  pageSize: { type: Number, default: 0 },
+  // 表格最大高度（px）；设置后表格在卡片内形成滚动盒、表头吸顶，方便对照列
+  maxHeight: { type: Number, default: 0 },
+  // 为 true 时按视口高度自适应（视口高 - 偏移），尽量多显示行数且表头固定
+  fillViewport: { type: Boolean, default: false }
 })
 
 const keyword = ref('')
@@ -124,6 +128,14 @@ const pagedRows = computed(() => {
 // 筛选条件变化后回到第一页
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
+// 表格最大高度：优先用显式 maxHeight，否则 fillViewport 时按视口自适应（预留顶栏/卡片/筛选等上方高度）
+const viewportMaxH = ref(0)
+function recalcViewport() { viewportMaxH.value = Math.max(320, Math.round((window.innerHeight || 800) - 320)) }
+const effectiveMaxH = computed(() => props.maxHeight || (props.fillViewport ? viewportMaxH.value : 0))
+const maxHeightStyle = computed(() => effectiveMaxH.value ? { maxHeight: effectiveMaxH.value + 'px' } : null)
+onMounted(() => { if (props.fillViewport) { recalcViewport(); window.addEventListener('resize', recalcViewport) } })
+onUnmounted(() => { if (props.fillViewport) window.removeEventListener('resize', recalcViewport) })
+
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
 // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）。
 // 后端 derive 已排序，这里前端兜底：存量数据在重建前也按时间展示
@@ -158,4 +170,12 @@ onMounted(async () => {
 .history :deep(.el-table) { font-size: 12px; color: #606266; font-family: inherit; }
 .history :deep(.el-table th.el-table__cell) { font-size: 12px; font-weight: 600; color: #606266; }
 .history :deep(.el-table td.el-table__cell) { font-size: 12px; font-weight: 400; padding: 8px 0; }
+/* 表头吸顶：表格在卡片内滚动时，列标题固定在盒子顶部，方便滚动查看时对照列 */
+.table-wrap :deep(.el-table__header-wrapper) {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-soft);
+  box-shadow: 0 1px 0 var(--border-color);
+}
 </style>
