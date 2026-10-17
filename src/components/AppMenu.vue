@@ -87,8 +87,8 @@ onMounted(async () => {
 <style scoped>
 .menu { border-right: none; }
 .menu :deep(.el-menu-item-group__title) {
-  font-size: 12px;
-  color: #a8abb2;
+  font-size:var(--fs-sub);
+  color:var(--text-disabled);
   padding: 10px 20px 4px;
   letter-spacing: 1px;
 }
@@ -99,8 +99,8 @@ onMounted(async () => {
   border-radius: 6px;
 }
 .menu :deep(.el-menu-item.is-active) {
-  background: #ecf5ff;
-  color: #409eff;
+  background:var(--bg-menu-active);
+  color:var(--color-primary);
   font-weight: 600;
 }
 .menu :deep(.el-sub-menu__title) {

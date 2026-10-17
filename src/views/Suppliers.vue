@@ -22,7 +22,7 @@
         </el-table-column>
         <el-table-column prop="contact" label="联系人" width="130" />
         <el-table-column prop="phone" label="电话" width="130" />
-        <el-table-column label="应付款" width="130">
+        <el-table-column label="应付款" width="130" align="right">
           <template #default="{ row }">
             <span :class="payableMap[row.name] ? 'amount-debt' : 'amount-zero'">
               ¥ {{ Number(payableMap[row.name] || 0).toFixed(2) }}
@@ -151,7 +151,7 @@ async function remove(row) {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
-.amount-debt{color:#f56c6c;font-weight:600;}
-.amount-zero{color:#c0c4cc;}
+.amount-debt{color:var(--color-danger);font-weight:600;}
+.amount-zero{color:var(--text-placeholder);}
 .pager{margin-top:12px;justify-content:flex-end;}
 </style>

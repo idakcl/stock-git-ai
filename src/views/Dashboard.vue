@@ -39,7 +39,7 @@
       </div>
     </el-card>
 
-    <el-card style="margin-top:16px">
+    <el-card>
       <template #header><b>{{ periodTitle }}采购单汇总（{{ filteredPurchases.length }} 张）</b></template>
       <div class="filter-row">
         <span class="filter-label">按供应商</span>
@@ -54,10 +54,10 @@
           </el-table-column>
           <el-table-column prop="supplier" label="供应商" min-width="180" />
           <el-table-column prop="date" label="日期" width="120" />
-          <el-table-column prop="total" label="金额" width="120">
+          <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
-          <el-table-column label="优惠" width="100">
+          <el-table-column label="优惠" width="100" align="right">
             <template #default="{ row }">
               <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际付款">-{{ Number(row.discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
@@ -77,7 +77,7 @@
       <el-empty v-if="!filteredPurchases.length" :description="`${periodTitle}暂无采购单`" />
     </el-card>
 
-    <el-card style="margin-top:16px">
+    <el-card>
       <template #header><b>{{ periodTitle }}销售单汇总（{{ filteredSales.length }} 张）</b></template>
       <div class="filter-row">
         <span class="filter-label">按客户</span>
@@ -92,10 +92,10 @@
           </el-table-column>
           <el-table-column prop="customer" label="客户" min-width="160" />
           <el-table-column prop="date" label="日期" width="120" />
-          <el-table-column prop="total" label="金额" width="120">
+          <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
-          <el-table-column label="优惠" width="100">
+          <el-table-column label="优惠" width="100" align="right">
             <template #default="{ row }">
               <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
@@ -115,7 +115,7 @@
       <el-empty v-if="!filteredSales.length" :description="`${periodTitle}暂无销售单`" />
     </el-card>
 
-    <el-card style="margin-top:16px">
+    <el-card>
       <template #header><b>库存概览</b></template>
       <div class="stat-grid">
         <div class="stat-item"><el-statistic title="商品数" :value="stats.itemCount" /></div>
@@ -128,8 +128,8 @@
       <el-table :data="filteredLowStock" stripe>
         <el-table-column prop="code" label="编码" width="140" />
         <el-table-column prop="name" label="名称" />
-        <el-table-column prop="stock" label="库存" width="100" />
-        <el-table-column label="预警值" width="170">
+        <el-table-column prop="stock" label="库存" width="100"  align="right"/>
+        <el-table-column label="预警值" width="170" align="right">
           <template #default="{ row }">
             <el-input-number
               :model-value="Number(row.warning || 0)"
@@ -307,10 +307,10 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-label { color: #606266; font-size: 14px; }
-.filter-sep { color: #909399; }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
+.filter-sep { color:var(--text-secondary); }
 .search-input { margin: 8px 0 12px; max-width: 360px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
-.discount { color: #67c23a; }
-.none { color: #c0c4cc; }
+.discount { color:var(--color-success); }
+.none { color:var(--text-placeholder); }
 </style>

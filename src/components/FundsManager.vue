@@ -45,7 +45,7 @@
           <div class="stat-sub">{{ stats.discountCount }} 单含优惠</div>
         </div>
         <div class="stat-item">
-          <el-statistic :title="`${L.unpaid}合计`" :value="stats.unpaid" :precision="2" prefix="¥" value-style="color:#f56c6c" />
+          <el-statistic :title="`${L.unpaid}合计`" :value="stats.unpaid" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
           <div class="stat-sub">{{ stats.openCount }} 单未结清</div>
         </div>
       </div>
@@ -61,25 +61,25 @@
             </el-table-column>
             <el-table-column :prop="partyKey" :label="L.party" min-width="150" show-overflow-tooltip />
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column :label="L.itemsLabel" width="100">
+            <el-table-column :label="L.itemsLabel" width="100" align="right">
               <template #default="{ row }">{{ orderKindCount(row) }}</template>
             </el-table-column>
-            <el-table-column :label="L.due" width="110">
+            <el-table-column :label="L.due" width="110" align="right">
               <template #default="{ row }">{{ dueOf(row).toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column :label="L.paid" width="120">
+            <el-table-column :label="L.paid" width="120" align="right">
               <template #default="{ row }">
                 <span>{{ paidSumOf(row).toFixed(2) }}</span>
                 <span v-if="payCountOf(row)" class="pay-count">（{{ payCountOf(row) }} 笔）</span>
               </template>
             </el-table-column>
-            <el-table-column label="优惠" width="100">
+            <el-table-column label="优惠" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
-            <el-table-column :label="L.unpaid" width="110">
+            <el-table-column :label="L.unpaid" width="110" align="right">
               <template #default="{ row }">
                 <span :class="netOf(row) > 0 ? 'debt' : 'none'">{{ netOf(row).toFixed(2) }}</span>
               </template>
@@ -119,14 +119,14 @@
                 <router-link :to="`${L.partyPath}${row.code || ''}`" class="link">{{ row.party }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column prop="count" label="单数" width="90" />
-            <el-table-column :label="L.due" width="120">
+            <el-table-column prop="count" label="单数" width="90"  align="right"/>
+            <el-table-column :label="L.due" width="120" align="right">
               <template #default="{ row }">{{ row.due.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column :label="L.paid" width="120">
+            <el-table-column :label="L.paid" width="120" align="right">
               <template #default="{ row }">{{ row.paid.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column :label="L.unpaid" width="120">
+            <el-table-column :label="L.unpaid" width="120" align="right">
               <template #default="{ row }">
                 <span :class="row.unpaid > 0 ? 'debt' : 'none'">{{ row.unpaid.toFixed(2) }}</span>
               </template>
@@ -340,20 +340,20 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.header-sub { color: #909399; font-size: 12px; font-weight: 400; }
+.header-sub { color:var(--text-secondary); font-size:var(--fs-sub); font-weight: 400; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-label { color: #606266; font-size: 14px; }
-.filter-sep { color: #909399; }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
+.filter-sep { color:var(--text-secondary); }
 .search-input { max-width: 360px; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 4px; }
-.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+.stat-item { padding: 12px 16px; background:var(--bg-stat); border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.stat-sub { margin-top: 4px; color:var(--text-secondary); font-size:var(--fs-sub); }
 .funds-tabs { margin-top: 12px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
-.pay-count { color: #909399; font-size: 12px; margin-left: 2px; }
-.discount { color: #67c23a; }
-.none { color: #c0c4cc; }
-.debt { color: #f56c6c; font-weight: 600; }
+.pay-count { color:var(--text-secondary); font-size:var(--fs-sub); margin-left: 2px; }
+.discount { color:var(--color-success); }
+.none { color:var(--text-placeholder); }
+.debt { color:var(--color-danger); font-weight: 600; }
 </style>

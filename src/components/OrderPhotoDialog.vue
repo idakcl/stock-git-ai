@@ -52,5 +52,5 @@ async function save() {
 </script>
 
 <style scoped>
-.dlg-tip { color: #909399; font-size: 12px; line-height: 1.6; margin-top: 4px; }
+.dlg-tip { color:var(--text-secondary); font-size:var(--fs-sub); line-height: 1.6; margin-top: 4px; }
 </style>

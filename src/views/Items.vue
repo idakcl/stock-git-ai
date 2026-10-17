@@ -21,7 +21,7 @@
           <div class="stat-sub">{{ inStockCount }} 项有库存</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="库存预警" :value="warningCount" suffix="项" value-style="color:#f56c6c" />
+          <el-statistic title="库存预警" :value="warningCount" suffix="项" value-style="color:var(--color-danger)" />
           <div class="stat-sub">{{ zeroStockCount }} 项零库存</div>
         </div>
       </div>
@@ -263,10 +263,10 @@ async function remove(row) {
 <style scoped>
 .card-header { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px; }
-.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+.stat-item { padding: 12px 16px; background:var(--bg-stat); border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.stat-sub { margin-top: 4px; color:var(--text-secondary); font-size:var(--fs-sub); }
 .filter-row { display:flex; align-items:center; gap:var(--gap-sm); flex-wrap:wrap; margin-bottom:var(--gap-md); }
 .filter-label { color:var(--text-regular); font-size:var(--fs-base); }
 .filter-select { width:220px; }

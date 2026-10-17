@@ -33,8 +33,8 @@ const photos = computed(() => (props.value || [])
   height: 64px;
   border-radius: 6px;
   border: 1px solid #e4e7ed;
-  background: #f5f7fa;
+  background:var(--bg-page);
   cursor: pointer;
 }
-.none { color: #c0c4cc; }
+.none { color:var(--text-placeholder); }
 </style>

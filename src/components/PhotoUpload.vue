@@ -136,6 +136,6 @@ function onChange(file, files) {
 
 <style scoped>
 .photo-upload { width: 100%; }
-.tip { color: #909399; font-size: 12px; margin-top: 6px; }
-.tip.uploading { color: #e6a23c; }
+.tip { color:var(--text-secondary); font-size:var(--fs-sub); margin-top: 6px; }
+.tip.uploading { color:var(--color-warning); }
 </style>

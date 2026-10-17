@@ -7,10 +7,10 @@
       <el-table :data="filtered" stripe empty-text="暂无库存数据">
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column prop="name" label="名称" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="qty" label="库存数量" width="120" />
+        <el-table-column prop="qty" label="库存数量" width="120"  align="right"/>
         <el-table-column prop="unit" label="单位" width="80" />
-        <el-table-column prop="cost" label="成本价" width="120" :formatter="fmtMoney" />
-        <el-table-column prop="value" label="库存金额" width="140" :formatter="fmtMoney" />
+        <el-table-column prop="cost" label="成本价" width="120" :formatter="fmtMoney"  align="right"/>
+        <el-table-column prop="value" label="库存金额" width="140" :formatter="fmtMoney"  align="right"/>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag v-if="row.qty < 0" type="danger">负库存</el-tag>

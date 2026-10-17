@@ -118,14 +118,14 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 22px;
+  font-size:22px;
   font-weight: 700;
 }
-.brand-title { font-size: 18px; font-weight: 700; letter-spacing: .5px; }
-.brand-sub { margin-top: 2px; font-size: 12px; opacity: .85; }
+.brand-title { font-size:18px; font-weight: 700; letter-spacing: .5px; }
+.brand-sub { margin-top: 2px; font-size:var(--fs-sub); opacity: .85; }
 .panel { padding: 24px 28px 26px; }
-.panel-title { font-size: 20px; font-weight: 700; color: #303133; }
-.panel-sub { margin: 4px 0 18px; font-size: 13px; color: #909399; }
+.panel-title { font-size:20px; font-weight: 700; color:var(--text-primary); }
+.panel-sub { margin: 4px 0 18px; font-size:var(--fs-table); color:var(--text-secondary); }
 .form { margin-top: 4px; }
 .remember { margin-bottom: 14px; }
 .submit { width: 100%; letter-spacing: 4px; }
@@ -134,8 +134,8 @@ async function onSubmit() {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: #a8abb2;
+  font-size:var(--fs-sub);
+  color:var(--text-disabled);
 }
-.foot { margin-top: 18px; font-size: 12px; color: #b1b3b8; }
+.foot { margin-top: 18px; font-size:var(--fs-sub); color:#b1b3b8; }
 </style>

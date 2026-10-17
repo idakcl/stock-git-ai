@@ -28,22 +28,22 @@
         </el-table-column>
         <el-table-column prop="supplier" label="供应商" width="170" />
         <el-table-column prop="date" label="日期" width="120" />
-        <el-table-column prop="total" label="金额" width="110">
+        <el-table-column prop="total" label="金额" width="110" align="right">
           <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
         </el-table-column>
-        <el-table-column label="实付" width="120">
+        <el-table-column label="实付" width="120" align="right">
           <template #default="{ row }">
             <span>{{ paidSumOf(row).toFixed(2) }}</span>
             <span v-if="(ensurePayments(row, 'paid')).length" class="pay-count">（{{ ensurePayments(row, 'paid').length }} 笔）</span>
           </template>
         </el-table-column>
-        <el-table-column label="优惠" width="100">
+        <el-table-column label="优惠" width="100" align="right">
           <template #default="{ row }">
             <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际付款">-{{ Number(row.discount).toFixed(2) }}</span>
             <span v-else class="none">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="未付" width="110">
+        <el-table-column label="未付" width="110" align="right">
           <template #default="{ row }">
             <span :class="payableOf(row) > 0 ? 'debt' : 'none'">{{ payableOf(row).toFixed(2) }}</span>
           </template>
@@ -125,10 +125,10 @@
             </el-select>
           </template>
         </el-table-column>
-        <el-table-column label="数量" width="100">
+        <el-table-column label="数量" width="100" align="right">
           <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" /></template>
         </el-table-column>
-        <el-table-column label="单价" width="100">
+        <el-table-column label="单价" width="100" align="right">
           <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" /></template>
         </el-table-column>
         <el-table-column label="" width="60">
@@ -467,12 +467,12 @@ async function remove(row) {
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
-.filter-label{color:#606266;font-size:14px;}
-.filter-sep{color:#909399;}
+.filter-label{color:var(--text-regular);font-size:var(--fs-base);}
+.filter-sep{color:var(--text-secondary);}
 .pager{margin-top:12px;justify-content:flex-end;}
-.discount{color:#67c23a;}
-.none{color:#c0c4cc;}
-.debt{color:#f56c6c;font-weight:600;}
-.calc-line{display:flex;gap:20px;flex-wrap:wrap;color:#606266;font-size:13px;}
-.calc-hint{color:#909399;font-weight:400;}
+.discount{color:var(--color-success);}
+.none{color:var(--text-placeholder);}
+.debt{color:var(--color-danger);font-weight:600;}
+.calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
+.calc-hint{color:var(--text-secondary);font-weight:400;}
 </style>

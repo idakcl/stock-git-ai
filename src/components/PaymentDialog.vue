@@ -7,10 +7,10 @@
       <span>{{ kind === 'payable' ? '未付' : '未收' }}：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b></span>
     </div>
 
-    <el-table :data="rows" stripe size="small" empty-text="暂无收付款记录">
+    <el-table :data="rows" stripe empty-text="暂无收付款记录">
       <el-table-column type="index" label="#" width="46" />
       <el-table-column prop="date" label="日期" width="130" />
-      <el-table-column prop="amount" label="金额" width="120">
+      <el-table-column prop="amount" label="金额" width="120" align="right">
         <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
@@ -172,7 +172,7 @@ async function saveAll() {
         h('div', null, [
           h('p', { style: 'margin:0 0 6px;line-height:1.6' }, `本单${isPay ? '应付' : '应收'} ¥${due.toFixed(2)}，本次${action}合计 ¥${paidSum.toFixed(2)}，差额 ¥${gap.toFixed(2)}。`),
           h('p', { style: 'margin:0 0 6px;line-height:1.6' }, `确认后差额作为优惠入账，本单按 ¥${paidSum.toFixed(2)} 结清。`),
-          h('p', { style: 'margin:0;color:#909399;font-size:12px;line-height:1.6' }, `取消则仅记部分${action}，账单保持挂账。`)
+          h('p', { style: 'margin:0;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.6' }, `取消则仅记部分${action}，账单保持挂账。`)
         ]),
         '优惠结清确认',
         { type: 'warning', confirmButtonText: '确认优惠结清', cancelButtonText: `仅记部分${action}`, distinguishCancelAndClose: true }
@@ -196,12 +196,12 @@ function onClosed() {
 </script>
 
 <style scoped>
-.pay-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color: #606266; font-size: 14px; }
+.pay-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
 .pay-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
-.pay-hint { margin-top: 6px; color: #909399; font-size: 12px; }
-.editing-tip { margin-left: 6px; color: #e6a23c; }
-.discount { color: #67c23a; }
+.pay-hint { margin-top: 6px; color:var(--text-secondary); font-size:var(--fs-sub); }
+.editing-tip { margin-left: 6px; color:var(--color-warning); }
+.discount { color:var(--color-success); }
 .is-editing { font-weight: 600; }
-.debt { color: #f56c6c; }
-.zero { color: #67c23a; }
+.debt { color:var(--color-danger); }
+.zero { color:var(--color-success); }
 </style>

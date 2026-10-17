@@ -19,7 +19,7 @@
     </el-card>
 
     <!-- 采购与应付款：供应商筛选只作用于本分区 -->
-    <el-card class="section-card">
+    <el-card>
       <template #header>
         <div class="card-header">
           <b>采购与应付款</b>
@@ -43,7 +43,7 @@
           <div class="stat-sub">{{ stats.purchasePayCount }} 笔付款流水</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="应付款（未付合计）" :value="stats.payable" :precision="2" prefix="¥" value-style="color:#f56c6c" />
+          <el-statistic title="应付款（未付合计）" :value="stats.payable" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
           <div class="stat-sub">共 {{ stats.payableCount }} 单 · 未付清 {{ stats.payableOpen }} 单</div>
         </div>
       </div>
@@ -81,7 +81,7 @@
     </el-card>
 
     <!-- 销售与应收款：客户筛选只作用于本分区 -->
-    <el-card class="section-card">
+    <el-card>
       <template #header>
         <div class="card-header">
           <b>销售与应收款</b>
@@ -105,7 +105,7 @@
           <div class="stat-sub">销售总额 − 销售成本</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="应收款（未收合计）" :value="stats.receivable" :precision="2" prefix="¥" value-style="color:#f56c6c" />
+          <el-statistic title="应收款（未收合计）" :value="stats.receivable" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
           <div class="stat-sub">共 {{ stats.receivableCount }} 单 · 未收清 {{ stats.receivableOpen }} 单</div>
         </div>
       </div>
@@ -143,7 +143,7 @@
     </el-card>
 
     <!-- 按商品销售汇总：随客户 + 时间段 + 关键词联动 -->
-    <el-card class="section-card">
+    <el-card>
       <template #header>
         <div class="card-header">
           <b>按商品销售汇总</b>
@@ -208,7 +208,7 @@
     </el-card>
 
     <!-- 按商品采购汇总：随供应商 + 时间段 + 关键词联动，按进价口径看采购维度 -->
-    <el-card class="section-card">
+    <el-card>
       <template #header>
         <div class="card-header">
           <b>按商品采购汇总</b>
@@ -598,53 +598,52 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.section-card { margin-top: 16px; }
-.section-sub { color: #909399; font-size: 12px; font-weight: 400; }
+.section-sub { color:var(--text-secondary); font-size:var(--fs-sub); font-weight: 400; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-label { color: #606266; font-size: 14px; }
-.filter-sep { color: #909399; }
-.filter-hint { color: #c0c4cc; font-size: 12px; }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
+.filter-sep { color:var(--text-secondary); }
+.filter-hint { color:var(--text-placeholder); font-size:var(--fs-sub); }
 .search-input { max-width: 280px; }
 .tool-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 8px 0 6px; }
-.pager-info { color: #909399; font-size: 12px; margin-bottom: 6px; }
+.pager-info { color:var(--text-secondary); font-size:var(--fs-sub); margin-bottom: 6px; }
 .pager-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 .pager-row :deep(.el-pagination) { padding: 0; }
 .pager-nav { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.pager-pos { color: #606266; font-size: 13px; min-width: 96px; text-align: center; font-variant-numeric: tabular-nums; }
+.pager-pos { color:var(--text-regular); font-size:var(--fs-table); min-width: 96px; text-align: center; font-variant-numeric: tabular-nums; }
 .size-select { width: 116px; }
 /* 虚拟滚动表格：外观对齐普通表格 */
-.v2-table { border: 1px solid #ebeef5; border-radius: 6px; overflow: hidden; margin-top: 8px; }
-.v2-table :deep(.el-table-v2__header-row) { background: #fafbfc; font-weight: 600; color: #606266; }
-.v2-table :deep(.el-table-v2__row) { font-size: 13px; }
-.v2-table :deep(.el-table-v2__row:hover) { background: #f5f7fa; }
-.v2-table :deep(.el-table-v2__footer) { background: #fafbfc; font-size: 13px; }
-.v2-footer { display: flex; align-items: center; width: 100%; height: 100%; padding: 0 12px; font-size: 13px; color: #606266; }
+.v2-table { border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; margin-top: 8px; }
+.v2-table :deep(.el-table-v2__header-row) { background:var(--bg-soft); font-weight: 600; color:var(--text-regular); }
+.v2-table :deep(.el-table-v2__row) { font-size:var(--fs-table); }
+.v2-table :deep(.el-table-v2__row:hover) { background:var(--bg-page); }
+.v2-table :deep(.el-table-v2__footer) { background:var(--bg-soft); font-size:var(--fs-table); }
+.v2-footer { display: flex; align-items: center; width: 100%; height: 100%; padding: 0 12px; font-size:var(--fs-table); color:var(--text-regular); }
 .v2-footer .f-flex { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .v2-footer .f-num { flex: none; text-align: right; padding-right: 12px; }
-.v2-footer .strong { font-weight: 700; color: #303133; }
+.v2-footer .strong { font-weight: 700; color:var(--text-primary); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
-.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+.stat-item { padding: 12px 16px; background:var(--bg-stat); border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.stat-sub { margin-top: 4px; color:var(--text-secondary); font-size:var(--fs-sub); }
 /* 迷你趋势条：纯 CSS 柱状图，随分区筛选联动；点击柱子显示当月数额 */
-.trend-block { margin-top: 12px; border-top: 1px dashed #ebeef5; padding-top: 10px; }
+.trend-block { margin-top: 12px; border-top: 1px dashed var(--border-color); padding-top: 10px; }
 .trend-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
-.trend-title { font-size: 13px; color: #606266; font-weight: 600; }
-.trend-caption { font-size: 12px; color: #909399; display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
-.trend-caption .trend-strong { color: #303133; font-weight: 700; }
+.trend-title { font-size:var(--fs-table); color:var(--text-regular); font-weight: 600; }
+.trend-caption { font-size:var(--fs-sub); color:var(--text-secondary); display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.trend-caption .trend-strong { color:var(--text-primary); font-weight: 700; }
 .trend-bars { display: flex; align-items: flex-end; gap: 3px; height: 64px; }
 .trend-col { flex: 1; min-width: 0; height: 100%; display: flex; align-items: flex-end; position: relative; cursor: pointer; }
 .trend-col:hover .trend-bar { filter: brightness(0.92); }
 .trend-col.active .trend-bar { filter: brightness(0.82); }
 .trend-val { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap; font-size: var(--fs-mini); font-weight: 700; background: rgba(255, 255, 255, .92); padding: 0 3px; border-radius: 2px; z-index: 2; pointer-events: none; }
-.trend-bar { flex: 1; min-width: 0; border-radius: 2px 2px 0 0; background: #e6a23c; transition: height .2s; }
-.trend-bar.sale { background: #409eff; }
-.trend-bar.is-zero { height: 2px; background: #ebeef5; }
+.trend-bar { flex: 1; min-width: 0; border-radius: 2px 2px 0 0; background:var(--color-warning); transition: height .2s; }
+.trend-bar.sale { background:var(--color-primary); }
+.trend-bar.is-zero { height: 2px; background:var(--border-color); }
 .trend-labels { display: flex; gap: 3px; margin-top: 4px; }
 .trend-labels span { flex: 1; min-width: 0; text-align: center; font-size: var(--fs-mini); color: var(--text-placeholder); white-space: nowrap; overflow: hidden; }
-.trend-labels span.active { color: #606266; font-weight: 700; }
+.trend-labels span.active { color:var(--text-regular); font-weight: 700; }
 /* 汇总表排序切换 */
 .sort-group { display: inline-flex; align-items: center; gap: 6px; }
-.sort-group .el-radio-button--small .el-radio-button__inner { padding: 5px 12px; font-size: 12px; }
+.sort-group .el-radio-button--small .el-radio-button__inner { padding: 5px 12px; font-size:var(--fs-sub); }
 </style>

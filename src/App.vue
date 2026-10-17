@@ -93,30 +93,53 @@ async function onLogout() {
 </script>
 
 <style>
-/* ---------- 设计变量：全站字体/间距/配色的唯一来源 ---------- */
+/* ==================== 设计变量：全站唯一来源 ==================== */
 :root {
-  /* 字号四档：正文 14 / 表格 13 / 次要 12 / 辅助 11（不再出现零散数值） */
+  /* 字号五档：正文 14 / 表格 13 / 次要 12 / 辅助 11 / 标题 16 */
   --fs-base: 14px;
   --fs-table: 13px;
   --fs-sub: 12px;
   --fs-mini: 11px;
+  --fs-title: 16px;
+  --fs-display: 22px;
   /* 间距：4px 栅格 */
   --gap-xs: 4px;
   --gap-sm: 8px;
   --gap-md: 12px;
   --gap-lg: 16px;
   --gap-xl: 24px;
-  /* 文字 / 线条 / 背景 */
+  /* 文字 */
   --text-primary: #303133;
   --text-regular: #606266;
   --text-secondary: #909399;
   --text-placeholder: #c0c4cc;
-  --border-color: #ebeef5;
+  --text-disabled: #a8abb2;
+  /* 线条 / 背景 */
+  --border-color:var(--border-color);
+  --border-light: #f5f7fa;
   --bg-page: #f5f7fa;
   --bg-soft: #fafbfc;
+  --bg-stat: #f8f9fb;
+  --bg-hover: #f5f7fa;
+  --bg-menu-active: #ecf5ff;
+  /* 语义色 */
+  --color-primary: #409eff;
+  --color-success: #67c23a;
+  --color-warning: #e6a23c;
+  --color-danger: #f56c6c;
+  --brand-gradient: linear-gradient(135deg, #409eff, #2f7fe0);
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  /* 阴影 */
+  --shadow-card: 0 1px 3px rgba(31, 45, 61, 0.04);
+  /* 表格行高两档：主表 / 从属内表 */
+  --td-pad: 10px;
+  --td-pad-sm: 8px;
 }
 
-/* ---------- 全局基础 ---------- */
+/* ==================== 全局基础 ==================== */
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body {
@@ -128,48 +151,59 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---------- 布局 ---------- */
+/* 滚动条统一（全站，含表格内与内容区） */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background:#dcdfe6;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background:var(--text-placeholder); background-clip: content-box; }
+
+/* ==================== 布局 ==================== */
 .layout { height: 100%; flex-direction: column; }
 .body { flex: 1; min-height: 0; }
 
 /* 顶栏：桌面/移动统一显示，承载系统名与退出登录 */
 .header {
   height: 56px;
-  padding: 0 12px 0 8px;
+  padding: 0 var(--gap-md) 0 var(--gap-sm);
   display: flex;
   align-items: center;
   justify-content: space-between;
   background: #fff;
-  border-bottom: 1px solid #ebeef5;
+  border-bottom: 1px solid var(--border-color);
   flex: none;
 }
 .header-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
+  gap: var(--gap-sm);
+  font-size: var(--fs-title);
   font-weight: 700;
-  color: #303133;
+  color: var(--text-primary);
 }
 .logo-dot {
   width: 26px; height: 26px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #409eff, #2f7fe0);
+  border-radius: var(--radius-md);
+  background: var(--brand-gradient);
   color: #fff;
-  font-size: 15px;
+  font-size:15px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 .header-right { display: flex; align-items: center; gap: 10px; }
-.build-tag { color: #c0c4cc; font-size: 12px; }
-.logout-btn { color: #606266; }
-.logout-btn:hover { color: #f56c6c; }
+.build-tag { color: var(--text-placeholder); font-size: var(--fs-sub); }
+.logout-btn { color: var(--text-regular); }
+.logout-btn:hover { color: var(--color-danger); }
 
 /* 侧边栏 */
 .aside {
   background: #fff;
-  border-right: 1px solid #ebeef5;
+  border-right: 1px solid var(--border-color);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -181,68 +215,127 @@ body {
   justify-content: center;
   gap: 10px;
   flex: none;
-  border-bottom: 1px solid #f5f7fa;
+  border-bottom: 1px solid var(--border-light);
 }
 .logo-mark {
   width: 32px; height: 32px;
   border-radius: 9px;
-  background: linear-gradient(135deg, #409eff, #2f7fe0);
+  background: var(--brand-gradient);
   color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size:18px;
   font-weight: 700;
 }
 .logo-text { line-height: 1.2; }
-.logo-title { font-size: 16px; font-weight: 700; color: #303133; }
-.logo-sub { font-size: 11px; color: #a8abb2; }
+.logo-title { font-size: var(--fs-title); font-weight: 700; color: var(--text-primary); }
+.logo-sub { font-size: var(--fs-mini); color: var(--text-disabled); }
 .aside .menu { flex: 1; }
-.build-info { padding: 10px 16px; color: #c0c4cc; font-size: 12px; border-top: 1px solid #f5f7fa; flex: none; }
-.main { padding: 16px; overflow-y: auto; min-width: 0; }
-.menu-btn { padding: 8px; }
+.build-info { padding: 10px var(--gap-lg); color: var(--text-placeholder); font-size: var(--fs-sub); border-top: 1px solid var(--border-light); flex: none; }
+.main { padding: var(--gap-lg); overflow-y: auto; min-width: 0; }
+.menu-btn { padding: var(--gap-sm); }
 
-/* ---------- 统一风格：卡片 / 统计块 / 表格 / 链接 ---------- */
+/* ==================== 卡片 ==================== */
 .el-card {
-  border-radius: 10px !important;
-  border: 1px solid #ebeef5 !important;
-  box-shadow: 0 1px 3px rgba(31, 45, 61, 0.04) !important;
+  border-radius: var(--radius-lg) !important;
+  border: 1px solid var(--border-color) !important;
+  box-shadow: var(--shadow-card) !important;
   /* 卡片默认是 overflow:hidden，会把内部表格的 sticky 表头「困」在卡片里而永不吸顶 */
   overflow: visible !important;
 }
 /* 卡片主体默认 overflow:auto 同理，必须一并解除；卡片内宽表改由 .main 横向滚动承接 */
-.el-card__body { overflow: visible !important; }
+.el-card__body { overflow: visible !important; padding: var(--gap-lg) !important; }
+.el-card__header {
+  padding: var(--gap-md) var(--gap-lg) !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
 .el-card + .el-card { margin-top: var(--gap-lg); }
-.card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 卡片头部：标题居左、操作居右，全站唯一写法 */
+.card-header { display: flex; justify-content: space-between; align-items: center; gap: var(--gap-sm); flex-wrap: wrap; }
 
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-.stat-item { padding: 12px 16px; background: #f8f9fb; border-radius: 8px; min-width: 0; }
+/* ==================== 通用工具类 ==================== */
+/* 筛选/工具行：同类页面结构统一，避免五套写法 */
+.filter-row,
+.tool-row { display: flex; align-items: center; gap: var(--gap-sm); flex-wrap: wrap; }
+.filter-label { color: var(--text-regular); font-size: var(--fs-base); }
+.filter-sep { color: var(--text-secondary); }
+.section-title { font-size: var(--fs-title); font-weight: 600; }
+.search-input { margin-bottom: var(--gap-md); max-width: 360px; }
+.mt-md { margin-top: var(--gap-md); }
+/* 空态：列表/卡片内统一的空数据提示，替代各页自造的写法 */
+.empty { padding: var(--gap-xl) 0; text-align: center; color: var(--text-secondary); font-size: var(--fs-sub); }
+
+/* 统计块：全站统一栅格与卡片；卡片内已统一间距的页面不再重复声明 */
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--gap-md); }
+.stat-item { padding: var(--gap-md) var(--gap-lg); background: var(--bg-stat); border-radius: var(--radius-md); min-width: 0; }
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
+.stat-sub { margin-top: var(--gap-xs); color: var(--text-secondary); font-size: var(--fs-sub); }
 
-/* ---------- 表格列标题吸顶（整页滚动时固定在内容区顶部，即顶栏正下方）---------- */
-/* 前提：必须解除 EP 自带的 .el-table / .el-table__body-wrapper 的 overflow:hidden 与 .el-table 的
+/* ==================== Element Plus 组件规格统一 ==================== */
+/* 按钮：圆角统一；字号按尺寸档位（字号仍需覆盖，EP 默认按钮偏大） */
+.el-button { border-radius: var(--radius-sm) !important; font-size: var(--fs-base); }
+.el-button--small { font-size: var(--fs-sub); }
+.el-button--large { font-size: var(--fs-base); }
+/* 输入类控件圆角 */
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner { border-radius: var(--radius-sm) !important; }
+.el-input__inner, .el-select__placeholder { font-size: var(--fs-base); }
+.el-input--small .el-input__inner { font-size: var(--fs-sub); }
+/* 标签 */
+.el-tag { border-radius: 4px; font-size: var(--fs-sub); border-radius: var(--radius-sm); }
+/* 分页 */
+.el-pagination { font-size: var(--fs-table); }
+/* 弹窗 */
+.el-dialog { border-radius: var(--radius-lg) !important; }
+.el-dialog__title { font-size: var(--fs-title); font-weight: 600; }
+.el-dialog__headerbtn { top: 10px; }
+/* 下拉/日期面板 */
+.el-picker__popper, .el-select-dropdown { border-radius: var(--radius-md) !important; }
+/* 消息提示 */
+.el-message { border-radius: var(--radius-sm); }
+
+/* ==================== 表格 ==================== */
+/* 列标题吸顶：整页滚动时固定在内容区顶部（顶栏正下方）。
+   前提：必须解除 EP 自带的 .el-table / .el-table__body-wrapper 的 overflow:hidden 与 .el-table 的
    max-width:100% 限制——否则 sticky 会被「困」在 .el-table 这个自身不滚动的盒子里而永不触发。
-   解法已实测：滚动 400px / 1200px 后，表头相对滚动容器顶部恒为 0，稳定吸顶。 */
+   已实测：滚动 400px / 1200px 后，表头相对滚动容器顶部恒为 0，稳定吸顶。 */
 .table-wrap { overflow: visible; }
 .table-wrap > .el-table { overflow: visible; max-width: none; width: max-content; min-width: 100%; }
 .table-wrap .el-table__inner-wrapper,
 .table-wrap .el-table__body-wrapper { overflow: visible; }
 /* top 取负值抵消 .main 的 padding，使表头正好停在顶栏下沿而不露出缝隙 */
 .table-wrap .el-table__header-wrapper { position: sticky; top: -16px; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
-/* 表格统一：无论各页是否单独写了 size="small"，行高与字号都收敛到同一档 */
-.el-table { font-size: var(--fs-table); }
-.el-table td.el-table__cell { padding: 10px 0; }
-.el-table th.el-table__cell { background: var(--bg-soft) !important; color: var(--text-regular); font-weight: 600; font-size: var(--fs-table); }
-.el-table .cell { line-height: 1.5; }
 
-.link { color: #409eff; cursor: pointer; text-decoration: none; }
+/* 表格统一：无论各页是否单独写了 size="small"，字号与行高都收敛到同一档 */
+.el-table { font-size: var(--fs-table); }
+.el-table th.el-table__cell {
+  padding: var(--td-pad) 0;
+  background: var(--bg-soft) !important;
+  color: var(--text-regular);
+  font-weight: 600;
+  font-size: var(--fs-table);
+  white-space: nowrap;
+}
+.el-table td.el-table__cell { padding: var(--td-pad) 0; }
+.el-table .cell { line-height: 1.5; }
+/* 斑马纹与悬浮态统一到同一色阶 */
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell { background: var(--bg-soft); }
+.el-table__body tr:hover > td.el-table__cell { background: var(--bg-hover) !important; }
+/* 空态 */
+.el-table__empty-text { color: var(--text-secondary); font-size: var(--fs-sub); }
+.el-empty__description { font-size: var(--fs-sub); color: var(--text-secondary); }
+
+.link { color: var(--color-primary); cursor: pointer; text-decoration: none; }
 .link:hover { text-decoration: underline; }
 
 @media (max-width: 768px) {
   .desktop-only { display: none; }
-  .main { padding: 12px; }
+  .main { padding: var(--gap-md); }
   .table-wrap .el-table__header-wrapper { top: -12px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-tag { display: none; }

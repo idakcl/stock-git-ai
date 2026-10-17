@@ -21,9 +21,9 @@
                 <el-table-column label="供应商" width="150" show-overflow-tooltip>
                   <template #default="{ row: h }">{{ h.supplierName || (supplierMap[h.supplier] || h.supplier || '') }}</template>
                 </el-table-column>
-                <el-table-column prop="qty" label="数量" width="80" />
-                <el-table-column prop="price" label="单价" width="90" />
-                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney" />
+                <el-table-column prop="qty" label="数量" width="80"  align="right"/>
+                <el-table-column prop="price" label="单价" width="90"  align="right"/>
+                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney"  align="right"/>
               </el-table>
               <div class="history-title" style="margin-top:12px">历史销售价</div>
               <el-table :data="sortedHistory(row.saleHistory)" border :fit="false">
@@ -32,9 +32,9 @@
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
                 <el-table-column prop="customer" label="客户" width="150" show-overflow-tooltip />
-                <el-table-column prop="qty" label="数量" width="80" />
-                <el-table-column prop="price" label="单价" width="90" />
-                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney" />
+                <el-table-column prop="qty" label="数量" width="80"  align="right"/>
+                <el-table-column prop="price" label="单价" width="90"  align="right"/>
+                <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney"  align="right"/>
               </el-table>
               <div v-if="row.package" class="history-title" style="margin-top:12px">规格/包装：{{ row.package }}</div>
               <div class="history-title" style="margin-top:12px">
@@ -56,7 +56,7 @@
         <el-table-column label="供应商" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ supplierNames(row) }}</template>
         </el-table-column>
-        <el-table-column v-if="showCost" prop="cost" label="进价" width="100" />
+        <el-table-column v-if="showCost" prop="cost" label="进价" width="100"  align="right"/>
         <el-table-column
           v-for="col in priceColumns"
           :key="col.prop"
@@ -151,12 +151,12 @@ onMounted(async () => {
 .search-input { margin-bottom: 12px; max-width: 360px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 /* 展开区与商品行保持同一字号字重：标题不再加粗变色，避免折叠内容显得比商品行大 */
-.history { padding: 8px 16px; font-size: 13px; color: #606266; }
-.history-title { font-weight: 400; margin-bottom: 6px; color: #303133; }
+.history { padding: 8px 16px; font-size:var(--fs-table); color:var(--text-regular); }
+.history-title { font-weight: 400; margin-bottom: 6px; color:var(--text-primary); }
 /* 内表是从属信息：比商品行（13px）小一号为 12px，行高收紧，且 :fit="false" 不铺满容器右侧留白，
    避免弹性列被拉到 800+px 后「宽框里几个字」显得字大又空 */
-.history :deep(.el-table) { font-size: 12px; color: #606266; font-family: inherit; }
-.history :deep(.el-table th.el-table__cell) { font-size: 12px; font-weight: 600; color: #606266; }
-.history :deep(.el-table td.el-table__cell) { font-size: 12px; font-weight: 400; padding: 8px 0; }
+.history :deep(.el-table) { font-size:var(--fs-sub); color:var(--text-regular); font-family: inherit; }
+.history :deep(.el-table th.el-table__cell) { font-size:var(--fs-sub); font-weight: 600; color:var(--text-regular); }
+.history :deep(.el-table td.el-table__cell) { font-size:var(--fs-sub); font-weight: 400; padding: 8px 0; }
 /* 列标题吸顶的样式在 App.vue 全局处理（需同时解除 EP 的 overflow 限制，放在局部 scoped 里会失效） */
 </style>

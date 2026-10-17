@@ -38,9 +38,9 @@
       </div>
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
         <template #extra>
-          <el-table-column prop="_qty" label="本次数量" width="100" />
-          <el-table-column prop="_price" label="本次单价" width="100" />
-          <el-table-column prop="_total" label="本次金额" width="100" />
+          <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
+          <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
+          <el-table-column prop="_total" label="本次金额" width="100"  align="right"/>
         </template>
       </ProductTable>
     </el-card>
@@ -52,10 +52,10 @@
           <el-button type="primary" size="small" @click="payDialog = true">记录收款</el-button>
         </div>
       </template>
-      <el-table :data="payments" stripe size="small" empty-text="暂无收款记录，可点右上角「记录收款」分多笔登记">
+      <el-table :data="payments" stripe empty-text="暂无收款记录，可点右上角「记录收款」分多笔登记">
         <el-table-column type="index" label="#" width="46" />
         <el-table-column prop="date" label="日期" width="140" />
-        <el-table-column label="金额" width="130">
+        <el-table-column label="金额" width="130" align="right">
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
@@ -163,10 +163,10 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; align-items: center; }
+.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .photos-block { margin-bottom: 12px; }
-.photos-title { font-weight: 600; margin-bottom: 6px; color: #409eff; display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.photos-title { font-weight: 600; margin-bottom: 6px; color:var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pay-card { margin-top: 12px; }
-.debt { color: #f56c6c; }
-.zero { color: #67c23a; }
+.debt { color:var(--color-danger); }
+.zero { color:var(--color-success); }
 </style>

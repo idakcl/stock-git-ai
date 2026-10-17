@@ -38,13 +38,13 @@
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column prop="total" label="金额" width="110">
+            <el-table-column prop="total" label="金额" width="110" align="right">
               <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column label="实付" width="110">
+            <el-table-column label="实付" width="110" align="right">
               <template #default="{ row }">{{ row.paid != null ? Number(row.paid).toFixed(2) : '—' }}</template>
             </el-table-column>
-            <el-table-column label="优惠" width="100">
+            <el-table-column label="优惠" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际付款">-{{ Number(row.discount).toFixed(2) }}</span>
                 <span v-else class="none">—</span>
@@ -73,24 +73,24 @@
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="summary" label="摘要" width="120" />
-            <el-table-column prop="amount" label="应付金额" width="120">
+            <el-table-column prop="amount" label="应付金额" width="120" align="right">
               <template #default="{ row }">{{ row.amount.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column prop="paid" label="实付金额" width="120">
+            <el-table-column prop="paid" label="实付金额" width="120" align="right">
               <template #default="{ row }">{{ row.paid.toFixed(2) }}</template>
             </el-table-column>
-            <el-table-column prop="discount" label="优惠" width="100">
+            <el-table-column prop="discount" label="优惠" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="row.discount > 0" class="discount">-{{ row.discount.toFixed(2) }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
-            <el-table-column prop="unpaid" label="未结金额" width="120">
+            <el-table-column prop="unpaid" label="未结金额" width="120" align="right">
               <template #default="{ row }">
                 <span :class="row.unpaid > 0 ? 'amount-debt' : 'none'">{{ row.unpaid.toFixed(2) }}</span>
               </template>
             </el-table-column>
-            <el-table-column prop="balance" label="累计欠款" width="130">
+            <el-table-column prop="balance" label="累计欠款" width="130" align="right">
               <template #default="{ row }">
                 <b :class="row.balance > 0 ? 'amount-debt' : 'amount-zero'">{{ row.balance.toFixed(2) }}</b>
               </template>
@@ -216,16 +216,15 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sub { color: #909399; font-weight: 400; }
-.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: #606266; font-size: 14px; }
+.sub { color:var(--text-secondary); font-weight: 400; }
+.info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-.filter-label { color: #606266; font-size: 14px; }
-.filter-sep { color: #909399; }
-.empty { color: #909399; text-align: center; padding: 24px 0; }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
+.filter-sep { color:var(--text-secondary); }
 .amount-item { display: inline-flex; align-items: center; gap: 4px; }
-.amount-debt { color: #f56c6c; font-weight: 700; }
-.amount-zero { color: #c0c4cc; }
-.none { color: #c0c4cc; }
-.discount { color: #67c23a; }
-.balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color: #606266; font-size: 14px; }
+.amount-debt { color:var(--color-danger); font-weight: 700; }
+.amount-zero { color:var(--text-placeholder); }
+.none { color:var(--text-placeholder); }
+.discount { color:var(--color-success); }
+.balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
 </style>
