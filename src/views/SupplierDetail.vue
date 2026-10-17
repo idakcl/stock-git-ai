@@ -30,7 +30,7 @@
 
       <el-tabs v-model="tab">
         <el-tab-pane label="产品列表" name="products">
-          <ProductTable :items="products" search-placeholder="搜索该供应商商品" show-price-tiers />
+          <ProductTable :items="products" search-placeholder="搜索该供应商商品" />
         </el-tab-pane>
         <el-tab-pane :label="`采购单 (${filteredPurchases.length})`" name="purchases">
           <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
