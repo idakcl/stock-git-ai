@@ -50,12 +50,15 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Menu, SwitchButton } from '@element-plus/icons-vue'
+import { useRouter } from 'vue-router'
 import AppMenu from './components/AppMenu.vue'
 import Login from './views/Login.vue'
 import { api, auth } from './api'
+
+const router = useRouter()
 
 const drawer = ref(false)
 const buildTime = __BUILD_TIME__
@@ -77,11 +80,46 @@ function onExpired() {
   authed.value = false
   ElMessage.warning('登录已过期，请重新登录')
 }
+// ---- 宽表自适应 ------------------------------------------------------------
+// 表格内容宽超出容器时打上 is-scrollable，改为表格在卡片内横向滑动；
+// 放得下时保持「整页滚动 + 列标题吸顶」。按实际宽度判定，覆盖手机竖屏/横屏与小尺寸窗口。
+function syncTableScroll() {
+  document.querySelectorAll('.table-wrap').forEach((wrap) => {
+    const table = wrap.querySelector('.el-table')
+    if (!table) return
+    wrap.classList.toggle('is-scrollable', table.scrollWidth > wrap.clientWidth + 2)
+  })
+}
+let rafId = 0
+function scheduleSync() {
+  cancelAnimationFrame(rafId)
+  rafId = requestAnimationFrame(() => setTimeout(syncTableScroll, 80))
+}
+let mo = null
+function observeMain(retry = 0) {
+  const main = document.querySelector('.main')
+  if (!main) { if (retry < 20) setTimeout(() => observeMain(retry + 1), 100); return }
+  // 列表数据渲染后宽度会变，用 MutationObserver 兜底重算（已做节流，不会频繁触发）
+  mo = new MutationObserver(scheduleSync)
+  mo.observe(main, { childList: true, subtree: true })
+}
+
 onMounted(() => {
   check()
   window.addEventListener('auth:expired', onExpired)
+  window.addEventListener('resize', scheduleSync)
+  window.addEventListener('orientationchange', scheduleSync)
+  router.afterEach(() => nextTick(scheduleSync))
+  observeMain()
+  scheduleSync()
 })
-onUnmounted(() => window.removeEventListener('auth:expired', onExpired))
+onUnmounted(() => {
+  window.removeEventListener('auth:expired', onExpired)
+  window.removeEventListener('resize', scheduleSync)
+  window.removeEventListener('orientationchange', scheduleSync)
+  cancelAnimationFrame(rafId)
+  if (mo) mo.disconnect()
+})
 
 async function onLogout() {
   try {
@@ -310,6 +348,11 @@ body {
 .table-wrap .el-table__body-wrapper { overflow: visible; }
 /* top 取负值抵消 .main 的 padding，使表头正好停在顶栏下沿而不露出缝隙 */
 .table-wrap .el-table__header-wrapper { position: sticky; top: -16px; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
+/* 表格放不下时（JS 实测内容宽 > 容器宽会自动加上 is-scrollable）：
+   改为在卡片内横向滑动，避免整页被宽表撑出横向滚动区（页面左右被裁、手机上拖不动）。
+   此时局部容器会困住 sticky，表头改为常驻表体顶部而非吸顶。 */
+.table-wrap.is-scrollable { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.table-wrap.is-scrollable .el-table__header-wrapper { position: static; box-shadow: none; }
 
 /* 表格统一：无论各页是否单独写了 size="small"，字号与行高都收敛到同一档 */
 .el-table { font-size: var(--fs-table); }
@@ -336,13 +379,9 @@ body {
 @media (max-width: 768px) {
   .desktop-only { display: none; }
   .main { padding: var(--gap-md); }
+  /* 统计块在窄/矮屏排两列 */
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-tag { display: none; }
-  /* 窄屏：宽表改在卡片内横向滑动，页面本身不再被表格撑出横向滚动区
-     （否则整页被撑偏、卡片两侧被裁——看起来"左右没对齐"，且手机上滑不动、右侧列永远看不到） */
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  /* 局部滚动容器会困住 sticky，移动端取消表头吸顶，改为横滑表格查看全部列 */
-  .table-wrap .el-table__header-wrapper { position: static; box-shadow: none; }
 }
 @media (min-width: 769px) {
   .menu-btn { display: none; }
