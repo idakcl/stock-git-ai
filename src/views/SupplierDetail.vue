@@ -30,7 +30,7 @@
 
       <el-tabs v-model="tab">
         <el-tab-pane label="产品列表" name="products">
-          <ProductTable :items="products" search-placeholder="搜索该供应商商品" />
+          <ProductTable :items="products" search-placeholder="搜索该供应商商品" :show-cost="false" :price-columns="supplierPriceColumns" />
         </el-tab-pane>
         <el-tab-pane :label="`采购单 (${filteredPurchases.length})`" name="purchases">
           <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
@@ -130,6 +130,12 @@ const products = computed(() => {
   const codes = new Set(supplier.value.products || [])
   return items.value.filter(i => codes.has(i.code))
 })
+// 供应商下商品的价格列：与商品库一致，售价、批发价、安装师傅价（不展示进价）
+const supplierPriceColumns = [
+  { prop: 'price', label: '售价' },
+  { prop: 'priceWholesale', label: '批发价' },
+  { prop: 'priceInstaller', label: '安装师傅价' }
+]
 const purchaseList = computed(() => (purchases.value || []).filter(p => p.supplier === supplier.value.name))
 const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateStart.value && (p.date || '') < dateStart.value) return false

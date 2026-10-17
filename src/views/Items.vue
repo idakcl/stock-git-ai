@@ -46,7 +46,7 @@
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="false" :page-size="60">
+      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="false" :price-columns="itemPriceColumns" :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -163,6 +163,12 @@ const form = reactive({
   warning:0, remark:''
 })
 
+// 商品库价格列：售价、批发价、安装师傅价（进价不在列表展示）
+const itemPriceColumns = [
+  { prop: 'price', label: '售价' },
+  { prop: 'priceWholesale', label: '批发价' },
+  { prop: 'priceInstaller', label: '安装师傅价' }
+]
 // 导出/打印与列表当前页同步：取当前页数据，副标题标注输出范围（第 X/Y 页）
 const exportRows = computed(() => (tableRef.value && tableRef.value.pagedRows) || items.value)
 const exportSubtitle = computed(() => {
@@ -176,6 +182,8 @@ const exportColumns = [
   { label: '名称', prop: 'name' },
   { label: '单位', prop: 'unit' },
   { label: '售价', prop: 'price' },
+  { label: '批发价', prop: 'priceWholesale' },
+  { label: '安装师傅价', prop: 'priceInstaller' },
   { label: '预警值', prop: 'warning' },
   { label: '备注', prop: 'remark' }
 ]

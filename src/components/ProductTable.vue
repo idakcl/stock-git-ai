@@ -57,11 +57,13 @@
           <template #default="{ row }">{{ supplierNames(row) }}</template>
         </el-table-column>
         <el-table-column v-if="showCost" prop="cost" label="进价" width="100" />
-        <el-table-column prop="price" label="售价" width="100" />
-        <template v-if="showPriceTiers">
-          <el-table-column prop="priceWholesale" label="批发价" width="100" />
-          <el-table-column prop="priceInstaller" label="安装师傅价" width="110" />
-        </template>
+        <el-table-column
+          v-for="col in priceColumns"
+          :key="col.prop"
+          :prop="col.prop"
+          :label="col.label"
+          width="110"
+        />
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
         <slot name="extra" />
         <el-table-column v-if="$slots.actions" label="操作" width="160">
@@ -91,9 +93,10 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   searchable: { type: Boolean, default: true },
   searchPlaceholder: { type: String, default: '搜索编码 / 名称' },
-  // 是否显示批发价/安装师傅价两列（零售价已并入「售价」，不再单列）
-  showPriceTiers: { type: Boolean, default: false },
-  // 是否显示「进价」列；商品库列表只需售价时传 false 隐藏
+  // 价格列：传入要展示的价格档位。商品库/供应商下商品传三档（售价/批发价/安装师傅价）；
+  // 客户详情按客户类型传对应的一档；不传时默认只显示「售价」
+  priceColumns: { type: Array, default: () => [{ prop: 'price', label: '售价' }] },
+  // 是否显示「进价」列；商品/供应商/客户列表无需展示成本时传 false 隐藏
   showCost: { type: Boolean, default: true },
   // 每页条数，0 表示不分页
   pageSize: { type: Number, default: 0 }

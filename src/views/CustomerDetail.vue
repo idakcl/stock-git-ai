@@ -33,7 +33,7 @@
 
       <el-tabs v-model="tab">
         <el-tab-pane label="产品列表" name="products">
-          <ProductTable :items="products" search-placeholder="搜索该客户商品" />
+          <ProductTable :items="products" search-placeholder="搜索该客户商品" :show-cost="false" :price-columns="customerPriceColumns" />
         </el-tab-pane>
         <el-tab-pane :label="`销售单 (${filteredSales.length})`" name="sales">
           <el-table :data="filteredSales" stripe show-summary :summary-method="summaryAmount">
@@ -141,6 +141,15 @@ const products = computed(() => {
   saleList.value.forEach(s => (s.items || []).forEach(l => l.code && codes.add(l.code)))
   const map = Object.fromEntries((items.value || []).map(i => [i.code, i]))
   return [...codes].map(code => map[code]).filter(Boolean)
+})
+// 客户下商品的价格列：按客户类型取对应一档价格；未分配类型时默认显示「售价」
+const customerPriceColumns = computed(() => {
+  const map = {
+    '批发': { prop: 'priceWholesale', label: '批发价' },
+    '零售': { prop: 'price', label: '售价' },
+    '安装师傅': { prop: 'priceInstaller', label: '安装师傅价' }
+  }
+  return [map[customer.value.category] || { prop: 'price', label: '售价' }]
 })
 const filteredSales = computed(() => saleList.value.filter(s => {
   if (dateStart.value && (s.date || '') < dateStart.value) return false
