@@ -46,7 +46,7 @@
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="false" :price-columns="itemPriceColumns" :page-size="60">
+      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns" :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -181,6 +181,7 @@ const exportColumns = [
   { label: '编码', prop: 'code' },
   { label: '名称', prop: 'name' },
   { label: '单位', prop: 'unit' },
+  { label: '进价', prop: 'cost' },
   { label: '售价', prop: 'price' },
   { label: '批发价', prop: 'priceWholesale' },
   { label: '安装师傅价', prop: 'priceInstaller' },
