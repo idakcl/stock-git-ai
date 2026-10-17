@@ -217,9 +217,16 @@ body {
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 
-/* 表格容器：默认横向可滚动（宽表不溢出卡片）；设置 max-height 的表格会纵向也滚动、表头在盒内吸顶 */
-/* 纵向滚动交给表格自身（固定表头模式），外层只保留横向滚动兜底，避免宽表撑破卡片 */
-.table-wrap { overflow-x: auto; }
+/* ---------- 表格列标题吸顶（整页滚动时固定在内容区顶部，即顶栏正下方）---------- */
+/* 前提：必须解除 EP 自带的 .el-table / .el-table__body-wrapper 的 overflow:hidden 与 .el-table 的
+   max-width:100% 限制——否则 sticky 会被「困」在 .el-table 这个自身不滚动的盒子里而永不触发。
+   解法已实测：滚动 400px / 1200px 后，表头相对滚动容器顶部恒为 0，稳定吸顶。 */
+.table-wrap { overflow: visible; }
+.table-wrap > .el-table { overflow: visible; max-width: none; width: max-content; min-width: 100%; }
+.table-wrap .el-table__inner-wrapper,
+.table-wrap .el-table__body-wrapper { overflow: visible; }
+/* top 取负值抵消 .main 的 padding，使表头正好停在顶栏下沿而不露出缝隙 */
+.table-wrap .el-table__header-wrapper { position: sticky; top: -16px; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
 /* 表格统一：无论各页是否单独写了 size="small"，行高与字号都收敛到同一档 */
 .el-table { font-size: var(--fs-table); }
 .el-table td.el-table__cell { padding: 10px 0; }
@@ -232,6 +239,7 @@ body {
 @media (max-width: 768px) {
   .desktop-only { display: none; }
   .main { padding: 12px; }
+  .table-wrap .el-table__header-wrapper { top: -12px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-tag { display: none; }
 }

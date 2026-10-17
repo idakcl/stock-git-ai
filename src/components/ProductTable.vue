@@ -7,8 +7,8 @@
       :placeholder="searchPlaceholder"
       class="search-input"
     />
-    <div class="table-wrap" ref="wrapRef">
-      <el-table :data="pagedRows" stripe :max-height="effectiveMaxH || undefined">
+    <div class="table-wrap">
+      <el-table :data="pagedRows" stripe>
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="history">
@@ -84,7 +84,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import PhotoThumbs from './PhotoThumbs.vue'
@@ -99,11 +99,7 @@ const props = defineProps({
   // 是否显示「进价」列；商品/供应商/客户列表无需展示成本时传 false 隐藏
   showCost: { type: Boolean, default: true },
   // 每页条数，0 表示不分页
-  pageSize: { type: Number, default: 0 },
-  // 表格最大高度（px）；设置后表格在卡片内形成滚动盒、表头吸顶，方便对照列
-  maxHeight: { type: Number, default: 0 },
-  // 为 true 时按视口高度自适应（视口高 - 偏移），尽量多显示行数且表头固定
-  fillViewport: { type: Boolean, default: false }
+  pageSize: { type: Number, default: 0 }
 })
 
 const keyword = ref('')
@@ -128,25 +124,6 @@ const pagedRows = computed(() => {
 // 筛选条件变化后回到第一页
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
-// 固定表头：用 Element Plus 官方方式——给表格设 max-height，EP 会让表头与表体分离、
-// 表体独立滚动，表头自然固定在表格顶部（且横向滚动时表头跟随，不会错位）。
-// 注意：不能用 position:sticky 自己去实现——EP 的 .el-table 根节点自带 overflow:hidden，
-// 它会成为 sticky 的滚动容器但自身不滚动，导致 sticky 永远不触发。
-const wrapRef = ref(null)
-const viewportMaxH = ref(0)
-// 按滚动容器精确计算可用高度：表格顶部到容器可视底部的距离，再扣掉分页与底部留白
-function recalcViewport() {
-  const el = wrapRef.value
-  const scroller = (el && el.closest('.main')) || document.scrollingElement
-  if (!el || !scroller) { viewportMaxH.value = 520; return }
-  const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + (scroller.scrollTop || 0)
-  const avail = (scroller.clientHeight || window.innerHeight) - top
-  viewportMaxH.value = Math.max(320, Math.round(avail - 96))
-}
-const effectiveMaxH = computed(() => props.maxHeight || (props.fillViewport ? viewportMaxH.value : 0))
-onMounted(() => { if (props.fillViewport) { recalcViewport(); window.addEventListener('resize', recalcViewport) } })
-onUnmounted(() => { if (props.fillViewport) window.removeEventListener('resize', recalcViewport) })
-
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
 // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）。
 // 后端 derive 已排序，这里前端兜底：存量数据在重建前也按时间展示
@@ -181,10 +158,5 @@ onMounted(async () => {
 .history :deep(.el-table) { font-size: 12px; color: #606266; font-family: inherit; }
 .history :deep(.el-table th.el-table__cell) { font-size: 12px; font-weight: 600; color: #606266; }
 .history :deep(.el-table td.el-table__cell) { font-size: 12px; font-weight: 400; padding: 8px 0; }
-/* 固定表头由 EP 原生 max-height 模式实现（表头与表体分离、表体独立滚动）。
-   这里只加一道描边，让滚动时表头与数据区更易分辨。
-   切勿再叠加 position:sticky —— .el-table 根节点自带 overflow:hidden，会使 sticky 失效。 */
-.table-wrap :deep(.el-table__header-wrapper) {
-  box-shadow: 0 1px 0 var(--border-color);
-}
+/* 列标题吸顶的样式在 App.vue 全局处理（需同时解除 EP 的 overflow 限制，放在局部 scoped 里会失效） */
 </style>
