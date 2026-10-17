@@ -336,9 +336,13 @@ body {
 @media (max-width: 768px) {
   .desktop-only { display: none; }
   .main { padding: var(--gap-md); }
-  .table-wrap .el-table__header-wrapper { top: -12px; }
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-tag { display: none; }
+  /* 窄屏：宽表改在卡片内横向滑动，页面本身不再被表格撑出横向滚动区
+     （否则整页被撑偏、卡片两侧被裁——看起来"左右没对齐"，且手机上滑不动、右侧列永远看不到） */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* 局部滚动容器会困住 sticky，移动端取消表头吸顶，改为横滑表格查看全部列 */
+  .table-wrap .el-table__header-wrapper { position: static; box-shadow: none; }
 }
 @media (min-width: 769px) {
   .menu-btn { display: none; }
