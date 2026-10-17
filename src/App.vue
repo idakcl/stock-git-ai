@@ -218,7 +218,8 @@ body {
 .stat-sub { margin-top: 4px; color: #909399; font-size: 12px; }
 
 /* 表格容器：默认横向可滚动（宽表不溢出卡片）；设置 max-height 的表格会纵向也滚动、表头在盒内吸顶 */
-.table-wrap { overflow: auto; }
+/* 纵向滚动交给表格自身（固定表头模式），外层只保留横向滚动兜底，避免宽表撑破卡片 */
+.table-wrap { overflow-x: auto; }
 /* 表格统一：无论各页是否单独写了 size="small"，行高与字号都收敛到同一档 */
 .el-table { font-size: var(--fs-table); }
 .el-table td.el-table__cell { padding: 10px 0; }

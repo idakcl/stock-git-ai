@@ -7,8 +7,8 @@
       :placeholder="searchPlaceholder"
       class="search-input"
     />
-    <div class="table-wrap" :style="maxHeightStyle">
-      <el-table :data="pagedRows" stripe>
+    <div class="table-wrap" ref="wrapRef">
+      <el-table :data="pagedRows" stripe :max-height="effectiveMaxH || undefined">
         <el-table-column type="expand">
           <template #default="{ row }">
             <div class="history">
@@ -128,11 +128,22 @@ const pagedRows = computed(() => {
 // 筛选条件变化后回到第一页
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
-// 表格最大高度：优先用显式 maxHeight，否则 fillViewport 时按视口自适应（预留顶栏/卡片/筛选等上方高度）
+// 固定表头：用 Element Plus 官方方式——给表格设 max-height，EP 会让表头与表体分离、
+// 表体独立滚动，表头自然固定在表格顶部（且横向滚动时表头跟随，不会错位）。
+// 注意：不能用 position:sticky 自己去实现——EP 的 .el-table 根节点自带 overflow:hidden，
+// 它会成为 sticky 的滚动容器但自身不滚动，导致 sticky 永远不触发。
+const wrapRef = ref(null)
 const viewportMaxH = ref(0)
-function recalcViewport() { viewportMaxH.value = Math.max(320, Math.round((window.innerHeight || 800) - 320)) }
+// 按滚动容器精确计算可用高度：表格顶部到容器可视底部的距离，再扣掉分页与底部留白
+function recalcViewport() {
+  const el = wrapRef.value
+  const scroller = (el && el.closest('.main')) || document.scrollingElement
+  if (!el || !scroller) { viewportMaxH.value = 520; return }
+  const top = el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + (scroller.scrollTop || 0)
+  const avail = (scroller.clientHeight || window.innerHeight) - top
+  viewportMaxH.value = Math.max(320, Math.round(avail - 96))
+}
 const effectiveMaxH = computed(() => props.maxHeight || (props.fillViewport ? viewportMaxH.value : 0))
-const maxHeightStyle = computed(() => effectiveMaxH.value ? { maxHeight: effectiveMaxH.value + 'px' } : null)
 onMounted(() => { if (props.fillViewport) { recalcViewport(); window.addEventListener('resize', recalcViewport) } })
 onUnmounted(() => { if (props.fillViewport) window.removeEventListener('resize', recalcViewport) })
 
@@ -170,12 +181,10 @@ onMounted(async () => {
 .history :deep(.el-table) { font-size: 12px; color: #606266; font-family: inherit; }
 .history :deep(.el-table th.el-table__cell) { font-size: 12px; font-weight: 600; color: #606266; }
 .history :deep(.el-table td.el-table__cell) { font-size: 12px; font-weight: 400; padding: 8px 0; }
-/* 表头吸顶：表格在卡片内滚动时，列标题固定在盒子顶部，方便滚动查看时对照列 */
+/* 固定表头由 EP 原生 max-height 模式实现（表头与表体分离、表体独立滚动）。
+   这里只加一道描边，让滚动时表头与数据区更易分辨。
+   切勿再叠加 position:sticky —— .el-table 根节点自带 overflow:hidden，会使 sticky 失效。 */
 .table-wrap :deep(.el-table__header-wrapper) {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--bg-soft);
   box-shadow: 0 1px 0 var(--border-color);
 }
 </style>
