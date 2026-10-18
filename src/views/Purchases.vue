@@ -110,7 +110,7 @@
         </el-form-item>
       </el-form>
       <div class="lines-scroll">
-      <el-table :data="form.lines" stripe>
+      <el-table :data="form.lines" stripe max-height="320">
         <el-table-column label="商品" min-width="180">
           <template #default="{ row }">
             <el-select
@@ -133,11 +133,11 @@
           <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" /></template>
         </el-table-column>
         <el-table-column label="折扣" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.discount" :min="0" :max="lineGross(row)" :precision="2" :controls="false" size="small" /></template>
+          <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" /></template>
         </el-table-column>
         <el-table-column label="小计" width="100" align="right">
           <template #default="{ row }">
-            <span class="line-net" :title="Number(row.discount) > 0 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
+            <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="" width="60">
@@ -147,7 +147,7 @@
       </div>
       <div style="margin-top:8px">
         <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discount:0})">添加行</el-button>
-        <span class="calc-hint" style="margin-left:12px">折扣＝本行直接减免的金额（元）；整单优惠请填表单上方「整单优惠」</span>
+        <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单上方「整单优惠」</span>
       </div>
       <div style="margin-top:12px;text-align:right">
         <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
@@ -173,7 +173,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { resolveLine, lineDisplayName, itemNameMap } from '../utils/catalog'
+import { resolveLine, lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, paidSumOf, ensurePayments, appendPayment, syncPayments, grossOf } from '../utils/account'
 import PhotoUpload from '../components/PhotoUpload.vue'
@@ -210,12 +210,14 @@ const payCount = computed(() => ensurePayments(editOrder.value, 'paid').length)
 const payableTotal = computed(() => Math.max(0, totalAmount.value - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, payableTotal.value - paidSumOf(editOrder.value)))
 
-// 行原价（数量×单价）/ 折后小计（原价−本行折扣，不为负）；折扣只减钱、不改单价
+// 行折扣率（默认1＝原价）/ 行原价（数量×单价）/ 行减免额 / 折后小计；折扣只减钱、不改单价
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+const lineRate = (l) => normalizeRate(l, lineGross(l))
 const lineGross = (l) => round2((l.qty || 0) * (l.price || 0))
-const lineNet = (l) => Math.max(0, round2(lineGross(l) - Number(l.discount || 0)))
+const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
+const lineNet = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
 const grossAmount = computed(() => form.lines.reduce((s, l) => s + lineGross(l), 0))
-const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + Math.min(Number(l.discount || 0), lineGross(l)), 0))
+const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + lineDiscount(l), 0))
 // 合计＝折后小计之和（已含单项折扣）；应付/应收再减整单优惠
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0))
 // 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
@@ -289,11 +291,11 @@ function openDialog(row) {
       settle: row.settle || '挂账',
       photos: [...(row.photos || [])],
       discount: Number(row.discount || 0),
-      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discount: Number(i.discount || 0) }))
+      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
     })
   } else {
     editingId.value = ''
-    Object.assign(form, { supplier:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0, discount:0}] })
+    Object.assign(form, { supplier:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0, discountRate:1}] })
   }
   dialog.value = true
 }

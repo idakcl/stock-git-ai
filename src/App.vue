@@ -286,6 +286,8 @@ body {
 }
 /* 卡片主体默认 overflow:auto 同理，必须一并解除；卡片内宽表改由 .main 横向滚动承接 */
 .el-card__body { overflow: visible !important; padding: var(--gap-lg) !important; }
+/* el-tabs 的内容区默认 overflow:hidden，会把卡片内表格的 sticky 表头「困」在 tab 里而永不吸顶 */
+.el-tabs__content { overflow: visible !important; }
 .el-card__header {
   padding: var(--gap-md) var(--gap-lg) !important;
   border-bottom: 1px solid var(--border-color) !important;

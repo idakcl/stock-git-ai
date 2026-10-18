@@ -36,6 +36,7 @@
           <ProductTable :items="products" search-placeholder="搜索该客户商品" :show-cost="false" :price-columns="customerPriceColumns" :page-size="60" />
         </el-tab-pane>
         <el-tab-pane :label="`销售单 (${filteredSales.length})`" name="sales">
+          <div class="table-wrap">
           <el-table :data="filteredSales" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
@@ -65,6 +66,7 @@
             </el-table-column>
             <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           </el-table>
+          </div>
           <div v-if="!filteredSales.length" class="empty">该时间段暂无销售单</div>
         </el-tab-pane>
         <el-tab-pane :label="`来往账 (${ledgerRows.length})`" name="ledger">
@@ -73,6 +75,7 @@
             <span>本期应收：<b>¥ {{ ledgerRows.reduce((s, r) => s + r.amount, 0).toFixed(2) }}</b></span>
             <span>期末欠款：<b :class="closingBalance > 0 ? 'amount-debt' : 'amount-zero'">¥ {{ closingBalance.toFixed(2) }}</b></span>
           </div>
+          <div class="table-wrap">
           <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column prop="id" label="单号" width="180">
@@ -109,6 +112,7 @@
               </template>
             </el-table-column>
           </el-table>
+          </div>
           <div v-if="!ledgerRows.length" class="empty">该时间段暂无往来记录</div>
         </el-tab-pane>
       </el-tabs>

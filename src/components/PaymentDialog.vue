@@ -7,7 +7,7 @@
       <span>{{ kind === 'payable' ? '未付' : '未收' }}：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b></span>
     </div>
 
-    <el-table :data="rows" stripe empty-text="暂无收付款记录">
+    <el-table :data="rows" stripe max-height="280" empty-text="暂无收付款记录">
       <el-table-column type="index" label="#" width="46" />
       <el-table-column prop="date" label="日期" width="130" />
       <el-table-column prop="amount" label="金额" width="120" align="right">

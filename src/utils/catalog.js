@@ -75,15 +75,30 @@ export function ensureCatalogItem(items, input, index = 0) {
 
 // 两位小数四舍五入：消除 5×1.91=9.549999… 这类浮点残留
 const round2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100
+// 比率保留 4 位小数（0.01% 粒度）：既避免旧金额换算出 0.6666666666666667 这种长串，
+// 也保证换算后行金额与原来的折扣金额分文不差
+const round4 = (v) => Math.round((Number(v) + Number.EPSILON) * 10000) / 10000
+
+// 折扣率归一化：1＝原价（不打折），0.9＝九折。
+// 兼容旧数据：早期行内折扣是「金额」（discount，元），按本行原价换算成比率；
+// 空值/非数字按 1（不打折）处理，避免清空输入被误读成「整行免费」。
+export function normalizeRate(line, gross) {
+  const r = Number(line && line.discountRate)
+  if (line && line.discountRate != null && Number.isFinite(r)) return round4(Math.min(1, Math.max(0, r)))
+  const amt = Number(line && line.discount || 0)
+  if (gross > 0 && amt > 0) return round4(Math.min(1, Math.max(0, 1 - Math.min(amt, gross) / gross)))
+  return 1
+}
 
 export function resolveLine(items, line, index = 0) {
   const result = ensureCatalogItem(items, line, index)
   if (!result.item) return result
   const qty = Number(line.qty || 0)
   const price = Number(line.price || result.item.price || 0)
-  // 行折扣：本行直接减免金额（元），不影响单价本身（成本价/历史价仍取原单价）
-  const discount = Math.max(0, round2(line.discount || 0))
   const gross = round2(qty * price)
+  const rate = normalizeRate(line, gross)
+  // 折扣只减钱、不改单价：成本价/历史价仍取原单价 price
+  const discount = round2(gross * (1 - rate))
   return {
     items: result.items,
     line: {
@@ -91,6 +106,7 @@ export function resolveLine(items, line, index = 0) {
       name: result.item.name,
       qty,
       price,
+      discountRate: rate,
       discount,
       total: Math.max(0, round2(gross - discount))
     }

@@ -33,6 +33,7 @@
           <ProductTable :items="products" search-placeholder="搜索该供应商商品" :show-cost="true" :show-supplier="false" :price-columns="supplierPriceColumns" :page-size="60" />
         </el-tab-pane>
         <el-tab-pane :label="`采购单 (${filteredPurchases.length})`" name="purchases">
+          <div class="table-wrap">
           <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
@@ -59,6 +60,7 @@
             </el-table-column>
             <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
           </el-table>
+          </div>
           <div v-if="!filteredPurchases.length" class="empty">该时间段暂无采购单</div>
         </el-tab-pane>
         <el-tab-pane :label="`来往账 (${ledgerRows.length})`" name="ledger">
@@ -67,6 +69,7 @@
             <span>本期应付：<b>¥ {{ ledgerRows.reduce((s, r) => s + r.amount, 0).toFixed(2) }}</b></span>
             <span>期末欠款：<b :class="closingBalance > 0 ? 'amount-debt' : 'amount-zero'">¥ {{ closingBalance.toFixed(2) }}</b></span>
           </div>
+          <div class="table-wrap">
           <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column prop="id" label="单号" width="180">
@@ -103,6 +106,7 @@
               </template>
             </el-table-column>
           </el-table>
+          </div>
           <div v-if="!ledgerRows.length" class="empty">该时间段暂无往来记录</div>
         </el-tab-pane>
       </el-tabs>

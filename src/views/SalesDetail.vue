@@ -43,7 +43,7 @@
           <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
           <el-table-column label="本次折扣" width="100" align="right">
             <template #default="{ row }">
-              <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
+              <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`${row._discountRate != null && row._discountRate < 1 ? `折扣率 ${row._discountRate} · ` : ''}原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
@@ -59,6 +59,7 @@
           <el-button type="primary" size="small" @click="payDialog = true">记录收款</el-button>
         </div>
       </template>
+      <div class="table-wrap">
       <el-table :data="payments" stripe empty-text="暂无收款记录，可点右上角「记录收款」分多笔登记">
         <el-table-column type="index" label="#" width="46" />
         <el-table-column prop="date" label="日期" width="140" />
@@ -67,6 +68,7 @@
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
       </el-table>
+      </div>
     </el-card>
 
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" @saved="onPaySaved" />
@@ -124,6 +126,7 @@ const detailItems = computed(() => {
       _qty: line.qty,
       _price: line.price,
       _discount: Number(line.discount || 0),
+      _discountRate: line.discountRate,
       _total: line.total
     }
   })
