@@ -46,7 +46,7 @@
         :columns="exportColumns"
         :rows="exportRows"
       />
-      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns">
+      <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns" :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
           <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
@@ -173,7 +173,9 @@ const itemPriceColumns = [
 const exportRows = computed(() => (tableRef.value && tableRef.value.pagedRows) || items.value)
 const exportSubtitle = computed(() => {
   const total = (tableRef.value && tableRef.value.filtered ? tableRef.value.filtered.length : items.value.length) || 0
-  return `共 ${total} 条 · 导出全部`
+  const p = (tableRef.value && tableRef.value.page) || 1
+  const pc = (tableRef.value && tableRef.value.pageCount) || 1
+  return `共 ${total} 条 · 导出当前第 ${p}/${pc} 页`
 })
 const exportColumns = [
   { label: '编码', prop: 'code' },

@@ -82,9 +82,8 @@ function onExpired() {
 }
 // ---- 宽表自适应 ------------------------------------------------------------
 // 取舍：
-//   窄屏（手机/小平板，≤1024）——优先「页面左右对齐 + 能滑动看全列」：表格在卡片内横滑，
-//     同时容器限高成为纵向滚动区，表头在容器内吸顶（横滑时表头随列一起动，列不错位），
-//     编码/名称等列标题在窄屏也始终可见；
+//   窄屏（手机/小平板，≤1024）——优先「页面左右对齐 + 能滑动看全列 + 不在表内上下拖动」：
+//     表格在卡片内横滑，且不限高，随整页自然滚动；代价是横滑容器困住 sticky，窄屏表头不吸顶；
 //   宽屏（笔记本/桌面）——保持整页滚动，sticky 列标题正常吸顶；
 //     若列总宽仍超出，用内容区横向滚动条查看（桌面有滚动条/触控板，不影响对齐观感）。
 function syncTableScroll() {
@@ -355,20 +354,12 @@ body {
 .table-wrap .el-table__header-wrapper { position: sticky; top: -16px; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
 /* 表格放不下时（≤1024 窄屏由 JS 自动加上 is-scrollable）：
    在卡片内横向滑动看全列，避免整页被宽表撑出横向滚动区（页面左右被裁、手机上拖不动）。
-   同时给容器限高——容器自身成为纵向滚动区，表头借 sticky 在容器内吸顶：
-   纵向滚表时表头钉在容器顶部；横向滑动时表头随列一起动（sticky 只约束纵向、不钉横向），
-   列与表头不错位。这样窄屏下「横滑看全列」与「编码/名称列标题常驻」两者兼得。 */
-.table-wrap.is-scrollable {
-  overflow: auto;
-  max-height: 62vh;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-color) transparent;
-}
-.table-wrap.is-scrollable::-webkit-scrollbar { width: 6px; height: 6px; }
+   不限高：表格随整页自然滚动，不在表格内部制造小滚动区（手机上不用在表内上下拖动）；
+   代价是横滑容器会困住 sticky，窄屏下表头不吸顶——桌面端整页滚动不受影响，照常吸顶。 */
+.table-wrap.is-scrollable { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
+.table-wrap.is-scrollable::-webkit-scrollbar { height: 6px; }
 .table-wrap.is-scrollable::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
-.table-wrap.is-scrollable::-webkit-scrollbar-track { background: transparent; }
-.table-wrap.is-scrollable .el-table__header-wrapper { position: sticky; top: 0; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
+.table-wrap.is-scrollable .el-table__header-wrapper { position: static; box-shadow: none; }
 
 /* 表格统一：无论各页是否单独写了 size="small"，字号与行高都收敛到同一档 */
 .el-table { font-size: var(--fs-table); }
