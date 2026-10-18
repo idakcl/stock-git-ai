@@ -12,7 +12,8 @@
       <div class="info">
         <span>客户：{{ sale.customer }}</span>
         <span>日期：{{ sale.date }}</span>
-        <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}</span>
+        <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
+        <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
         <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0">（抹零优惠，未实际收款）</template></span>
         <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实收：¥ {{ receivedSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
@@ -40,6 +41,12 @@
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
+          <el-table-column label="本次折扣" width="100" align="right">
+            <template #default="{ row }">
+              <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
+              <span v-else class="none">—</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="_total" label="本次金额" width="100"  align="right"/>
         </template>
       </ProductTable>
@@ -96,6 +103,10 @@ const unpaid = computed(() => receivableOf(sale.value))
 const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
 
+// 明细行原价合计与单项折扣合计（合计字段为折后金额）
+const grossSum = computed(() => (sale.value.items || []).reduce((s, l) => s + Number(l.qty || 0) * Number(l.price || 0), 0))
+const lineDiscountSum = computed(() => (sale.value.items || []).reduce((s, l) => s + Number(l.discount || 0), 0))
+
 const detailItems = computed(() => {
   const nameMap = Object.fromEntries((items.value || []).map(i => [i.code, i.name || '']))
   return (sale.value.items || []).map(line => {
@@ -112,6 +123,7 @@ const detailItems = computed(() => {
       price: line.price,
       _qty: line.qty,
       _price: line.price,
+      _discount: Number(line.discount || 0),
       _total: line.total
     }
   })
@@ -169,4 +181,6 @@ onMounted(async () => {
 .pay-card { margin-top: 12px; }
 .debt { color:var(--color-danger); }
 .zero { color:var(--color-success); }
+.none { color:var(--text-placeholder); }
+.discount { color:var(--color-success); }
 </style>

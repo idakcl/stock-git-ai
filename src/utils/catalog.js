@@ -73,17 +73,26 @@ export function ensureCatalogItem(items, input, index = 0) {
   return { items: [...items, item], item }
 }
 
+// 两位小数四舍五入：消除 5×1.91=9.549999… 这类浮点残留
+const round2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100
+
 export function resolveLine(items, line, index = 0) {
   const result = ensureCatalogItem(items, line, index)
   if (!result.item) return result
+  const qty = Number(line.qty || 0)
+  const price = Number(line.price || result.item.price || 0)
+  // 行折扣：本行直接减免金额（元），不影响单价本身（成本价/历史价仍取原单价）
+  const discount = Math.max(0, round2(line.discount || 0))
+  const gross = round2(qty * price)
   return {
     items: result.items,
     line: {
       code: result.item.code,
       name: result.item.name,
-      qty: Number(line.qty || 0),
-      price: Number(line.price || result.item.price || 0),
-      total: Number(line.qty || 0) * Number(line.price || result.item.price || 0)
+      qty,
+      price,
+      discount,
+      total: Math.max(0, round2(gross - discount))
     }
   }
 }

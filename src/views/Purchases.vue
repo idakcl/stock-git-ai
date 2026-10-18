@@ -92,7 +92,7 @@
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
         <el-form-item label="单据照片"><PhotoUpload ref="photoUpload" v-model="form.photos" /></el-form-item>
-        <el-form-item label="优惠金额">
+        <el-form-item label="整单优惠">
           <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
         </el-form-item>
         <el-form-item label="实付金额">
@@ -109,6 +109,7 @@
           </div>
         </el-form-item>
       </el-form>
+      <div class="lines-scroll">
       <el-table :data="form.lines" stripe>
         <el-table-column label="商品" min-width="180">
           <template #default="{ row }">
@@ -131,14 +132,31 @@
         <el-table-column label="单价" width="100" align="right">
           <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" /></template>
         </el-table-column>
+        <el-table-column label="折扣" width="100" align="right">
+          <template #default="{ row }"><el-input-number v-model="row.discount" :min="0" :max="lineGross(row)" :precision="2" :controls="false" size="small" /></template>
+        </el-table-column>
+        <el-table-column label="小计" width="100" align="right">
+          <template #default="{ row }">
+            <span class="line-net" :title="Number(row.discount) > 0 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="" width="60">
           <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
         </el-table-column>
       </el-table>
-      <div style="margin-top:8px"><el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0})">添加行</el-button></div>
+      </div>
+      <div style="margin-top:8px">
+        <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discount:0})">添加行</el-button>
+        <span class="calc-hint" style="margin-left:12px">折扣＝本行直接减免的金额（元）；整单优惠请填表单上方「整单优惠」</span>
+      </div>
       <div style="margin-top:12px;text-align:right">
         <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
         <span class="calc-hint" style="margin-left:12px">应付 {{ payableTotal.toFixed(2) }} · 未付 {{ unpaidAmount.toFixed(2) }}</span>
+        <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0" class="calc-detail">
+          <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
+          <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
+          <span v-if="Number(form.discount) > 0" class="discount">整单优惠 -¥ {{ Number(form.discount).toFixed(2) }}</span>
+        </div>
       </div>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存入库</el-button></template>
     </el-dialog>
@@ -192,7 +210,14 @@ const payCount = computed(() => ensurePayments(editOrder.value, 'paid').length)
 const payableTotal = computed(() => Math.max(0, totalAmount.value - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, payableTotal.value - paidSumOf(editOrder.value)))
 
-const totalAmount = computed(() => form.lines.reduce((s, l) => s + (l.qty||0) * (l.price||0), 0))
+// 行原价（数量×单价）/ 折后小计（原价−本行折扣，不为负）；折扣只减钱、不改单价
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+const lineGross = (l) => round2((l.qty || 0) * (l.price || 0))
+const lineNet = (l) => Math.max(0, round2(lineGross(l) - Number(l.discount || 0)))
+const grossAmount = computed(() => form.lines.reduce((s, l) => s + lineGross(l), 0))
+const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + Math.min(Number(l.discount || 0), lineGross(l)), 0))
+// 合计＝折后小计之和（已含单项折扣）；应付/应收再减整单优惠
+const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0))
 // 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
 const nameMap = computed(() => itemNameMap(itemOptions.value))
 const filtered = computed(() => list.value.filter(row => {
@@ -264,11 +289,11 @@ function openDialog(row) {
       settle: row.settle || '挂账',
       photos: [...(row.photos || [])],
       discount: Number(row.discount || 0),
-      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price }))
+      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discount: Number(i.discount || 0) }))
     })
   } else {
     editingId.value = ''
-    Object.assign(form, { supplier:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0}] })
+    Object.assign(form, { supplier:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0, discount:0}] })
   }
   dialog.value = true
 }
@@ -475,4 +500,7 @@ async function remove(row) {
 .debt{color:var(--color-danger);font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
+.lines-scroll{overflow-x:auto;}
+.calc-detail{display:flex;justify-content:flex-end;gap:16px;flex-wrap:wrap;margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);}
+.line-net{font-variant-numeric:tabular-nums;}
 </style>
