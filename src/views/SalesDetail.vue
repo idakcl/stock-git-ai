@@ -6,7 +6,12 @@
           <div class="title">
             <b>销售单：{{ sale.id }}</b>
           </div>
-          <el-button @click="$router.push('/sales')">返回列表</el-button>
+          <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
+          <div class="actions">
+            <el-button type="primary" :disabled="!found" @click="editDialog = true">编辑</el-button>
+            <el-button type="danger" :disabled="!found" @click="removeOrder">删除</el-button>
+            <el-button @click="$router.push('/sales')">返回列表</el-button>
+          </div>
         </div>
       </template>
       <div class="info">
@@ -73,6 +78,18 @@
 
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" @saved="onPaySaved" />
 
+    <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件（客户档案用于分级售价策略） -->
+    <OrderEditDialog
+      v-model="editDialog"
+      :order="sale"
+      :list="sales"
+      :items="items"
+      :customers="customers"
+      kind="receivable"
+      :saving="saving"
+      @saved="onOrderSaved"
+    />
+
     <!-- 轻量补照片：仅更新本单 photos 字段 -->
     <OrderPhotoDialog v-model="photoDialog" :order="sale" @saved="onPhotosSaved" />
   </div>
@@ -80,23 +97,32 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
+import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { receivableOf, grossOf, receivedSumOf, ensurePayments } from '../utils/account'
 import { lineDisplayName } from '../utils/catalog'
 
 const route = useRoute()
+const router = useRouter()
 const sales = ref([])
 const items = ref([])
+// 客户档案：编辑弹窗里的单价策略（客户类别分级价 / 该客户最近成交价）依赖它
+const customers = ref([])
 // 数据加载中：全量单据/商品拉取期间显示遮罩，避免白屏被误判为"点了没反应"
 const loading = ref(true)
 const payDialog = ref(false)
 const photoDialog = ref(false)
+const editDialog = ref(false)
+// 保存中标记：配合弹窗按钮 loading，防止双击重复提交
+const saving = ref(false)
+// 单据是否真实存在：不存在时禁用编辑/删除，避免把占位空单当新增保存
+const found = computed(() => sales.value.some(s => s.id === route.params.id))
 const sale = computed(() => sales.value.find(s => s.id === route.params.id) || { id: route.params.id, customer: '', date: '', total: 0, items: [] })
 
 // 应收(合计−优惠) 与 未收(应收−累计实收)，与全站统一规则一致
@@ -166,18 +192,66 @@ async function onPhotosSaved(photos) {
   ElMessage.success('已更新单据照片')
 }
 
-onMounted(async () => {
+// 编辑本单：弹窗组装好 entry 后在此落库，保存成功后重拉数据，页面原地刷新
+async function onOrderSaved({ entry }) {
+  saving.value = true
   try {
+    const snapshot = [...sales.value]
+    const idx = sales.value.findIndex(s => s.id === entry.id)
+    if (idx >= 0) sales.value[idx] = entry
+    try {
+      await api.saveSales(sales.value)
+    } catch (e) {
+      sales.value = snapshot
+      ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      return
+    }
+    // 商品销售价历史、库存均由后端自动推导，重拉保证页面与线上一致
     const [s, it] = await Promise.all([api.getSales(), api.getItems()])
     sales.value = s
     items.value = it
-  } catch (e) { sales.value = []; items.value = [] }
+    editDialog.value = false
+    ElMessage.success('已保存修改')
+  } finally { saving.value = false }
+}
+
+// 删除本单：库存与历史价由后端自动重算；删除成功后必须跳回列表，否则路由 id 失效只剩占位空单
+async function removeOrder() {
+  try {
+    await ElMessageBox.confirm(
+      `确定删除销售单 ${sale.value.id}?\n删除后库存与历史价会自动重算，删除后将返回销售列表。`,
+      '提示', { type: 'warning' })
+  } catch { return }
+  saving.value = true
+  try {
+    const snapshot = [...sales.value]
+    sales.value = sales.value.filter(s => s.id !== sale.value.id)
+    try {
+      await api.saveSales(sales.value)
+    } catch (e) {
+      sales.value = snapshot
+      ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      return
+    }
+    ElMessage.success('已删除')
+    router.push('/sales')
+  } finally { saving.value = false }
+}
+
+onMounted(async () => {
+  try {
+    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+    sales.value = s
+    items.value = it
+    customers.value = cu || []
+  } catch (e) { sales.value = []; items.value = []; customers.value = [] }
   finally { loading.value = false }
 })
 </script>
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color:var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }

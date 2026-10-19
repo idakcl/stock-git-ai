@@ -81,98 +81,16 @@
       />
     </el-card>
 
-    <el-dialog v-model="dialog" :title="editingId ? '编辑销售单' : '销售出库'" width="620">
-      <el-form :model="form" label-width="80px">
-        <el-form-item label="客户">
-          <el-select
-            v-model="form.customer"
-            filterable
-            allow-create
-            default-first-option
-            placeholder="选择或输入客户"
-            style="width:100%"
-            @change="onCustomerChange"
-          >
-            <el-option v-for="c in customerOptions" :key="c.code" :label="`${c.name} (${c.code})`" :value="c.name" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-        <el-form-item label="结算">
-          <el-radio-group v-model="form.settle">
-            <el-radio-button label="挂账" />
-            <el-radio-button label="结清" />
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
-        <el-form-item label="单据照片"><PhotoUpload ref="photoUpload" v-model="form.photos" /></el-form-item>
-        <el-form-item label="整单优惠">
-          <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
-        </el-form-item>
-        <el-form-item label="实收金额">
-          <div class="paid-summary">
-            <span>累计实收：<b>{{ receivedSumOf(editOrder).toFixed(2) }}</b></span>
-            <span v-if="payCount > 0">（{{ payCount }} 笔，见「收款」流水）</span>
-            <span v-else class="hint">未收款，可在列表点「收款」分多笔记录</span>
-          </div>
-        </el-form-item>
-        <el-form-item label=" ">
-          <div class="calc-line">
-            <span>应收：<b>{{ receivableTotal.toFixed(2) }}</b></span>
-            <span>未收：<b :class="unpaidAmount > 0 ? 'debt' : 'none'">{{ unpaidAmount.toFixed(2) }}</b></span>
-          </div>
-        </el-form-item>
-      </el-form>
-      <div class="lines-scroll">
-      <el-table :data="form.lines" stripe max-height="320">
-        <el-table-column label="商品" min-width="180">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.code"
-              filterable
-              allow-create
-              default-first-option
-              placeholder="选择或输入商品"
-              style="width:100%"
-              @change="onItemChange(row)"
-            >
-              <el-option v-for="i in itemOptions" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="数量" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" /></template>
-        </el-table-column>
-        <el-table-column label="单价" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" /></template>
-        </el-table-column>
-        <el-table-column label="折扣" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" /></template>
-        </el-table-column>
-        <el-table-column label="小计" width="100" align="right">
-          <template #default="{ row }">
-            <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="60">
-          <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
-        </el-table-column>
-      </el-table>
-      </div>
-      <div style="margin-top:8px">
-        <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discount:0})">添加行</el-button>
-        <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单上方「整单优惠」</span>
-      </div>
-      <div style="margin-top:12px;text-align:right">
-        <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
-        <span class="calc-hint" style="margin-left:12px">应收 {{ receivableTotal.toFixed(2) }} · 未收 {{ unpaidAmount.toFixed(2) }}</span>
-        <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0" class="calc-detail">
-          <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
-          <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
-          <span v-if="Number(form.discount) > 0" class="discount">整单优惠 -¥ {{ Number(form.discount).toFixed(2) }}</span>
-        </div>
-      </div>
-      <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存出库</el-button></template>
-    </el-dialog>
+    <OrderEditDialog
+      v-model="dialog"
+      :order="editingOrder"
+      :list="list"
+      :items="itemOptions"
+      :customers="customerOptions"
+      kind="receivable"
+      :saving="saving"
+      @saved="onOrderSaved"
+    />
 
     <PaymentDialog v-model="payDialog" :order="payOrder" kind="receivable" @saved="onPaySaved" />
 
@@ -182,21 +100,19 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { resolveLine, orderKindCount, lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
-import { genOrderId } from '../utils/code'
-import { receivableOf, receivedSumOf, ensurePayments, appendPayment, syncPayments, grossOf } from '../utils/account'
-import PhotoUpload from '../components/PhotoUpload.vue'
+import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
+import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf } from '../utils/account'
+import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 
 const PAGE_SIZE = 60
 // 客户类别 → 商品上的对应分级售价字段
-const CATEGORY_PRICE_FIELD = { '批发': 'priceWholesale', '零售': 'price', '安装师傅': 'priceInstaller' }
 
 const list = ref([])
 const keyword = ref('')
@@ -208,34 +124,12 @@ const customerOptions = ref([])
 const dialog = ref(false)
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
-const editingId = ref('')
-const form = reactive({ customer:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, lines:[] })
-const photoUpload = ref(null)
 const payDialog = ref(false)
 const payOrder = ref({})
 // 轻量补照片弹窗（不改动单据其他信息，仅合并 photos 字段）
 const photoDialog = ref(false)
 const photoOrder = ref(null)
 
-// 编辑中的原始单据（用于展示累计实收，实收不在表单里改，统一走「收款」流水）
-const editOrder = computed(() => (editingId.value ? list.value.find(s => s.id === editingId.value) : null) || {})
-const payCount = computed(() => ensurePayments(editOrder.value, 'received').length)
-
-// 账务规则（与 src/utils/account.js 一致）：欠款按金额计算，与结算状态无关
-//   应收 = 合计 − 优惠 ；未收 = max(0, 应收 − 累计实收[收款流水])
-const receivableTotal = computed(() => Math.max(0, totalAmount.value - Number(form.discount || 0)))
-const unpaidAmount = computed(() => Math.max(0, receivableTotal.value - receivedSumOf(editOrder.value)))
-
-// 行折扣率（默认1＝原价）/ 行原价（数量×单价）/ 行减免额 / 折后小计；折扣只减钱、不改单价
-const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
-const lineRate = (l) => normalizeRate(l, lineGross(l))
-const lineGross = (l) => round2((l.qty || 0) * (l.price || 0))
-const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
-const lineNet = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
-const grossAmount = computed(() => form.lines.reduce((s, l) => s + lineGross(l), 0))
-const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + lineDiscount(l), 0))
-// 合计＝折后小计之和（已含单项折扣）；应收/应付再减整单优惠
-const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0))
 // 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
 const nameMap = computed(() => itemNameMap(itemOptions.value))
 const filtered = computed(() => list.value.filter(row => {
@@ -283,40 +177,6 @@ const exportColumns = [
   { label: '备注', prop: 'remark' }
 ]
 
-// 当前所选客户的类别
-const customerCategory = computed(() => {
-  const c = (customerOptions.value || []).find(c => c.name === form.customer)
-  return c && c.category ? c.category : ''
-})
-
-// 按客户类别取对应分级售价（批发→批发价 / 零售→售价 / 安装师傅→安装师傅价）
-function tierPriceFor(item) {
-  const field = CATEGORY_PRICE_FIELD[customerCategory.value]
-  if (!field) return null
-  const v = item?.[field]
-  return (v !== '' && v != null && Number(v) > 0) ? Number(v) : null
-}
-
-// 按「某客户最近一次销售价」带出单价；没历史则用商品当前售价
-function customerPriceFor(code) {
-  if (!form.customer || !code) return null
-  const item = itemOptions.value.find(i => i.code === code)
-  if (!item) return null
-  const hist = (item.saleHistory || []).filter(h => h.customer === form.customer)
-  if (!hist.length) return null
-  const latest = hist.reduce((a, b) => ((a.date || '') > (b.date || '') ? a : b))
-  return latest.price
-}
-
-// 单价优先级：该客户最近成交价(历史成交价最优先) → 客户类别对应分级售价 → 商品当前售价
-function autoPriceFor(item) {
-  const recent = customerPriceFor(item.code)
-  if (recent != null) return recent
-  const tier = tierPriceFor(item)
-  if (tier != null) return tier
-  return item.price || 0
-}
-
 function loadAll() {
   return Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
 }
@@ -334,115 +194,42 @@ onMounted(async () => {
   }
 })
 
+// 编辑中的单据：null 表示新增
+const editingOrder = ref(null)
 function openDialog(row) {
-  if (row) {
-    editingId.value = row.id
-    Object.assign(form, {
-      customer: row.customer || '',
-      date: row.date || '',
-      remark: row.remark || '',
-      settle: row.settle || '挂账',
-      photos: [...(row.photos || [])],
-      discount: Number(row.discount || 0),
-      lines: (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
-    })
-  } else {
-    editingId.value = ''
-    Object.assign(form, { customer:'', date: new Date().toISOString().slice(0,10), remark:'', settle:'挂账', photos:[], discount:0, lines: [{code:'', name:'', qty:1, price:0, discountRate:1}] })
-  }
+  editingOrder.value = row || null
   dialog.value = true
 }
 
-function onItemChange(row) {
-  const found = itemOptions.value.find(i => i.code === row.code || i.name === row.code)
-  if (found) {
-    row.code = found.code
-    row.name = found.name
-    row.price = autoPriceFor(found)
-  } else {
-    row.name = row.code
-  }
-}
-
-// 更换客户后，按新客户的类别价/最近售价刷新已填行的单价（仍可手动改）
-function onCustomerChange() {
-  form.lines.forEach(l => {
-    if (!l.code) return
-    const item = itemOptions.value.find(i => i.code === l.code)
-    if (item) l.price = autoPriceFor(item)
-  })
-}
-
-async function doSave() {
-  if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
-  if (!form.customer) return ElMessage.warning('请填写客户')
-  if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning('请完整填写销售明细')
-  let catalog = [...itemOptions.value]
-  const resolved = []
-  form.lines.forEach((l, idx) => {
-    const result = resolveLine(catalog, l, idx)
-    if (result.line) {
-      catalog = result.items
-      resolved.push(result.line)
-    }
-  })
-  if (!resolved.length) return ElMessage.warning('请完整填写销售明细')
-  const amount = resolved.reduce((s, l) => s + l.total, 0)
-  const discountVal = Number(form.discount || 0)
-  const isEdit = !!editingId.value
-  const origin = isEdit ? list.value.find(s => s.id === editingId.value) : null
-  // 收付款统一走 payments 流水（编辑时保留原流水）；标记结清时自动补一笔差额收款，保证状态与金额一致
-  let entry = {
-    ...(origin || {}),
-    customer: form.customer,
-    date: form.date,
-    remark: form.remark || '',
-    settle: form.settle || '挂账',
-    photos: [...(form.photos || [])],
-    discount: discountVal,
-    items: resolved,
-    total: amount
-  }
-  if (!isEdit) {
-    entry = { id: genOrderId('X', list.value, form.date), ...entry, payments: [], received: 0 }
-  }
-  if (form.settle === '结清') {
-    const unpaid = receivableOf({ total: amount, discount: discountVal, received: receivedSumOf(entry) })
-    if (unpaid > 0) entry = appendPayment(entry, 'receivable', { date: form.date, amount: unpaid, remark: '结清收款' })
-  }
-  entry.received = receivedSumOf(entry)
-  // 编辑时沿用原单号，新增才生成新单号
-  if (isEdit) {
-    const idx = list.value.findIndex(s => s.id === editingId.value)
-    if (idx >= 0) list.value[idx] = entry
-  } else {
-    list.value.push(entry)
-  }
-  // 保存失败（如 GitHub 写入出错）时明确报错，弹窗不关闭、本地回滚为线上数据
+// 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
+// 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则刷新商品与客户并关窗
+async function onOrderSaved({ entry, isEdit }) {
+  saving.value = true
   try {
-    await api.saveSales(list.value)
-  } catch (e) {
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    const snapshot = [...list.value]
+    if (isEdit) {
+      const idx = list.value.findIndex(s => s.id === entry.id)
+      if (idx >= 0) list.value[idx] = entry
+    } else {
+      list.value.push(entry)
+    }
+    try {
+      await api.saveSales(list.value)
+    } catch (e) {
+      list.value = snapshot
+      ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+      list.value = s
+      itemOptions.value = it
+      return
+    }
+    // 商品销售价历史、库存均由后端自动推导
     const [s, it] = await Promise.all([api.getSales(), api.getItems()])
     list.value = s
     itemOptions.value = it
-    return
-  }
-  // 商品销售价历史、库存均由后端自动推导
-  const [s, it] = await Promise.all([api.getSales(), api.getItems()])
-  list.value = s
-  itemOptions.value = it
-  dialog.value = false
-  editingId.value = ''
-  ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
-}
-
-// 保存入口：加锁 + 按钮 loading，双击只会执行一次
-async function save() {
-  if (saving.value) return
-  saving.value = true
-  try {
-    await doSave()
+    dialog.value = false
+    editingOrder.value = null
+    ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
   } finally {
     saving.value = false
   }
