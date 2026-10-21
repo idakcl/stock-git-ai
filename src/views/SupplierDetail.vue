@@ -30,7 +30,12 @@
 
       <el-tabs v-model="tab">
         <el-tab-pane label="产品列表" name="products">
-          <ProductTable :items="products" search-placeholder="搜索该供应商商品" :show-cost="true" :show-supplier="false" :price-columns="supplierPriceColumns" :page-size="60" />
+          <ProductTable :items="products" search-placeholder="搜索该供应商商品" :show-cost="true" :show-supplier="false" :price-columns="supplierPriceColumns" :page-size="60">
+            <template #actions="{ row }">
+              <el-button size="small" @click="openDialog(row)">编辑</el-button>
+              <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+            </template>
+          </ProductTable>
         </el-tab-pane>
         <el-tab-pane :label="`采购单 (${filteredPurchases.length})`" name="purchases">
           <div class="table-wrap">
@@ -111,14 +116,46 @@
         </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <el-dialog v-model="dialog" title="商品" width="520">
+      <el-form :model="form" label-width="80px">
+        <el-form-item label="编码"><el-input v-model="form.code" /></el-form-item>
+        <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
+        <el-form-item label="单位"><el-input v-model="form.unit" /></el-form-item>
+        <el-form-item label="供应商">
+          <el-select
+            v-model="form.suppliers"
+            multiple filterable clearable
+            placeholder="可多选，留空表示暂未指定"
+            style="width:100%"
+          >
+            <el-option v-for="s in supplierOptions" :key="s.code" :label="s.label" :value="s.code" />
+          </el-select>
+          <div class="field-hint">更换供应商后，商品行的供应商列会同步更新；下次录入该商品的采购单时仍会自动补充新供应商</div>
+        </el-form-item>
+        <el-form-item label="进价"><el-input-number v-model="form.cost" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="售价"><el-input-number v-model="form.price" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="批发价"><el-input-number v-model="form.priceWholesale" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="安装师傅价"><el-input-number v-model="form.priceInstaller" :min="0" :precision="2" /></el-form-item>
+        <el-form-item label="预警值"><el-input-number v-model="form.warning" :min="0" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
+        <el-form-item label="商品照片"><PhotoUpload v-model="form.photos" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="dialog=false">取消</el-button>
+        <el-button type="primary" @click="save">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
+import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, paidSumOf } from '../utils/account'
 
 const route = useRoute()
@@ -140,6 +177,81 @@ const supplierPriceColumns = [
   { prop: 'priceWholesale', label: '批发价' },
   { prop: 'priceInstaller', label: '安装师傅价' }
 ]
+
+// ---------- 商品编辑 / 删除 ----------
+const dialog = ref(false)
+// 正在编辑的商品原始编码：用于拦截「改成他人编码」导致覆盖对方商品
+const editingCode = ref('')
+const form = reactive({
+  code:'', name:'', unit:'', photos:[], suppliers:[],
+  cost:0, price:0, priceWholesale:0, priceInstaller:0,
+  warning:0, remark:''
+})
+
+// 供应商选项：存在同名不同码的重复档案（如 S00001/S00039 都叫湖南利接管件），
+// 同名的在选项里补上编码后缀，避免选错
+const supplierOptions = computed(() => {
+  const nameCount = {}
+  ;(suppliers.value || []).forEach(s => { nameCount[s.name] = (nameCount[s.name] || 0) + 1 })
+  return (suppliers.value || []).map(s => ({
+    code: s.code,
+    label: nameCount[s.name] > 1 ? `${s.name}（${s.code}）` : s.name
+  }))
+})
+
+function openDialog(row) {
+  editingCode.value = row ? row.code : ''
+  // 先重置为默认值再覆盖，避免上次编辑残留；品牌字段已废弃，读入时剥离
+  const { brand, ...rest } = row || {}
+  Object.assign(form, {
+    code:'', name:'', unit:'', photos:[], suppliers:[],
+    cost:0, price:0, priceWholesale:0, priceInstaller:0, warning:0, remark:'',
+    ...rest
+  })
+  // 供应商始终是数组，避免历史脏数据（字符串/null）导致多选组件异常
+  form.suppliers = Array.isArray(form.suppliers) ? [...form.suppliers] : []
+  dialog.value = true
+}
+
+async function save() {
+  // 把编码改成别人的编码会把对方商品整条覆盖掉，先拦下来
+  if (form.code && form.code !== editingCode.value && items.value.some(i => i.code === form.code)) {
+    return ElMessage.error(`编码 ${form.code} 已被其他商品使用，请换一个编码`)
+  }
+  const idx = items.value.findIndex(i => i.code === form.code)
+  // 品牌字段已废弃、零售价已并入售价：保存时剥离，数据中不再写入
+  const { brand, priceRetail, ...rest } = form
+  const payload = { ...rest, suppliers: Array.isArray(rest.suppliers) ? [...rest.suppliers] : [] }
+  if (idx >= 0) items.value[idx] = { ...items.value[idx], ...payload, brand: undefined }
+  else items.value.push({ ...payload, brand: undefined })
+  // 保存失败（如 GitHub 写入出错）时明确报错，并回滚为线上数据，避免本地与线上不一致
+  try {
+    await api.saveItems(items.value)
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    await load()
+    return
+  }
+  dialog.value = false
+  ElMessage.success('已保存')
+  load()
+}
+
+async function remove(row) {
+  try {
+    await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
+  } catch { return }
+  items.value = items.value.filter(i => i.code !== row.code)
+  try {
+    await api.saveItems(items.value)
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    await load()
+    return
+  }
+  ElMessage.success('已删除')
+  load()
+}
 const purchaseList = computed(() => (purchases.value || []).filter(p => p.supplier === supplier.value.name))
 const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateStart.value && (p.date || '') < dateStart.value) return false
@@ -208,14 +320,15 @@ const ledgerSummary = ({ columns, data }) => {
   })
 }
 
-onMounted(async () => {
+onMounted(load)
+async function load() {
   try {
     const [sp, it, pu] = await Promise.all([api.getSuppliers(), api.getItems(), api.getPurchases()])
     suppliers.value = sp
     items.value = it
     purchases.value = pu
   } catch (e) { suppliers.value = []; items.value = []; purchases.value = [] }
-})
+}
 </script>
 
 <style scoped>
@@ -231,4 +344,5 @@ onMounted(async () => {
 .none { color:var(--text-placeholder); }
 .discount { color:var(--color-success); }
 .balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
+.field-hint { margin-top: var(--gap-xs); color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.5; }
 </style>
