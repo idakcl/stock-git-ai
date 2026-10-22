@@ -128,14 +128,23 @@ const photoOrder = ref(null)
 
 // 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
 const nameMap = computed(() => itemNameMap(itemOptions.value))
-const filtered = computed(() => list.value.filter(row => {
-  // 搜索商品名按编码解析为当前名：单据快照名过期（商品改名前）也能命中
-  if (!matchText(keyword.value, row.id, row.supplier, row.date, row.remark,
-    ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
-  if (dateStart.value && (row.date || '') < dateStart.value) return false
-  if (dateEnd.value && (row.date || '') > dateEnd.value) return false
-  return true
-}))
+// 列表排序：最新的排最前面。先按日期倒序，同日再按单号倒序（单号内含录入时间 hhmmss+流水），
+// 保证同日多单按开单先后正确排列，而非依赖后端存储顺序
+const byNewest = (a, b) => {
+  const d = String(b.date || '').localeCompare(String(a.date || ''))
+  return d !== 0 ? d : String(b.id || '').localeCompare(String(a.id || ''))
+}
+const filtered = computed(() => list.value
+  .filter(row => {
+    // 搜索商品名按编码解析为当前名：单据快照名过期（商品改名前）也能命中
+    if (!matchText(keyword.value, row.id, row.supplier, row.date, row.remark,
+      ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
+    if (dateStart.value && (row.date || '') < dateStart.value) return false
+    if (dateEnd.value && (row.date || '') > dateEnd.value) return false
+    return true
+  })
+  .sort(byNewest)
+)
 
 // 表格底部汇总：基于「全部筛选结果」，不受分页影响
 const summaryAmount = ({ columns }) => {
