@@ -96,10 +96,20 @@ const page = ref(1)
 const dialog = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', category:'', remark:'' })
 
-const filtered = computed(() => list.value.filter(i => {
-  if (categoryFilter.value && (i.category || '') !== categoryFilter.value) return false
-  return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)
-}))
+// 列表排序：最新添加的排最前面。编码为 C+5 位序号、新增时取最大序号+1，序号越大越新；
+// 按编码数字部分倒序（兼容历史非定宽编码），无序号脏数据排最后
+const byNewest = (a, b) => {
+  const na = parseInt(String(a.code || '').replace(/\D/g, ''), 10) || 0
+  const nb = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0
+  return nb - na
+}
+const filtered = computed(() => list.value
+  .filter(i => {
+    if (categoryFilter.value && (i.category || '') !== categoryFilter.value) return false
+    return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)
+  })
+  .sort(byNewest)
+)
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, categoryFilter], () => { page.value = 1 })
