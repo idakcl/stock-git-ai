@@ -118,12 +118,22 @@ const supplierOptions = computed(() => {
   }))
 })
 
+// 列表排序：最新添加的排最前面。商品编码为 P+5 位序号、新增时取最大序号+1，序号越大越新；
+// 按编码内的数字部分倒序（不依赖字符串比较，兼容历史非定宽编码），存量的无序号脏数据排最后
+const byNewest = (a, b) => {
+  const na = parseInt(String(a.code || '').replace(/\D/g, ''), 10) || 0
+  const nb = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0
+  return nb - na
+}
 // 筛选后的商品：传给表格，统计数据也跟着筛选范围走
-const filteredItems = computed(() => items.value.filter(i => {
-  if (filterSupplier.value && !(i.suppliers || []).includes(filterSupplier.value)) return false
-  if (filterCustomer.value && !(i.saleHistory || []).some(h => (h.customer || '') === filterCustomer.value)) return false
-  return true
-}))
+const filteredItems = computed(() => items.value
+  .filter(i => {
+    if (filterSupplier.value && !(i.suppliers || []).includes(filterSupplier.value)) return false
+    if (filterCustomer.value && !(i.saleHistory || []).some(h => (h.customer || '') === filterCustomer.value)) return false
+    return true
+  })
+  .sort(byNewest)
+)
 function clearFilter() { filterSupplier.value = ''; filterCustomer.value = '' }
 // 客户选项：客户档案 + 商品销售历史里实际出现过的客户并集，避免档案不全导致选不到
 const customerOptions = computed(() => {
