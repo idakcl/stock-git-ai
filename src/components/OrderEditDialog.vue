@@ -317,6 +317,15 @@ async function save() {
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
 .lines-scroll{overflow-x:auto;}
+/* 明细行输入框撑满所在列：el-input-number 默认 150px，在 100px 的列里会溢出错位 */
+.lines-scroll :deep(.el-input-number){width:100%;}
+/* 手机端压缩单元格留白与字体，尽量让 商品/数量/单价/折扣 一屏放下；
+   仍放不下的部分由表格自身横向滚动兜底 */
+@media (max-width: 768px){
+  .lines-scroll :deep(.el-table .cell){padding-left:5px;padding-right:5px;}
+  .lines-scroll :deep(.el-table .el-input__wrapper),
+  .lines-scroll :deep(.el-table .el-select__wrapper){padding-left:6px;padding-right:6px;}
+}
 .calc-detail{display:flex;justify-content:flex-end;gap:16px;flex-wrap:wrap;margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);}
 .line-net{font-variant-numeric:tabular-nums;}
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}

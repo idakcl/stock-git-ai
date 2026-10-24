@@ -334,6 +334,9 @@ body {
 .el-pagination { font-size: var(--fs-table); }
 /* 弹窗 */
 .el-dialog { border-radius: var(--radius-lg) !important; }
+/* 弹窗宽度自适应：各弹窗写死的 width（420~660px）在手机上会左右溢出屏幕，
+   用 max-width 统一钳制在视口内（max-width 天然优先于 width），桌面端不受影响 */
+.el-dialog { max-width: 94vw; }
 .el-dialog__title { font-size: var(--fs-title); font-weight: 600; }
 .el-dialog__headerbtn { top: 10px; }
 /* 下拉/日期面板 */
