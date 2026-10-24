@@ -26,6 +26,9 @@
           <el-radio-button label="挂账" />
           <el-radio-button label="结清" />
         </el-radio-group>
+        <div v-if="form.settle === '结清' && unpaidAmount > 0" class="settle-hint">
+          结清后未{{ payWord }}的 <b>¥{{ unpaidAmount.toFixed(2) }}</b> 将自动计入整单优惠（核销尾款，不虚增已{{ payWord }}）
+        </div>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="单据照片">
@@ -111,7 +114,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, appendPayment } from '../utils/account'
+import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 
 const props = defineProps({
@@ -291,10 +294,12 @@ async function doSave() {
     entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments: [], [sumField.value]: 0 }
   }
   if (form.settle === '结清') {
+    // 结清时把未收差额计入整单优惠（核销尾款），而不是补记一笔收款——
+    // 避免账面「已收」虚高；应收也相应减少，账户自然平账
     const unpaid = isPurchase.value
       ? payableOf({ total: amount, discount: discountVal, paid: paidSumOf(entry) })
       : receivableOf({ total: amount, discount: discountVal, received: receivedSumOf(entry) })
-    if (unpaid > 0) entry = appendPayment(entry, props.kind, { date: form.date, amount: unpaid, remark: `结清${payWord.value}款` })
+    if (unpaid > 0) entry.discount = (Number(entry.discount) || 0) + unpaid
   }
   entry[sumField.value] = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
   // 只组装、不落库：交给父组件保存（失败时弹窗保持打开可重试）
@@ -328,6 +333,7 @@ async function save() {
 }
 .calc-detail{display:flex;justify-content:flex-end;gap:16px;flex-wrap:wrap;margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);}
 .line-net{font-variant-numeric:tabular-nums;}
+.settle-hint{margin-top:6px;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.5;}
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}
 .paid-summary .hint{color:var(--text-placeholder);}
 .discount{color:var(--color-success);}
