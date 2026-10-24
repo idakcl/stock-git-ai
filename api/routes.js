@@ -46,10 +46,16 @@ function parseFreeText(text) {
   return out
 }
 
-// 从采购单/销售单推导：商品与供应商的关系链接、历史采购价/销售价、库存
-export function derive(items, suppliers, purchases, sales) {
+// 从采购单/销售单推导：商品与供应商/客户的关系链接、历史采购价/销售价、库存
+// 商品、供应商、客户三类主数据，凡是在单据里首次出现的新名字，都会在此自动建档：
+//   ensureItem（采购+销售明细）→ 商品
+//   ensureSupplier（采购单供应商）→ 供应商
+//   ensureCustomer（销售单客户）→ 客户
+// 已存在的档案只会被补全派生字段（如供应商.products），不会被改写或删除。
+export function derive(items, suppliers, purchases, sales, customers) {
   items = (items || []).map(i => ({ ...i }))
   suppliers = (suppliers || []).map(s => ({ ...s }))
+  customers = (customers || []).map(c => ({ ...c }))
   const nameToCode = {}
   suppliers.forEach(s => { if (s.name) nameToCode[s.name] = s.code })
 
@@ -63,6 +69,23 @@ export function derive(items, suppliers, purchases, sales) {
       suppliers.push(s)
     }
     return s
+  }
+
+  // 销售单里的客户只是个名字字符串，保存销售单时按名字匹配、缺失则自动建档，
+  // 保证「客户名单」与「销售单」不再两套独立数据（以前新客户只进销售单、不进名单）。
+  const custNameToCode = {}
+  customers.forEach(c => { if (c.name) custNameToCode[c.name] = c.code })
+  const ensureCustomer = (name) => {
+    let c = customers.find(x => x.name && name && x.name === name)
+    if (!c) {
+      let max = 0
+      for (const x of customers) { const m = /^C(\d{5})$/.exec(x.code || ''); if (m) max = Math.max(max, parseInt(m[1], 10)) }
+      const code = 'C' + String(max + 1).padStart(5, '0')
+      c = { code, name: name || '', contact: '', phone: '', remark: '' }
+      customers.push(c)
+      custNameToCode[name] = code
+    }
+    return c
   }
 
   const itemByCode = {}
@@ -114,6 +137,8 @@ export function derive(items, suppliers, purchases, sales) {
     }
   }
   for (const s of orderedSales) {
+    const custName = s.customer || ''
+    if (custName) ensureCustomer(custName)
     for (const l of (s.items || [])) {
       const it = ensureItem(l.code, l.name)
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
@@ -147,7 +172,7 @@ export function derive(items, suppliers, purchases, sales) {
   for (const s of suppliers) {
     s.products = items.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
   }
-  return { items, suppliers }
+  return { items, suppliers, customers }
 }
 
 export function rebuildStock(purchases, sales, items) {
@@ -180,15 +205,16 @@ export function rebuildStock(purchases, sales, items) {
 }
 
 async function syncDerived(env, { purchases, sales }) {
-  const [items, suppliers, curP, curS] = await Promise.all([
+  const [items, suppliers, curP, curS, customers] = await Promise.all([
     readJSON(env, 'items.json'),
     readJSON(env, 'suppliers.json'),
     readJSON(env, 'purchases.json'),
-    readJSON(env, 'sales.json')
+    readJSON(env, 'sales.json'),
+    readJSON(env, 'customers.json')
   ])
   const p = purchases != null ? purchases : curP
   const s = sales != null ? sales : curS
-  const { items: newItems, suppliers: newSuppliers } = derive(items, suppliers, p, s)
+  const { items: newItems, suppliers: newSuppliers, customers: newCustomers } = derive(items, suppliers, p, s, customers)
   // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
   // 一旦出现，说明上游读取异常（例如 GitHub 对大文件返回空内容），
   // 此时宁可报错中止，也不能把空数组写回去覆盖真实数据。
@@ -202,6 +228,11 @@ async function syncDerived(env, { purchases, sales }) {
     await writeJSON(env, 'items.json', newItems, 'derive items')
     await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers')
     await writeJSON(env, 'stock.json', stock, 'derive stock')
+    // 客户：仅当销售单里出现了名单中原本没有的新客户时才写回，
+    // 避免每次保存销售单都给 customers.json 产生一条内容不变的空提交
+    if (newCustomers.length > customers.length) {
+      await writeJSON(env, 'customers.json', newCustomers, 'derive customers')
+    }
   } catch (e) {
     throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
   }

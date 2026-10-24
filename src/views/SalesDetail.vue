@@ -206,10 +206,11 @@ async function onOrderSaved({ entry }) {
       ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
       return
     }
-    // 商品销售价历史、库存均由后端自动推导，重拉保证页面与线上一致
-    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+    // 商品销售价历史、库存、客户档案均由后端自动推导，重拉保证页面与线上一致
+    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
     sales.value = s
     items.value = it
+    customers.value = cu || []
     editDialog.value = false
     ElMessage.success('已保存修改')
   } finally { saving.value = false }

@@ -232,10 +232,11 @@ async function onOrderSaved({ entry, isEdit }) {
       itemOptions.value = it
       return
     }
-    // 商品销售价历史、库存均由后端自动推导
-    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
+    // 商品销售价历史、库存、客户档案均由后端自动推导（销售单里的新客户会自动建档）
+    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
     list.value = s
     itemOptions.value = it
+    customerOptions.value = cu
     dialog.value = false
     editingOrder.value = null
     ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
