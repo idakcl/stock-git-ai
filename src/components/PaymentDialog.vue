@@ -27,7 +27,7 @@
       <el-input-number
         v-model="draft.amount"
         :min="0"
-        :max="draftMax"
+        :max="editingIndex >= 0 ? draftMax : 99999999"
         :precision="2"
         :controls="false"
         placeholder="金额"
@@ -36,13 +36,20 @@
       <el-input v-model="draft.remark" placeholder="备注（付款方式等，可空）" style="flex:1;min-width:140px" />
       <template v-if="editingIndex < 0">
         <el-button type="primary" @click="addOne">记一笔</el-button>
+        <!-- 结清：自动把剩余未收/未付金额记为一笔流水并保存（保存后按金额自动判定结清） -->
+        <el-button type="success" @click="settleFull">结清</el-button>
+        <!-- 抹零结清：按填写金额记一笔，不足应收/应付的差额自动计入优惠并结清 -->
+        <el-button type="warning" @click="settleRound">抹零结清</el-button>
       </template>
       <template v-else>
         <el-button type="primary" @click="saveEdit">保存修改</el-button>
         <el-button @click="cancelEdit">取消编辑</el-button>
       </template>
     </div>
-    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「编辑」可修改已有记录；超额收付会被拒绝，少收/少付保存时会把差额记为抹零优惠（不产生实际收付）并提示确认结清。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
+    <div v-if="pendingDeposit" class="pay-hint deposit-tip">
+      本单已记满未{{ kind === 'payable' ? '付' : '收' }}金额，超出部分 <b>¥ {{ pendingDeposit.amount.toFixed(2) }}</b> 将存入{{ kind === 'payable' ? '供应商预付款' : '客户预存款' }}（点「保存」生效）
+    </div>
+    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「结清」自动记一笔剩余全部金额并标记结清；填好实际金额点「抹零结清」，不足部分自动转为优惠并结清；超额收付时本单记满未收金额、超出部分转入预存款。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -74,6 +81,8 @@ const dirty = ref(false)
 const draft = ref({ date: '', amount: null, remark: '' })
 // 正在编辑的流水下标，-1 表示未进入编辑（此时表单用于「记一笔」）
 const editingIndex = ref(-1)
+// 超额收付时待转入预存款/预付款的流水：{ date, amount, remark, time }，保存时交由父组件写入对应档案
+const pendingDeposit = ref(null)
 
 const due = computed(() => grossOf(props.order))
 const paidSum = computed(() => rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
@@ -88,6 +97,7 @@ watch(() => props.modelValue, v => {
     rows.value = ensurePayments(props.order, field)
     draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
     editingIndex.value = -1
+    pendingDeposit.value = null
     dirty.value = false
   }
 })
@@ -95,7 +105,24 @@ watch(() => props.modelValue, v => {
 function addOne() {
   const amount = Number(draft.value.amount || 0)
   if (!amount || amount <= 0) return ElMessage.warning('请输入收款/付款金额')
-  if (amount > unpaid.value + 1e-6) return ElMessage.warning(`金额超过未${kindLabel.value === '付款' ? '付' : '收'}金额`)
+  const remain = round2(unpaid.value)
+  if (amount > remain + 1e-6) {
+    // 超额收付：本单记满未收/未付金额，超出部分转预存款/预付款（保存时写入对应档案）
+    if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额，无需再记`)
+    const date = draft.value.date || new Date().toISOString().slice(0, 10)
+    rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString() })
+    pendingDeposit.value = {
+      date,
+      amount: round2(amount - remain),
+      remark: draft.value.remark || `超${kindLabel.value === '付款' ? '付' : '收'}转${props.kind === 'payable' ? '预付款' : '预存款'}`,
+      time: new Date().toISOString()
+    }
+    dirty.value = true
+    draft.value.amount = null
+    draft.value.remark = ''
+    ElMessage.success(`本单已记满未${kindLabel.value === '付款' ? '付' : '收'}金额，超出 ¥${round2(amount - remain).toFixed(2)} 将存入${props.kind === 'payable' ? '供应商预付款' : '客户预存款'}`)
+    return
+  }
   rows.value.push({
     date: draft.value.date || new Date().toISOString().slice(0, 10),
     amount,
@@ -106,6 +133,48 @@ function addOne() {
   // 默认带入剩余未收，方便连续录入
   draft.value.amount = Math.max(0, unpaid.value - amount) || null
   draft.value.remark = ''
+}
+
+// 一键结清：把剩余未收/未付金额记为一笔流水并保存（syncPayments 按金额自动判定结清）
+async function settleFull() {
+  if (editingIndex.value >= 0) return ElMessage.warning('正在编辑流水，请先取消编辑')
+  const remain = round2(unpaid.value)
+  if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额`)
+  rows.value.push({
+    date: draft.value.date || new Date().toISOString().slice(0, 10),
+    amount: remain,
+    remark: draft.value.remark || `结清${kindLabel.value}`,
+    time: new Date().toISOString()
+  })
+  dirty.value = true
+  draft.value.amount = null
+  draft.value.remark = ''
+  await saveAll()
+}
+
+// 抹零结清：按填写的金额记一笔；不足应收/应付的差额自动计入整单优惠并标记结清
+function settleRound() {
+  if (editingIndex.value >= 0) return ElMessage.warning('正在编辑流水，请先取消编辑')
+  const amount = Number(draft.value.amount || 0)
+  if (!amount || amount <= 0) return ElMessage.warning('请先填写实际收/付金额，再点「抹零结清」')
+  const paidTotal = round2(paidSum.value + amount)
+  if (paidTotal > due.value + 1e-6) {
+    return ElMessage.warning(`金额超过${kindLabel.value === '付款' ? '应付' : '应收'}金额；如需多收请用「记一笔」，超出部分会转入预存款`)
+  }
+  rows.value.push({
+    date: draft.value.date || new Date().toISOString().slice(0, 10),
+    amount,
+    remark: draft.value.remark || `抹零${kindLabel.value}`,
+    time: new Date().toISOString()
+  })
+  dirty.value = true
+  const gap = round2(due.value - paidTotal)
+  const order = { ...props.order, payments: rows.value.map(p => ({ ...p })) }
+  // 不足部分直接计入整单优惠（核销尾款），syncPayments 按金额自动判定结清
+  if (gap > 0) order.discount = round2(Number(order.discount || 0) + gap)
+  draft.value.amount = null
+  draft.value.remark = ''
+  emit('saved', syncPayments(order, props.kind), pendingDeposit.value)
 }
 
 // ---------- 编辑已有流水：把该笔载入表单，改完写回原位置（保留原 time） ----------
@@ -150,6 +219,11 @@ function removeRow(idx) {
   if (editingIndex.value === idx) cancelEdit()
   else if (editingIndex.value > idx) editingIndex.value -= 1
   rows.value.splice(idx, 1)
+  // 待转预存款与已记满的流水是配套的：删了流水就一并取消，避免出现「没有对应收款却入账预存款」
+  if (pendingDeposit.value) {
+    pendingDeposit.value = null
+    ElMessage.info('已同时取消转入预存款的超额部分')
+  }
   dirty.value = true
 }
 
@@ -184,8 +258,10 @@ async function saveAll() {
     }
   }
   const updated = syncPayments(order, props.kind)
-  // 不在此处关闭弹窗：由父组件保存成功后关闭，失败时弹窗保持打开便于重试
-  emit('saved', updated)
+  // 超额收付的预存款流水随保存一并交给父组件写入对应档案（客户预存款/供应商预付款）
+  const dep = pendingDeposit.value
+  pendingDeposit.value = null
+  emit('saved', updated, dep && Number(dep.amount) > 0 ? dep : null)
 }
 
 function onClosed() {
@@ -199,6 +275,7 @@ function onClosed() {
 .pay-summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
 .pay-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
 .pay-hint { margin-top: 6px; color:var(--text-secondary); font-size:var(--fs-sub); }
+.deposit-tip { color:var(--color-success); }
 .editing-tip { margin-left: 6px; color:var(--color-warning); }
 .discount { color:var(--color-success); }
 .is-editing { font-weight: 600; }

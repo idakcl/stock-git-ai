@@ -91,3 +91,9 @@ export function removePayment(order, kind, index) {
   payments.splice(index, 1)
   return syncPayments({ ...order, payments }, kind)
 }
+
+// 客户预存款 / 供应商预付款流水合计
+// 流水存于对应档案：customer.deposits / supplier.advances = [{ date, amount, remark, time }]
+export function depositSumOf(list) {
+  return (list || []).reduce((s, d) => s + Number(d?.amount || 0), 0)
+}

@@ -20,6 +20,10 @@
         <span class="amount-item">
           应收款：<b :class="receivable ? 'amount-debt' : 'amount-zero'">¥ {{ receivable.toFixed(2) }}</b>
         </span>
+        <span class="amount-item">
+          预存款：<b class="amount-deposit">¥ {{ depositBalance.toFixed(2) }}</b>
+        </span>
+        <el-button size="small" type="primary" plain @click="openDeposit">预存款充值</el-button>
         <span v-if="customer.remark">备注：{{ customer.remark }}</span>
       </div>
 
@@ -115,17 +119,52 @@
           </div>
           <div v-if="!ledgerRows.length" class="empty">该时间段暂无往来记录</div>
         </el-tab-pane>
+        <el-tab-pane :label="`预存款 (${(customer.deposits || []).length})`" name="deposits">
+          <div class="balance-bar">
+            <span>预存款余额：<b class="amount-deposit">¥ {{ depositBalance.toFixed(2) }}</b></span>
+            <el-button size="small" type="primary" plain @click="openDeposit">充值一笔</el-button>
+          </div>
+          <div class="table-wrap">
+          <el-table :data="customer.deposits || []" stripe>
+            <el-table-column prop="date" label="日期" width="130" />
+            <el-table-column label="金额" width="130" align="right">
+              <template #default="{ row }"><b>{{ Number(row.amount || 0).toFixed(2) }}</b></template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="180" />
+            <el-table-column label="操作" width="90">
+              <template #default="{ $index }">
+                <el-button size="small" type="danger" link @click="removeDeposit($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </div>
+          <div v-if="!(customer.deposits || []).length" class="empty">暂无预存款记录；收款时超额部分会自动转入预存款</div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <!-- 预存款充值：写入客户档案 deposits 流水 -->
+    <el-dialog v-model="depositDialog" title="预存款充值" width="420">
+      <el-form label-width="80px">
+        <el-form-item label="日期"><el-date-picker v-model="depDraft.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="金额"><el-input-number v-model="depDraft.amount" :min="0" :precision="2" :controls="false" style="width:100%" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="depDraft.remark" placeholder="付款方式等，可空" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="depositDialog = false">取消</el-button>
+        <el-button type="primary" :loading="depSaving" @click="saveDeposit">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
-import { receivableOf, receivedSumOf } from '../utils/account'
+import { receivableOf, receivedSumOf, depositSumOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 
 const route = useRoute()
@@ -139,6 +178,55 @@ const dateEnd = ref('')
 const categoryTagType = (c) => ({ '批发': 'warning', '零售': 'success', '安装师傅': 'primary' }[c] || 'info')
 
 const customer = computed(() => customers.value.find(c => c.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', remark: '', category: '' })
+
+// ---- 预存款：余额 = 客户档案 deposits 流水合计；支持单独充值/删除 ----
+const depositBalance = computed(() => depositSumOf(customer.value.deposits))
+const depositDialog = ref(false)
+const depSaving = ref(false)
+const depDraft = ref({ date: '', amount: null, remark: '' })
+
+function openDeposit() {
+  depDraft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+  depositDialog.value = true
+}
+
+async function saveDeposit() {
+  const amount = Number(depDraft.value.amount || 0)
+  if (!amount || amount <= 0) return ElMessage.warning('请输入充值金额')
+  depSaving.value = true
+  try {
+    const list = customers.value.map(c => ({ ...c }))
+    const c = list.find(x => x.code === customer.value.code)
+    if (!c) return ElMessage.error('客户档案未找到，请刷新页面重试')
+    c.deposits = [...(c.deposits || []), {
+      date: depDraft.value.date || new Date().toISOString().slice(0, 10),
+      amount,
+      remark: depDraft.value.remark || '',
+      time: new Date().toISOString()
+    }]
+    await api.saveCustomers(list)
+    customers.value = list
+    depositDialog.value = false
+    ElMessage.success('已存入预存款')
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || e}`)
+  } finally { depSaving.value = false }
+}
+
+async function removeDeposit(idx) {
+  try { await ElMessageBox.confirm('确定删除该笔预存款记录？删除后不可恢复。', '提示', { type: 'warning' }) } catch { return }
+  try {
+    const list = customers.value.map(c => ({ ...c }))
+    const c = list.find(x => x.code === customer.value.code)
+    if (!c) return
+    c.deposits = (c.deposits || []).filter((_, i) => i !== idx)
+    await api.saveCustomers(list)
+    customers.value = list
+    ElMessage.success('已删除该笔预存款记录')
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message || e}`)
+  }
+}
 const saleList = computed(() => (sales.value || []).filter(s => s.customer === customer.value.name))
 const products = computed(() => {
   const codes = new Set()
@@ -242,6 +330,7 @@ onMounted(async () => {
 .amount-item { display: inline-flex; align-items: center; gap: 4px; }
 .amount-debt { color:var(--color-danger); font-weight: 700; }
 .amount-zero { color:var(--text-placeholder); }
+.amount-deposit { color:var(--color-success); font-weight: 700; }
 .none { color:var(--text-placeholder); }
 .discount { color:var(--color-success); }
 .balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }

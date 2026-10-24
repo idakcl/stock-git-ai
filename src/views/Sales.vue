@@ -60,7 +60,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="350" class-name="ops-col">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
             <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
@@ -276,7 +276,7 @@ async function onPhotosSaved(photos) {
   ElMessage.success('已更新单据照片')
 }
 
-async function onPaySaved(updated) {
+async function onPaySaved(updated, deposit) {
   const idx = list.value.findIndex(s => s.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
   // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
@@ -289,6 +289,28 @@ async function onPaySaved(updated) {
   list.value = await api.getSales().catch(() => list.value)
   payDialog.value = false
   ElMessage.success('已保存收款流水')
+  // 超收部分转客户预存款：写入客户档案 deposits 流水（后端保存销售单时会自动建档客户，这里按名字必能找到）
+  if (deposit && Number(deposit.amount) > 0) await addCustomerDeposit(updated.customer, deposit)
+}
+
+// 超收转客户预存款
+async function addCustomerDeposit(name, dep) {
+  try {
+    const customers = await api.getCustomers()
+    const c = customers.find(x => x.name === name)
+    if (!c) return ElMessage.warning(`客户「${name || '未知'}」不在名单中，超额部分 ¥${Number(dep.amount).toFixed(2)} 未入预存款`)
+    c.deposits = [...(c.deposits || []), {
+      date: dep.date,
+      amount: Number(dep.amount),
+      remark: dep.remark || '超收转预存款',
+      time: dep.time || new Date().toISOString()
+    }]
+    await api.saveCustomers(customers)
+    customerOptions.value = customers
+    ElMessage.success(`已存入客户预存款 ¥${Number(dep.amount).toFixed(2)}`)
+  } catch (e) {
+    ElMessage.error(`预存款保存失败：${e.message || e}，请到客户详情手动补记`)
+  }
 }
 
 async function toggleSettle(row) {

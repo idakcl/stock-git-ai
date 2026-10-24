@@ -337,6 +337,9 @@ body {
 /* 弹窗宽度自适应：各弹窗写死的 width（420~660px）在手机上会左右溢出屏幕，
    用 max-width 统一钳制在视口内（max-width 天然优先于 width），桌面端不受影响 */
 .el-dialog { max-width: 94vw; }
+/* 列表操作列（ops-col）：按钮收紧间距并强制单行，删除与照片同排不换行 */
+.el-table .ops-col .cell { white-space: nowrap; }
+.el-table .ops-col .el-button + .el-button { margin-left: 6px; }
 .el-dialog__title { font-size: var(--fs-title); font-weight: 600; }
 .el-dialog__headerbtn { top: 10px; }
 /* 下拉/日期面板 */

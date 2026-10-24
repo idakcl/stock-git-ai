@@ -17,6 +17,10 @@
         <span class="amount-item">
           应付款：<b :class="payable ? 'amount-debt' : 'amount-zero'">¥ {{ payable.toFixed(2) }}</b>
         </span>
+        <span class="amount-item">
+          预付款：<b class="amount-deposit">¥ {{ advanceBalance.toFixed(2) }}</b>
+        </span>
+        <el-button size="small" type="primary" plain @click="openAdvance">预付款充值</el-button>
         <span v-if="supplier.remark">备注：{{ supplier.remark }}</span>
       </div>
 
@@ -114,8 +118,42 @@
           </div>
           <div v-if="!ledgerRows.length" class="empty">该时间段暂无往来记录</div>
         </el-tab-pane>
+        <el-tab-pane :label="`预付款 (${(supplier.advances || []).length})`" name="advances">
+          <div class="balance-bar">
+            <span>预付款余额：<b class="amount-deposit">¥ {{ advanceBalance.toFixed(2) }}</b></span>
+            <el-button size="small" type="primary" plain @click="openAdvance">充值一笔</el-button>
+          </div>
+          <div class="table-wrap">
+          <el-table :data="supplier.advances || []" stripe>
+            <el-table-column prop="date" label="日期" width="130" />
+            <el-table-column label="金额" width="130" align="right">
+              <template #default="{ row }"><b>{{ Number(row.amount || 0).toFixed(2) }}</b></template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="180" />
+            <el-table-column label="操作" width="90">
+              <template #default="{ $index }">
+                <el-button size="small" type="danger" link @click="removeAdvance($index)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          </div>
+          <div v-if="!(supplier.advances || []).length" class="empty">暂无预付款记录；付款时超额部分会自动转入预付款</div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <!-- 预付款充值：写入供应商档案 advances 流水 -->
+    <el-dialog v-model="advanceDialog" title="预付款充值" width="420">
+      <el-form label-width="80px">
+        <el-form-item label="日期"><el-date-picker v-model="advDraft.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
+        <el-form-item label="金额"><el-input-number v-model="advDraft.amount" :min="0" :precision="2" :controls="false" style="width:100%" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="advDraft.remark" placeholder="付款方式等，可空" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="advanceDialog = false">取消</el-button>
+        <el-button type="primary" :loading="advSaving" @click="saveAdvance">保存</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="dialog" title="商品" width="520">
       <el-form :model="form" label-width="80px">
@@ -156,7 +194,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
-import { payableOf, paidSumOf } from '../utils/account'
+import { payableOf, paidSumOf, depositSumOf } from '../utils/account'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -167,6 +205,55 @@ const dateStart = ref('')
 const dateEnd = ref('')
 
 const supplier = computed(() => suppliers.value.find(s => s.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', remark: '' })
+
+// ---- 预付款：余额 = 供应商档案 advances 流水合计；支持单独充值/删除 ----
+const advanceBalance = computed(() => depositSumOf(supplier.value.advances))
+const advanceDialog = ref(false)
+const advSaving = ref(false)
+const advDraft = ref({ date: '', amount: null, remark: '' })
+
+function openAdvance() {
+  advDraft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+  advanceDialog.value = true
+}
+
+async function saveAdvance() {
+  const amount = Number(advDraft.value.amount || 0)
+  if (!amount || amount <= 0) return ElMessage.warning('请输入充值金额')
+  advSaving.value = true
+  try {
+    const list = suppliers.value.map(s => ({ ...s }))
+    const s = list.find(x => x.code === supplier.value.code)
+    if (!s) return ElMessage.error('供应商档案未找到，请刷新页面重试')
+    s.advances = [...(s.advances || []), {
+      date: advDraft.value.date || new Date().toISOString().slice(0, 10),
+      amount,
+      remark: advDraft.value.remark || '',
+      time: new Date().toISOString()
+    }]
+    await api.saveSuppliers(list)
+    suppliers.value = list
+    advanceDialog.value = false
+    ElMessage.success('已存入预付款')
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || e}`)
+  } finally { advSaving.value = false }
+}
+
+async function removeAdvance(idx) {
+  try { await ElMessageBox.confirm('确定删除该笔预付款记录？删除后不可恢复。', '提示', { type: 'warning' }) } catch { return }
+  try {
+    const list = suppliers.value.map(s => ({ ...s }))
+    const s = list.find(x => x.code === supplier.value.code)
+    if (!s) return
+    s.advances = (s.advances || []).filter((_, i) => i !== idx)
+    await api.saveSuppliers(list)
+    suppliers.value = list
+    ElMessage.success('已删除该笔预付款记录')
+  } catch (e) {
+    ElMessage.error(`删除失败：${e.message || e}`)
+  }
+}
 const products = computed(() => {
   const codes = new Set(supplier.value.products || [])
   return items.value.filter(i => codes.has(i.code))
@@ -340,6 +427,7 @@ async function load() {
 .filter-sep { color:var(--text-secondary); }
 .amount-item { display: inline-flex; align-items: center; gap: 4px; }
 .amount-debt { color:var(--color-danger); font-weight: 700; }
+.amount-deposit { color:var(--color-success); font-weight: 700; }
 .amount-zero { color:var(--text-placeholder); }
 .none { color:var(--text-placeholder); }
 .discount { color:var(--color-success); }

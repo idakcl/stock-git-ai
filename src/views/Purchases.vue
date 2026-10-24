@@ -59,7 +59,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="300">
+        <el-table-column label="操作" width="350" class-name="ops-col">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/purchase/${row.id}`)">查看</el-button>
             <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
@@ -117,6 +117,8 @@ const dateStart = ref('')
 const dateEnd = ref('')
 const page = ref(1)
 const itemOptions = ref([])
+// 供应商档案（预付款存这里）：付款弹窗超付部分转供应商预付款时使用
+const supplierOptions = ref([])
 const dialog = ref(false)
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
@@ -182,17 +184,19 @@ const exportColumns = [
 ]
 
 function loadAll() {
-  return Promise.all([api.getPurchases(), api.getItems()])
+  return Promise.all([api.getPurchases(), api.getItems(), api.getSuppliers()])
 }
 
 onMounted(async () => {
   try {
-    const [p, it] = await loadAll()
+    const [p, it, sup] = await loadAll()
     list.value = p
     itemOptions.value = it
+    supplierOptions.value = sup
   } catch (e) {
     list.value = []
     itemOptions.value = []
+    supplierOptions.value = []
   }
 })
 
@@ -220,9 +224,10 @@ async function onOrderSaved({ entry, isEdit }) {
     } catch (e) {
       list.value = snapshot
       ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-      const [p, it] = await loadAll()
+      const [p, it, sup] = await loadAll()
       list.value = p
       itemOptions.value = it
+      supplierOptions.value = sup
       return
     }
     // 商品建档、库存、供应商关系均由后端自动推导
@@ -266,7 +271,7 @@ async function onPhotosSaved(photos) {
   ElMessage.success('已更新单据照片')
 }
 
-async function onPaySaved(updated) {
+async function onPaySaved(updated, deposit) {
   const idx = list.value.findIndex(p => p.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
   // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
@@ -276,11 +281,34 @@ async function onPaySaved(updated) {
     ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
     return
   }
-  const [p, it] = await loadAll()
+  const [p, it, sup] = await loadAll()
   list.value = p
   itemOptions.value = it
+  supplierOptions.value = sup
   payDialog.value = false
   ElMessage.success('已保存付款流水')
+  // 超付部分转供应商预付款：写入供应商档案 advances 流水（保存采购单时后端会自动建档供应商，这里按名字必能找到）
+  if (deposit && Number(deposit.amount) > 0) await addSupplierAdvance(updated.supplier, deposit)
+}
+
+// 超付转供应商预付款
+async function addSupplierAdvance(name, dep) {
+  try {
+    const suppliers = await api.getSuppliers()
+    const s = suppliers.find(x => x.name === name)
+    if (!s) return ElMessage.warning(`供应商「${name || '未知'}」不在名单中，超额部分 ¥${Number(dep.amount).toFixed(2)} 未入预付款`)
+    s.advances = [...(s.advances || []), {
+      date: dep.date,
+      amount: Number(dep.amount),
+      remark: dep.remark || '超付转预付款',
+      time: dep.time || new Date().toISOString()
+    }]
+    await api.saveSuppliers(suppliers)
+    supplierOptions.value = suppliers
+    ElMessage.success(`已存入供应商预付款 ¥${Number(dep.amount).toFixed(2)}`)
+  } catch (e) {
+    ElMessage.error(`预付款保存失败：${e.message || e}，请到供应商详情手动补记`)
+  }
 }
 
 async function toggleSettle(row) {
@@ -311,7 +339,8 @@ async function toggleSettle(row) {
     await api.savePurchases(list.value)
   } catch (e) {
     ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    const [p, it] = await loadAll()
+    const [p, it, sup] = await loadAll()
+    supplierOptions.value = sup
     list.value = p
     itemOptions.value = it
     return
@@ -330,10 +359,11 @@ async function remove(row) {
     await api.savePurchases(list.value)
   } catch (e) {
     ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    await loadAll().then(([p, it]) => { list.value = p; itemOptions.value = it })
+    await loadAll().then(([p, it, sup]) => { list.value = p; itemOptions.value = it; supplierOptions.value = sup })
     return
   }
-  const [p, it] = await loadAll()
+  const [p, it, sup] = await loadAll()
+  supplierOptions.value = sup
   list.value = p
   itemOptions.value = it
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
