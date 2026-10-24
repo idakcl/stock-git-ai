@@ -77,6 +77,8 @@
           <div class="balance-bar">
             <span>期初欠款：<b :class="openingBalance > 0 ? 'amount-debt' : 'amount-zero'">¥ {{ openingBalance.toFixed(2) }}</b></span>
             <span>本期应收：<b>¥ {{ ledgerRows.reduce((s, r) => s + r.amount, 0).toFixed(2) }}</b></span>
+            <span>本期已收：<b class="amount-received">¥ {{ ledgerRows.reduce((s, r) => s + r.received, 0).toFixed(2) }}</b></span>
+            <span>本期优惠：<b class="amount-deposit">¥ {{ ledgerRows.reduce((s, r) => s + r.discount, 0).toFixed(2) }}</b></span>
             <span>期末欠款：<b :class="closingBalance > 0 ? 'amount-debt' : 'amount-zero'">¥ {{ closingBalance.toFixed(2) }}</b></span>
           </div>
           <div class="table-wrap">
@@ -95,6 +97,12 @@
             <el-table-column prop="discount" label="优惠" width="100" align="right">
               <template #default="{ row }">
                 <span v-if="row.discount > 0" class="discount">-{{ row.discount.toFixed(2) }}</span>
+                <span v-else class="none">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="deposit" label="预存款抵扣" width="110" align="right">
+              <template #default="{ row }">
+                <span v-if="row.deposit > 0" class="discount">-{{ row.deposit.toFixed(2) }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -275,9 +283,11 @@ const ledgerRows = computed(() => {
       const amount = Number(s.total || 0)
       const discount = Number(s.discount || 0)
       const received = receivedSumOf(s)
+      // 该单从客户预存款抵扣的金额（来源为预存款的收款流水）
+      const deposit = (s.payments || []).filter(p => p.fromDeposit).reduce((a, p) => a + Number(p.amount || 0), 0)
       const unpaid = Math.max(0, amount - discount - received)
       balance += unpaid
-      return { date: s.date, id: s.id, summary: '销售出库', amount, discount, received, unpaid, balance, settle: s.settle || '挂账' }
+      return { date: s.date, id: s.id, summary: '销售出库', amount, discount, received, deposit, unpaid, balance, settle: s.settle || '挂账' }
     })
 })
 
@@ -301,6 +311,7 @@ const ledgerSummary = ({ columns, data }) => {
     amount: sum('amount').toFixed(2),
     discount: sum('discount').toFixed(2),
     received: sum('received').toFixed(2),
+    deposit: sum('deposit').toFixed(2),
     unpaid: sum('unpaid').toFixed(2),
     balance: closingBalance.value.toFixed(2)
   }
@@ -331,6 +342,7 @@ onMounted(async () => {
 .amount-debt { color:var(--color-danger); font-weight: 700; }
 .amount-zero { color:var(--text-placeholder); }
 .amount-deposit { color:var(--color-success); font-weight: 700; }
+.amount-received { color:var(--color-primary); font-weight: 700; }
 .none { color:var(--text-placeholder); }
 .discount { color:var(--color-success); }
 .balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }

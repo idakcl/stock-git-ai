@@ -5,6 +5,7 @@
       <span>累计{{ kind === 'payable' ? '实付' : '实收' }}：<b>¥ {{ paidSum.toFixed(2) }}</b>（{{ rows.length }} 笔）</span>
       <span v-if="Number(order.discount || 0) > 0">抹零优惠：<b class="discount">¥ {{ Number(order.discount).toFixed(2) }}</b>（未实际{{ kind === 'payable' ? '付款' : '收款' }}）</span>
       <span>{{ kind === 'payable' ? '未付' : '未收' }}：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b></span>
+      <span v-if="depositAvailable > 0">可用{{ depositLabel }}：<b class="deposit">¥ {{ depositAvailable.toFixed(2) }}</b></span>
     </div>
 
     <el-table :data="rows" stripe max-height="280" empty-text="暂无收付款记录">
@@ -13,7 +14,13 @@
       <el-table-column prop="amount" label="金额" width="120" align="right">
         <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
+      <el-table-column label="来源" width="92">
+        <template #default="{ row }">
+          <el-tag v-if="row.fromDeposit" size="small" type="warning" disable-transitions>{{ depositLabel }}</el-tag>
+          <span v-else class="none">现金</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="remark" label="备注" min-width="130" show-overflow-tooltip />
       <el-table-column label="操作" width="120">
         <template #default="{ row, $index }">
           <el-button size="small" type="primary" link :class="{ 'is-editing': editingIndex === $index }" @click="startEdit($index)">编辑</el-button>
@@ -40,6 +47,8 @@
         <el-button type="success" @click="settleFull">结清</el-button>
         <!-- 抹零结清：按填写金额记一笔，不足应收/应付的差额自动计入优惠并结清 -->
         <el-button type="warning" @click="settleRound">抹零结清</el-button>
+        <!-- 用预存款/预付款支付：从对应档案余额中扣减货款，记一笔来源为预存款的流水 -->
+        <el-button type="info" plain :disabled="depositAvailable <= 0" @click="payFromDeposit">用{{ depositLabel }}支付</el-button>
       </template>
       <template v-else>
         <el-button type="primary" @click="saveEdit">保存修改</el-button>
@@ -49,7 +58,7 @@
     <div v-if="pendingDeposit" class="pay-hint deposit-tip">
       本单已记满未{{ kind === 'payable' ? '付' : '收' }}金额，超出部分 <b>¥ {{ pendingDeposit.amount.toFixed(2) }}</b> 将存入{{ kind === 'payable' ? '供应商预付款' : '客户预存款' }}（点「保存」生效）
     </div>
-    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「结清」自动记一笔剩余全部金额并标记结清；填好实际金额点「抹零结清」，不足部分自动转为优惠并结清；超额收付时本单记满未收金额、超出部分转入预存款。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
+    <div class="pay-hint">提示：记一笔后先入列表，点「保存」统一生效；点「结清」自动记一笔剩余全部金额并标记结清；填好实际金额点「抹零结清」，不足部分自动转为优惠并结清；超额收付时本单记满未收金额、超出部分转入预存款；点「用{{ depositLabel }}支付」可从{{ depositLabel }}余额中抵扣货款（余额不足时按可用额扣减）。<span v-if="editingIndex >= 0" class="editing-tip">正在编辑第 {{ editingIndex + 1 }} 笔，金额上限为「应收 − 其他各笔合计」。</span></div>
 
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
@@ -66,7 +75,8 @@ import { ensurePayments, grossOf, syncPayments } from '../utils/account'
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
   order: { type: Object, required: true },
-  kind: { type: String, default: 'receivable' } // 'receivable' 销售单收款 | 'payable' 采购单付款
+  kind: { type: String, default: 'receivable' }, // 'receivable' 销售单收款 | 'payable' 采购单付款
+  depositBalance: { type: Number, default: 0 } // 客户预存款/供应商预付款可用余额，用于「用预存款支付」抵扣
 })
 const emit = defineEmits(['update:modelValue', 'saved'])
 
@@ -76,6 +86,9 @@ const visible = computed({
 })
 
 const kindLabel = computed(() => props.kind === 'payable' ? '付款' : '收款')
+// 预存款（客户）/预付款（供应商）文案与可用余额
+const depositLabel = computed(() => props.kind === 'payable' ? '预付款' : '预存款')
+const depositAvailable = computed(() => Math.max(0, Number(props.depositBalance) || 0))
 const rows = ref([])
 const dirty = ref(false)
 const draft = ref({ date: '', amount: null, remark: '' })
@@ -135,6 +148,32 @@ function addOne() {
   draft.value.remark = ''
 }
 
+// 用预存款/预付款抵扣货款：从对应档案余额扣减，记一笔「来源=预存款」的流水（金额计入实收/实付）
+// 保存时父组件据此从客户预存款/供应商预付款余额中扣减对应金额，并在往来账/预存款页体现
+function payFromDeposit() {
+  if (editingIndex.value >= 0) return ElMessage.warning('正在编辑流水，请先取消编辑')
+  if (depositAvailable.value <= 0) return ElMessage.warning(`该${props.kind === 'payable' ? '供应商' : '客户'}暂无可用${depositLabel.value}`)
+  const remain = round2(unpaid.value)
+  if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额`)
+  const entered = Number(draft.value.amount || 0)
+  // 填了金额用填写值，否则默认抵扣「剩余未收」与「可用余额」中的较小值；最终不超过两者
+  let amount = entered > 0 ? entered : Math.min(remain, depositAvailable.value)
+  amount = round2(Math.min(amount, remain, depositAvailable.value))
+  if (amount <= 0) return ElMessage.warning('抵扣金额无效')
+  const date = draft.value.date || new Date().toISOString().slice(0, 10)
+  rows.value.push({
+    date,
+    amount,
+    remark: draft.value.remark || `用${depositLabel.value}抵扣`,
+    time: new Date().toISOString(),
+    fromDeposit: true
+  })
+  dirty.value = true
+  draft.value.amount = null
+  draft.value.remark = ''
+  ElMessage.success(`已用${depositLabel.value}抵扣 ¥${amount.toFixed(2)}（点「保存」生效）`)
+}
+
 // 一键结清：把剩余未收/未付金额记为一笔流水并保存（syncPayments 按金额自动判定结清）
 async function settleFull() {
   if (editingIndex.value >= 0) return ElMessage.warning('正在编辑流水，请先取消编辑')
@@ -174,7 +213,9 @@ function settleRound() {
   if (gap > 0) order.discount = round2(Number(order.discount || 0) + gap)
   draft.value.amount = null
   draft.value.remark = ''
-  emit('saved', syncPayments(order, props.kind), pendingDeposit.value)
+  const dep = pendingDeposit.value
+  pendingDeposit.value = null
+  emit('saved', syncPayments(order, props.kind), dep && Number(dep.amount) > 0 ? { add: dep, deduct: null } : null)
 }
 
 // ---------- 编辑已有流水：把该笔载入表单，改完写回原位置（保留原 time） ----------
@@ -261,7 +302,17 @@ async function saveAll() {
   // 超额收付的预存款流水随保存一并交给父组件写入对应档案（客户预存款/供应商预付款）
   const dep = pendingDeposit.value
   pendingDeposit.value = null
-  emit('saved', updated, dep && Number(dep.amount) > 0 ? dep : null)
+  // 用预存款/预付款抵扣的部分：按标记来源的行汇总，保存时从对应档案余额扣减
+  const deductTotal = round2(rows.value.filter(r => r.fromDeposit).reduce((s, r) => s + Number(r.amount || 0), 0))
+  emit('saved', updated, {
+    add: dep && Number(dep.amount) > 0 ? dep : null,
+    deduct: deductTotal > 0 ? {
+      date: props.order.date || new Date().toISOString().slice(0, 10),
+      amount: deductTotal,
+      remark: `抵扣 ${props.order.id || ''} 货款`,
+      time: new Date().toISOString()
+    } : null
+  })
 }
 
 function onClosed() {
@@ -278,6 +329,7 @@ function onClosed() {
 .deposit-tip { color:var(--color-success); }
 .editing-tip { margin-left: 6px; color:var(--color-warning); }
 .discount { color:var(--color-success); }
+.deposit { color:var(--color-success); }
 .is-editing { font-weight: 600; }
 .debt { color:var(--color-danger); }
 .zero { color:var(--color-success); }

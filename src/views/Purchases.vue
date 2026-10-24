@@ -90,7 +90,7 @@
       @saved="onOrderSaved"
     />
 
-    <PaymentDialog v-model="payDialog" :order="payOrder" kind="payable" @saved="onPaySaved" />
+    <PaymentDialog v-model="payDialog" :order="payOrder" kind="payable" :deposit-balance="supplierAdvanceBalance(payOrder)" @saved="onPaySaved" />
 
     <!-- 轻量补照片：给已有单据传原始单据照片，只更新 photos 字段 -->
     <OrderPhotoDialog v-model="photoDialog" :order="photoOrder" @saved="onPhotosSaved" />
@@ -103,7 +103,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap } from '../utils/catalog'
-import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf } from '../utils/account'
+import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf } from '../utils/account'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -246,6 +246,12 @@ function openPay(row) {
   payDialog.value = true
 }
 
+// 当前单据对应供应商的预付款可用余额（用于付款时「用预付款支付」抵扣）
+function supplierAdvanceBalance(row) {
+  const s = supplierOptions.value.find(x => x.name === (row && row.supplier))
+  return depositSumOf(s && s.advances)
+}
+
 // 打开某单的轻量补照片弹窗
 function openPhotos(row) {
   photoOrder.value = row
@@ -271,7 +277,7 @@ async function onPhotosSaved(photos) {
   ElMessage.success('已更新单据照片')
 }
 
-async function onPaySaved(updated, deposit) {
+async function onPaySaved(updated, payload) {
   const idx = list.value.findIndex(p => p.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
   // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
@@ -287,8 +293,9 @@ async function onPaySaved(updated, deposit) {
   supplierOptions.value = sup
   payDialog.value = false
   ElMessage.success('已保存付款流水')
-  // 超付部分转供应商预付款：写入供应商档案 advances 流水（保存采购单时后端会自动建档供应商，这里按名字必能找到）
-  if (deposit && Number(deposit.amount) > 0) await addSupplierAdvance(updated.supplier, deposit)
+  // 超付部分转供应商预付款；用预付款抵扣的部分从余额扣减
+  if (payload?.add && Number(payload.add.amount) > 0) await addSupplierAdvance(updated.supplier, payload.add)
+  if (payload?.deduct && Number(payload.deduct.amount) > 0) await deductSupplierAdvance(updated.supplier, payload.deduct)
 }
 
 // 超付转供应商预付款
@@ -308,6 +315,26 @@ async function addSupplierAdvance(name, dep) {
     ElMessage.success(`已存入供应商预付款 ¥${Number(dep.amount).toFixed(2)}`)
   } catch (e) {
     ElMessage.error(`预付款保存失败：${e.message || e}，请到供应商详情手动补记`)
+  }
+}
+
+// 用预付款抵扣货款：在供应商档案 advances 中记一笔负值，扣减可用余额
+async function deductSupplierAdvance(name, entry) {
+  try {
+    const suppliers = await api.getSuppliers()
+    const s = suppliers.find(x => x.name === name)
+    if (!s) return ElMessage.warning(`供应商「${name || '未知'}」不在名单中，抵扣 ¥${Number(entry.amount).toFixed(2)} 未扣减预付款`)
+    s.advances = [...(s.advances || []), {
+      date: entry.date,
+      amount: -Number(entry.amount),
+      remark: entry.remark || '抵扣货款',
+      time: entry.time || new Date().toISOString()
+    }]
+    await api.saveSuppliers(suppliers)
+    supplierOptions.value = suppliers
+    ElMessage.success(`已从供应商预付款扣减 ¥${Number(entry.amount).toFixed(2)}`)
+  } catch (e) {
+    ElMessage.error(`预付款扣减失败：${e.message || e}，请到供应商详情手动调整`)
   }
 }
 

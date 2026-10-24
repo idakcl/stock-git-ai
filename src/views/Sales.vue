@@ -92,7 +92,7 @@
       @saved="onOrderSaved"
     />
 
-    <PaymentDialog v-model="payDialog" :order="payOrder" kind="receivable" @saved="onPaySaved" />
+    <PaymentDialog v-model="payDialog" :order="payOrder" kind="receivable" :deposit-balance="customerDepositBalance(payOrder)" @saved="onPaySaved" />
 
     <!-- 轻量补照片：给已有单据传原始单据照片，只更新 photos 字段 -->
     <OrderPhotoDialog v-model="photoDialog" :order="photoOrder" @saved="onPhotosSaved" />
@@ -105,7 +105,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
-import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf } from '../utils/account'
+import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf, depositSumOf } from '../utils/account'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -251,6 +251,12 @@ function openPay(row) {
   payDialog.value = true
 }
 
+// 当前单据对应客户的预存款可用余额（用于收款时「用预存款支付」抵扣）
+function customerDepositBalance(row) {
+  const c = customerOptions.value.find(x => x.name === (row && row.customer))
+  return depositSumOf(c && c.deposits)
+}
+
 // 打开某单的轻量补照片弹窗
 function openPhotos(row) {
   photoOrder.value = row
@@ -276,7 +282,7 @@ async function onPhotosSaved(photos) {
   ElMessage.success('已更新单据照片')
 }
 
-async function onPaySaved(updated, deposit) {
+async function onPaySaved(updated, payload) {
   const idx = list.value.findIndex(s => s.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
   // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
@@ -289,8 +295,9 @@ async function onPaySaved(updated, deposit) {
   list.value = await api.getSales().catch(() => list.value)
   payDialog.value = false
   ElMessage.success('已保存收款流水')
-  // 超收部分转客户预存款：写入客户档案 deposits 流水（后端保存销售单时会自动建档客户，这里按名字必能找到）
-  if (deposit && Number(deposit.amount) > 0) await addCustomerDeposit(updated.customer, deposit)
+  // 超收部分转客户预存款（写入客户档案 deposits 流水）；用预存款抵扣的部分从余额扣减
+  if (payload?.add && Number(payload.add.amount) > 0) await addCustomerDeposit(updated.customer, payload.add)
+  if (payload?.deduct && Number(payload.deduct.amount) > 0) await deductCustomerDeposit(updated.customer, payload.deduct)
 }
 
 // 超收转客户预存款
@@ -310,6 +317,26 @@ async function addCustomerDeposit(name, dep) {
     ElMessage.success(`已存入客户预存款 ¥${Number(dep.amount).toFixed(2)}`)
   } catch (e) {
     ElMessage.error(`预存款保存失败：${e.message || e}，请到客户详情手动补记`)
+  }
+}
+
+// 用预存款抵扣货款：在客户档案 deposits 中记一笔负值，扣减可用余额
+async function deductCustomerDeposit(name, entry) {
+  try {
+    const customers = await api.getCustomers()
+    const c = customers.find(x => x.name === name)
+    if (!c) return ElMessage.warning(`客户「${name || '未知'}」不在名单中，抵扣 ¥${Number(entry.amount).toFixed(2)} 未扣减预存款`)
+    c.deposits = [...(c.deposits || []), {
+      date: entry.date,
+      amount: -Number(entry.amount),
+      remark: entry.remark || '抵扣货款',
+      time: entry.time || new Date().toISOString()
+    }]
+    await api.saveCustomers(customers)
+    customerOptions.value = customers
+    ElMessage.success(`已从客户预存款扣减 ¥${Number(entry.amount).toFixed(2)}`)
+  } catch (e) {
+    ElMessage.error(`预存款扣减失败：${e.message || e}，请到客户详情手动调整`)
   }
 }
 

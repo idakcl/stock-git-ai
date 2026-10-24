@@ -76,7 +76,7 @@
       </div>
     </el-card>
 
-    <PaymentDialog v-model="payDialog" :order="purchase" kind="payable" @saved="onPaySaved" />
+    <PaymentDialog v-model="payDialog" :order="purchase" kind="payable" :deposit-balance="supplierAdvanceBalance" @saved="onPaySaved" />
 
     <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件 -->
     <OrderEditDialog
@@ -104,13 +104,15 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { payableOf, grossOf, paidSumOf, ensurePayments } from '../utils/account'
+import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf } from '../utils/account'
 import { lineDisplayName } from '../utils/catalog'
 
 const route = useRoute()
 const router = useRouter()
 const purchases = ref([])
 const items = ref([])
+// 供应商档案：付款时「用预付款支付」抵扣需要读取/扣减供应商预付款余额
+const suppliers = ref([])
 // 数据加载中：全量单据/商品拉取期间显示遮罩，避免白屏被误判为"点了没反应"
 const loading = ref(true)
 const payDialog = ref(false)
@@ -121,6 +123,12 @@ const saving = ref(false)
 // 单据是否真实存在：不存在时禁用编辑/删除，避免把占位空单当新增保存
 const found = computed(() => purchases.value.some(p => p.id === route.params.id))
 const purchase = computed(() => purchases.value.find(p => p.id === route.params.id) || { id: route.params.id, supplier: '', date: '', total: 0, items: [] })
+
+// 当前采购单对应供应商的预付款可用余额（用于付款时「用预付款支付」抵扣）
+const supplierAdvanceBalance = computed(() => {
+  const s = suppliers.value.find(x => x.name === purchase.value.supplier)
+  return depositSumOf(s && s.advances)
+})
 
 // 应付(合计−优惠) 与 未付(应付−累计实付)，与全站统一规则一致
 const dueAmount = computed(() => grossOf(purchase.value))
@@ -156,7 +164,7 @@ const detailItems = computed(() => {
   })
 })
 
-async function onPaySaved(updated) {
+async function onPaySaved(updated, payload) {
   const idx = purchases.value.findIndex(p => p.id === updated.id)
   if (idx >= 0) purchases.value[idx] = updated
   try {
@@ -170,6 +178,29 @@ async function onPaySaved(updated) {
   }
   payDialog.value = false
   ElMessage.success('已保存付款流水')
+  // 超付转预付款 / 用预付款抵扣：按名字定位供应商档案后写入或扣减 advances
+  if (payload?.add && Number(payload.add.amount) > 0) await applySupplierAdvance(updated.supplier, payload.add, false)
+  if (payload?.deduct && Number(payload.deduct.amount) > 0) await applySupplierAdvance(updated.supplier, payload.deduct, true)
+}
+
+// 供应商预付款变动：isDeduct=true 时记负值扣减余额，否则记正值存入
+async function applySupplierAdvance(name, entry, isDeduct) {
+  try {
+    const list = await api.getSuppliers()
+    const s = list.find(x => x.name === name)
+    if (!s) return ElMessage.warning(`供应商「${name || '未知'}」不在名单中，预付款未${isDeduct ? '扣减' : '存入'}`)
+    s.advances = [...(s.advances || []), {
+      date: entry.date,
+      amount: isDeduct ? -Number(entry.amount) : Number(entry.amount),
+      remark: entry.remark || (isDeduct ? '抵扣货款' : '超付转预付款'),
+      time: entry.time || new Date().toISOString()
+    }]
+    await api.saveSuppliers(list)
+    suppliers.value = list
+    ElMessage.success(isDeduct ? `已从供应商预付款扣减 ¥${Number(entry.amount).toFixed(2)}` : `已存入供应商预付款 ¥${Number(entry.amount).toFixed(2)}`)
+  } catch (e) {
+    ElMessage.error(`预付款${isDeduct ? '扣减' : '保存'}失败：${e.message || e}，请到供应商详情手动调整`)
+  }
 }
 
 // 保存照片：仅合并 photos 字段，单据其他信息与付款流水不动
@@ -205,9 +236,10 @@ async function onOrderSaved({ entry }) {
       return
     }
     // 商品建档、库存、历史价均由后端自动推导，重拉保证页面与线上一致
-    const [p, it] = await Promise.all([api.getPurchases(), api.getItems()])
+    const [p, it, sup] = await Promise.all([api.getPurchases(), api.getItems(), api.getSuppliers()])
     purchases.value = p
     items.value = it
+    suppliers.value = sup
     editDialog.value = false
     ElMessage.success('已保存修改')
   } finally { saving.value = false }
@@ -238,9 +270,10 @@ async function removeOrder() {
 
 onMounted(async () => {
   try {
-    const [p, it] = await Promise.all([api.getPurchases(), api.getItems()])
+    const [p, it, sup] = await Promise.all([api.getPurchases(), api.getItems(), api.getSuppliers()])
     purchases.value = p
     items.value = it
+    suppliers.value = sup
   } catch (e) { purchases.value = []; items.value = [] }
   finally { loading.value = false }
 })
