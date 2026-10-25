@@ -78,7 +78,7 @@
         </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
-      <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" @click="save">保存</el-button></template>
+      <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
     </el-dialog>
   </div>
 </template>
@@ -101,6 +101,8 @@ const keyword = ref('')
 const categoryFilter = ref('')
 const page = ref(1)
 const dialog = ref(false)
+// 保存中锁：配合按钮 loading，防止连点造成并发重复写入
+const saving = ref(false)
 const form = reactive({ code:'', name:'', contact:'', phone:'', category:'', remark:'' })
 
 // 列表排序：最新添加的排最前面。编码为 C+5 位序号、新增时取最大序号+1，序号越大越新；
@@ -159,42 +161,59 @@ const depositMap = computed(() => {
 })
 
 onMounted(load)
+// 刷新失败不再清空列表：数据此时多半仍在服务端，清空会让用户误以为「没保存上」而反复点击，
+// 保留本地数据等下次进入/刷新自动重拉即可
 async function load() {
   try {
     const [cu, sa] = await Promise.all([api.getCustomers(), api.getSales()])
     list.value = cu
     sales.value = sa
-  } catch (e) { list.value = []; sales.value = [] }
+  } catch (e) { /* 刷新失败：保留当前数据 */ }
 }
 function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'C'), name:'', contact:'', phone:'', category:'', remark:'' }); dialog.value = true }
+// 保存中锁：防止连点造成并发重复写入；按钮同步转 loading 给出明确反馈
 async function save() {
-  const idx = list.value.findIndex(i => i.code === form.code)
-  if (idx >= 0) list.value[idx] = { ...list.value[idx], ...form }
-  else list.value.push({ ...form })
-  // 保存失败（如 GitHub 写入出错）时明确报错，并回滚为线上数据
+  if (saving.value) return
+  const name = (form.name || '').trim()
+  if (!name) return ElMessage.warning('请填写客户名称')
+  saving.value = true
   try {
-    await api.saveCustomers(list.value)
-  } catch (e) {
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    await load()
-    return
-  }
-  dialog.value = false; ElMessage.success('已保存'); load()
+    const snapshot = [...list.value]
+    const idx = list.value.findIndex(i => i.code === form.code)
+    if (idx >= 0) list.value[idx] = { ...list.value[idx], ...form }
+    else list.value.push({ ...form })
+    // 保存失败（如 GitHub 写入出错）时明确报错，并回滚为线上数据
+    try {
+      await api.saveCustomers(list.value)
+    } catch (e) {
+      list.value = snapshot
+      ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      await load()
+      return
+    }
+    // 保存已成功：先关窗报成功，再后台刷新（刷新失败不再清空，新记录仍留在列表里）
+    dialog.value = false; ElMessage.success('已保存'); load()
+  } finally { saving.value = false }
 }
 async function remove(row) {
+  if (saving.value) return
   try {
     await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
   } catch { return }
-  list.value = list.value.filter(i => i.code !== row.code)
+  saving.value = true
   try {
-    await api.saveCustomers(list.value)
-  } catch (e) {
-    ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    await load()
-    return
-  }
-  ElMessage.success('已删除')
-  load()
+    const snapshot = [...list.value]
+    list.value = list.value.filter(i => i.code !== row.code)
+    try {
+      await api.saveCustomers(list.value)
+    } catch (e) {
+      list.value = snapshot
+      ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      return
+    }
+    ElMessage.success('已删除')
+    load()
+  } finally { saving.value = false }
 }
 </script>
 <style scoped>
