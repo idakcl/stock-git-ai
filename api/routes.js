@@ -204,6 +204,24 @@ export function rebuildStock(purchases, sales, items) {
   return stock
 }
 
+// 规范化单据收付款字段，杜绝「实付漏算」缺陷：
+// ensurePayments 规定 payments 数组一旦存在（即使为空）即为权威数据、不再回退旧字段，
+// 因此「payments 是空数组 + 实付躺在旧 paid/received 字段」会让实收被算成 0，
+// 产生幽灵欠款（B202610251227400005：实付 1830.25 被漏算，未付合计虚增 1830.25）。
+// 这种结构多来自外部导入或旧版本数据；写入前统一转成一笔正式流水，任何途径都不能再产生。
+// 注意：正常删光付款记录时 payments=[] 且旧字段为 0，不满足转换条件，不会被误造流水
+export function normalizeOrderPayments(order, legacyField) {
+  if (!order || typeof order !== 'object') return order
+  if (Array.isArray(order.payments) && order.payments.length === 0 && Number(order[legacyField] || 0) > 0) {
+    const amount = Math.round(Number(order[legacyField]) * 100) / 100
+    return {
+      ...order,
+      payments: [{ date: order.date || '', amount, remark: '历史实付', time: '' }]
+    }
+  }
+  return order
+}
+
 async function syncDerived(env, { purchases, sales }) {
   const [items, suppliers, curP, curS, customers] = await Promise.all([
     readJSON(env, 'items.json'),
@@ -335,13 +353,14 @@ export async function handleApi(req, url, env) {
         return json(req, env, { ok: true })
       }
       if (path === '/purchases') {
-        const purchases = body.purchases || []
+        // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
+        const purchases = (body.purchases || []).map(p => normalizeOrderPayments(p, 'paid'))
         await writeJSON(env, 'purchases.json', purchases, 'update purchases')
         await syncDerived(env, { purchases })
         return json(req, env, { ok: true })
       }
       if (path === '/sales') {
-        const sales = body.sales || []
+        const sales = (body.sales || []).map(s => normalizeOrderPayments(s, 'received'))
         await writeJSON(env, 'sales.json', sales, 'update sales')
         await syncDerived(env, { sales })
         return json(req, env, { ok: true })
@@ -362,6 +381,10 @@ export async function handleApi(req, url, env) {
         }
 
         const parsed = extractData(text)
+        // 导入同样过一遍规范化：外部 JSON 常带「payments:[] + 旧 paid/received」结构，
+        // 原样落库会造成实付漏算、幽灵欠款（与保存接口同一缺陷，同一修法）
+        if (parsed.purchases && parsed.purchases.length) parsed.purchases = parsed.purchases.map(p => normalizeOrderPayments(p, 'paid'))
+        if (parsed.sales && parsed.sales.length) parsed.sales = parsed.sales.map(s => normalizeOrderPayments(s, 'received'))
         const results = []
         for (const key of ['items', 'suppliers', 'customers', 'purchases', 'sales']) {
           const arr = parsed[key]

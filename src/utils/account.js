@@ -63,12 +63,13 @@ export function netOf(order, kind) {
   return kind === 'payable' ? payableOf(order) : receivableOf(order)
 }
 
-// 展示层结清判定：库内 settle 已标记「结清」，或按口径算出的未收/未付金额为 0
-//（容忍 1e-6 浮点尘，与 syncPayments 的结清口径一致）
-// unpaid：receivableOf/payableOf 的结果，或来往账等展示行里的未结金额
-// 用途：列表/详情/来往账无需打开编辑弹窗，金额收清即显示结清
+// 展示层结清判定：以金额为准——未收/未付 ≤ 1e-6（浮点尘容忍，与 syncPayments 口径一致）即结清。
+// 不再让库内 settle 标签短路判定：脏数据（标了结清但钱没收回）必须暴露为挂账，
+// 否则会出现「未付合计 > 0 却显示 0 单未结清」的自相矛盾（B202610251227400005 事故：
+// 该单 payments 空数组 + 旧 paid 字段导致实收漏算，settle 短路把 1830.25 幽灵欠款藏成了结清）。
+// 正常路径下点「结清」时差额已记入抹零优惠、金额归 0，标签与金额天然一致，无需再看标签。
+// settle 参数保留仅为兼容既有调用签名，不参与判定
 export function isSettledOf(unpaid, settle) {
-  if ((settle || '挂账') === '结清') return true
   return Number(unpaid || 0) <= 1e-6
 }
 
