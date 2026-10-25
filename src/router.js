@@ -13,6 +13,7 @@ import SupplierDetail from './views/SupplierDetail.vue'
 import CustomerDetail from './views/CustomerDetail.vue'
 import PurchaseDetail from './views/PurchaseDetail.vue'
 import SalesDetail from './views/SalesDetail.vue'
+import DataManager from './views/DataManager.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -28,7 +29,8 @@ const routes = [
   { path: '/stock', component: Stock },
   { path: '/report', component: Report },
   { path: '/receivables', component: Receivables },
-  { path: '/payables', component: Payables }
+  { path: '/payables', component: Payables },
+  { path: '/data', component: DataManager }
 ]
 
 export default createRouter({

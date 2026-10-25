@@ -57,6 +57,13 @@
         <el-badge v-if="payableOpen" :value="payableOpen" type="danger" :max="99" class="menu-badge" />
       </el-menu-item>
     </el-sub-menu>
+
+    <el-menu-item-group title="系统">
+      <el-menu-item index="/data">
+        <el-icon><FolderOpened /></el-icon>
+        <span>数据备份</span>
+      </el-menu-item>
+    </el-menu-item-group>
   </el-menu>
 </template>
 
@@ -64,7 +71,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard
+  Money, Wallet, CreditCard, FolderOpened
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'
