@@ -134,13 +134,31 @@
           </div>
           <div class="table-wrap">
           <el-table :data="customer.deposits || []" stripe>
-            <el-table-column prop="date" label="日期" width="130" />
-            <el-table-column label="金额" width="130" align="right">
-              <template #default="{ row }"><b>{{ Number(row.amount || 0).toFixed(2) }}</b></template>
+            <el-table-column prop="date" label="日期" width="120" />
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="Number(row.amount) >= 0 ? 'success' : 'danger'" disable-transitions>
+                  {{ Number(row.amount) >= 0 ? '增加' : '减少' }}
+                </el-tag>
+              </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="180" />
-            <el-table-column label="操作" width="90">
-              <template #default="{ $index }">
+            <el-table-column label="金额" width="120" align="right">
+              <template #default="{ row }">
+                <b :class="Number(row.amount) >= 0 ? 'amount-deposit' : 'amount-debt'">
+                  {{ Number(row.amount) >= 0 ? '+' : '' }}{{ Number(row.amount || 0).toFixed(2) }}
+                </b>
+              </template>
+            </el-table-column>
+            <el-table-column label="关联单据" width="180">
+              <template #default="{ row }">
+                <router-link v-if="row.order" :to="`/sale/${row.order}`" class="link">{{ row.order }}</router-link>
+                <span v-else class="none">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
+            <el-table-column label="操作" width="130">
+              <template #default="{ row, $index }">
+                <el-button size="small" type="primary" link @click="openDepositEdit(row, $index)">编辑</el-button>
                 <el-button size="small" type="danger" link @click="removeDeposit($index)">删除</el-button>
               </template>
             </el-table-column>
@@ -161,6 +179,22 @@
       <template #footer>
         <el-button @click="depositDialog = false">取消</el-button>
         <el-button type="primary" :loading="depSaving" @click="saveDeposit">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑预存款记录：改日期/金额/备注；金额正数＝增加，负数＝减少（抵扣） -->
+    <el-dialog v-model="depositEditDialog" title="编辑预存款记录" width="420">
+      <el-form label-width="80px">
+        <el-form-item label="日期"><el-date-picker v-model="depEditDraft.date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="depEditDraft.amount" :precision="2" :controls="false" style="width:100%" />
+          <div style="margin-top:4px;color:var(--text-secondary);font-size:var(--fs-sub)">正数＝增加，负数＝减少（抵扣）</div>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="depEditDraft.remark" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="depositEditDialog = false">取消</el-button>
+        <el-button type="primary" :loading="depSaving" @click="saveDepositEdit">保存</el-button>
       </template>
     </el-dialog>
   </div>
@@ -234,6 +268,42 @@ async function removeDeposit(idx) {
   } catch (e) {
     ElMessage.error(`删除失败：${e.message || e}`)
   }
+}
+
+// 编辑预存款流水：改日期/金额/备注；金额正数＝增加，负数＝减少（抵扣）
+const depositEditDialog = ref(false)
+const depositEditIndex = ref(-1)
+const depEditDraft = ref({ date: '', amount: 0, remark: '' })
+
+function openDepositEdit(row, index) {
+  depositEditIndex.value = index
+  depEditDraft.value = {
+    date: row.date || '',
+    amount: Number(row.amount || 0),
+    remark: row.remark || ''
+  }
+  depositEditDialog.value = true
+}
+
+async function saveDepositEdit() {
+  const idx = depositEditIndex.value
+  if (idx < 0) return
+  depSaving.value = true
+  try {
+    const list = customers.value.map(c => ({ ...c }))
+    const c = list.find(x => x.code === customer.value.code)
+    if (!c) return ElMessage.error('客户档案未找到，请刷新页面重试')
+    // 保留 order/fromDeposit 等标记字段，仅改日期/金额/备注
+    c.deposits = (c.deposits || []).map((d, i) => i === idx
+      ? { ...d, date: depEditDraft.value.date || d.date, amount: Number(depEditDraft.value.amount || 0), remark: depEditDraft.value.remark || '' }
+      : d)
+    await api.saveCustomers(list)
+    customers.value = list
+    depositEditDialog.value = false
+    ElMessage.success('已保存修改')
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || e}`)
+  } finally { depSaving.value = false }
 }
 const saleList = computed(() => (sales.value || []).filter(s => s.customer === customer.value.name))
 const products = computed(() => {

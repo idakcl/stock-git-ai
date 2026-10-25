@@ -222,7 +222,7 @@ async function onPhotosSaved(photos) {
 }
 
 // 编辑本单：弹窗组装好 entry 后在此落库，保存成功后重拉数据，页面原地刷新
-async function onOrderSaved({ entry }) {
+async function onOrderSaved({ entry, depositDeduct }) {
   saving.value = true
   try {
     const snapshot = [...sales.value]
@@ -242,6 +242,12 @@ async function onOrderSaved({ entry }) {
     customers.value = cu || []
     editDialog.value = false
     ElMessage.success('已保存修改')
+    // 兜底：若带预收款抵扣（正常编辑路径不会），一并扣减
+    if (depositDeduct && Number(depositDeduct.amount) > 0) {
+      const cu2 = await applyDepositFlows(api, 'receivable', entry.customer, entry.id, 0, depositDeduct.amount).catch(() => null)
+      if (cu2) customers.value = cu2
+      ElMessage.success(`已从客户预收款扣减 ¥${Number(depositDeduct.amount).toFixed(2)}`)
+    }
   } finally { saving.value = false }
 }
 

@@ -53,13 +53,30 @@
         <el-input-number v-model="form.discountRate" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:100%" />
         <div class="calc-hint" style="margin-top:4px">折扣率：1＝不打折，0.9＝九折；按比例作用于单据合计（在「整单优惠金额」之前）</div>
       </el-form-item>
-      <!-- 实付/实收为只读：不在表单里改，统一走「付款/收款」流水 -->
+      <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只读汇总，改流水走「付款/收款」弹窗 -->
       <el-form-item :label="`实${payWord}金额`">
-        <div class="paid-summary">
-          <span>累计实{{ payWord }}：<b>{{ sumPaid.toFixed(2) }}</b></span>
-          <span v-if="payCount > 0">（{{ payCount }} 笔，见「{{ payWord }}款」流水）</span>
-          <span v-else class="hint">未{{ payWord }}款，可在列表点「{{ payWord }}款」分多笔记录</span>
-        </div>
+        <template v-if="editingId">
+          <div class="paid-summary">
+            <span>累计实{{ payWord }}：<b>{{ sumPaid.toFixed(2) }}</b></span>
+            <span v-if="payCount > 0">（{{ payCount }} 笔，见「{{ payWord }}款」流水）</span>
+            <span v-else class="hint">未{{ payWord }}款，可在列表点「{{ payWord }}款」分多笔记录</span>
+          </div>
+        </template>
+        <template v-else>
+          <div class="pay-now-row">
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额`" />
+            <el-button type="info" plain size="small" :disabled="depositAvailable <= 0" @click="payFromDeposit">
+              用{{ depositLabel }}支付（可用 ¥{{ depositAvailable.toFixed(2) }}）
+            </el-button>
+            <span v-if="Number(form.depositPay) > 0" class="deposit-used">
+              已用{{ depositLabel }}抵扣 <b>¥{{ Number(form.depositPay).toFixed(2) }}</b>
+              <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
+            </span>
+          </div>
+          <div class="calc-hint" style="margin-top:4px">
+            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；选「结清」时若不足{{ dueWord }}，差额自动计入整单优惠金额。
+          </div>
+        </template>
       </el-form-item>
       <el-form-item label=" ">
         <div class="calc-line">
@@ -130,7 +147,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments } from '../utils/account'
+import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 
 const props = defineProps({
@@ -174,7 +191,7 @@ const photoKey = ref(0)
 const editingId = ref('')
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
-const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRate:1, lines:[] })
+const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRate:1, paidNow:0, depositPay:0, lines:[] })
 
 // 打开时整体重建表单：编辑回填原单（行折扣走 normalizeRate，兼容早期金额口径的旧数据）
 watch(() => props.modelValue, (open) => {
@@ -190,6 +207,8 @@ watch(() => props.modelValue, (open) => {
     form.photos = [...(row.photos || [])]
     form.discount = Number(row.discount || 0)
     form.discountRate = Number(row.discountRate || 1)
+    form.paidNow = 0
+    form.depositPay = 0
     form.lines = (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
   } else {
     editingId.value = ''
@@ -200,6 +219,8 @@ watch(() => props.modelValue, (open) => {
     form.photos = []
     form.discount = 0
     form.discountRate = 1
+    form.paidNow = 0
+    form.depositPay = 0
     form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
   }
 })
@@ -207,7 +228,31 @@ watch(() => props.modelValue, (open) => {
 // 编辑中的原始单据（用于展示累计实付/实收，实收实付不在表单里改，统一走流水）
 const editOrder = computed(() => (editingId.value ? (props.list || []).find(o => o.id === editingId.value) : null) || {})
 const payCount = computed(() => ensurePayments(editOrder.value, sumField.value).length)
-const sumPaid = computed(() => (isPurchase.value ? paidSumOf(editOrder.value) : receivedSumOf(editOrder.value)))
+// 累计实付/实收：编辑单取原流水；新增单取本次填的「现金实付 + 预付款/预收款抵扣」
+const sumPaid = computed(() => editingId.value
+  ? (isPurchase.value ? paidSumOf(editOrder.value) : receivedSumOf(editOrder.value))
+  : round2(Number(form.paidNow || 0) + Number(form.depositPay || 0)))
+
+// 预付款（采购）/ 预收款（销售）：当前所选往来单位的可用余额
+const depositLabel = computed(() => (isPurchase.value ? '预付款' : '预收款'))
+const depositAvailable = computed(() => {
+  const name = form.party
+  if (!name) return 0
+  const list = isPurchase.value ? props.suppliers : props.customers
+  const p = (list || []).find(x => x.name === name)
+  return depositSumOf(p && (isPurchase.value ? p.advances : p.deposits))
+})
+
+// 用预付款/预收款支付：按「剩余未收」与「可用余额」较小值记一笔抵扣（保存时从档案扣减）
+function payFromDeposit() {
+  if (editingId.value) return ElMessage.warning('编辑已有单据请用「付款/收款」弹窗操作抵扣')
+  const remain = round2(dueTotal.value - sumPaid.value)
+  if (remain <= 0) return ElMessage.warning(`本单已无未${payWord.value}金额`)
+  const use = round2(Math.min(remain, depositAvailable.value))
+  if (use <= 0) return ElMessage.warning(`可用${depositLabel.value}不足`)
+  form.depositPay = round2(Number(form.depositPay || 0) + use)
+  ElMessage.success(`已用${depositLabel.value}抵扣 ¥${use.toFixed(2)}（点「保存」生效）`)
+}
 
 // 账务规则（与 src/utils/account.js 一致）：欠款按金额计算，与结算状态无关
 //   应付/应收 = 合计 − 整单优惠 ；未付/未收 = max(0, 应付 − 累计实付[流水])
@@ -325,7 +370,14 @@ async function doSave() {
     total: amount
   }
   if (!isEdit) {
-    entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments: [], [sumField.value]: 0 }
+    // 新增单：把「现金实付」与「预付款/预收款抵扣」直接落成收款/付款流水
+    const payments = []
+    const paidNow = round2(Number(form.paidNow || 0))
+    const depositPay = round2(Number(form.depositPay || 0))
+    const now = new Date().toISOString()
+    if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `实${payWord.value}`, time: now })
+    if (depositPay > 0) payments.push({ date: form.date, amount: depositPay, remark: `用${depositLabel.value}抵扣`, fromDeposit: true, time: now })
+    entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments, [sumField.value]: round2(paidNow + depositPay) }
   }
   if (form.settle === '结清') {
     // 结清时把未收差额计入整单优惠（核销尾款），而不是补记一笔收款——
@@ -336,8 +388,12 @@ async function doSave() {
     if (unpaid > 0) entry.discount = (Number(entry.discount) || 0) + unpaid
   }
   entry[sumField.value] = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
+  // 用预付款/预收款抵扣的部分：随保存一并交父组件从对应档案余额扣减（幂等，按订单 id 标记）
+  const depositDeduct = (!isEdit && round2(Number(form.depositPay || 0)) > 0)
+    ? { amount: round2(Number(form.depositPay || 0)) }
+    : null
   // 只组装、不落库：交给父组件保存（失败时弹窗保持打开可重试）
-  emit('saved', { entry, isEdit, id: entry.id })
+  emit('saved', { entry, isEdit, id: entry.id, depositDeduct })
 }
 
 // 保存入口：组件锁 + 父级锁双保险，双击只会执行一次
@@ -370,6 +426,9 @@ async function save() {
 .settle-hint{margin-top:6px;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.5;}
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}
 .paid-summary .hint{color:var(--text-placeholder);}
+.pay-now-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.deposit-used{color:var(--text-regular);font-size:var(--fs-table);}
+.deposit-used b{color:var(--color-success);}
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .debt{color:var(--color-danger);font-weight:600;}

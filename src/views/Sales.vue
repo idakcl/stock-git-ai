@@ -224,7 +224,7 @@ function openDialog(row) {
 
 // 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则刷新商品与客户并关窗
-async function onOrderSaved({ entry, isEdit }) {
+async function onOrderSaved({ entry, isEdit, depositDeduct }) {
   saving.value = true
   try {
     const snapshot = [...list.value]
@@ -252,6 +252,12 @@ async function onOrderSaved({ entry, isEdit }) {
     dialog.value = false
     editingOrder.value = null
     ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
+    // 新增单用预收款抵扣：从客户档案按订单 id 幂等扣减（资金不泄漏）
+    if (depositDeduct && Number(depositDeduct.amount) > 0) {
+      const cu2 = await applyDepositFlows(api, 'receivable', entry.customer, entry.id, 0, depositDeduct.amount).catch(() => null)
+      if (cu2) customerOptions.value = cu2
+      ElMessage.success(`已从客户预收款扣减 ¥${Number(depositDeduct.amount).toFixed(2)}`)
+    }
   } finally {
     saving.value = false
   }

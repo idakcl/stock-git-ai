@@ -133,13 +133,31 @@
           </div>
           <div class="table-wrap">
           <el-table :data="supplier.advances || []" stripe>
-            <el-table-column prop="date" label="日期" width="130" />
-            <el-table-column label="金额" width="130" align="right">
-              <template #default="{ row }"><b>{{ Number(row.amount || 0).toFixed(2) }}</b></template>
+            <el-table-column prop="date" label="日期" width="120" />
+            <el-table-column label="类型" width="90">
+              <template #default="{ row }">
+                <el-tag size="small" :type="Number(row.amount) >= 0 ? 'success' : 'danger'" disable-transitions>
+                  {{ Number(row.amount) >= 0 ? '增加' : '减少' }}
+                </el-tag>
+              </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="180" />
-            <el-table-column label="操作" width="90">
-              <template #default="{ $index }">
+            <el-table-column label="金额" width="120" align="right">
+              <template #default="{ row }">
+                <b :class="Number(row.amount) >= 0 ? 'amount-deposit' : 'amount-debt'">
+                  {{ Number(row.amount) >= 0 ? '+' : '' }}{{ Number(row.amount || 0).toFixed(2) }}
+                </b>
+              </template>
+            </el-table-column>
+            <el-table-column label="关联单据" width="180">
+              <template #default="{ row }">
+                <router-link v-if="row.order" :to="`/purchase/${row.order}`" class="link">{{ row.order }}</router-link>
+                <span v-else class="none">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
+            <el-table-column label="操作" width="130">
+              <template #default="{ row, $index }">
+                <el-button size="small" type="primary" link @click="openAdvanceEdit(row, $index)">编辑</el-button>
                 <el-button size="small" type="danger" link @click="removeAdvance($index)">删除</el-button>
               </template>
             </el-table-column>
@@ -160,6 +178,22 @@
       <template #footer>
         <el-button @click="advanceDialog = false">取消</el-button>
         <el-button type="primary" :loading="advSaving" @click="saveAdvance">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 编辑预付款记录：改日期/金额/备注；金额正数＝增加，负数＝减少（抵扣） -->
+    <el-dialog v-model="advanceEditDialog" title="编辑预付款记录" width="420">
+      <el-form label-width="80px">
+        <el-form-item label="日期"><el-date-picker v-model="advEditDraft.date" type="date" value-format="YYYY-MM-DD" style="width:100%" /></el-form-item>
+        <el-form-item label="金额">
+          <el-input-number v-model="advEditDraft.amount" :precision="2" :controls="false" style="width:100%" />
+          <div style="margin-top:4px;color:var(--text-secondary);font-size:var(--fs-sub)">正数＝增加，负数＝减少（抵扣）</div>
+        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="advEditDraft.remark" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="advanceEditDialog = false">取消</el-button>
+        <el-button type="primary" :loading="advSaving" @click="saveAdvanceEdit">保存</el-button>
       </template>
     </el-dialog>
 
@@ -261,6 +295,42 @@ async function removeAdvance(idx) {
   } catch (e) {
     ElMessage.error(`删除失败：${e.message || e}`)
   }
+}
+
+// 编辑预付款流水：改日期/金额/备注；金额正数＝增加，负数＝减少（抵扣）
+const advanceEditDialog = ref(false)
+const advanceEditIndex = ref(-1)
+const advEditDraft = ref({ date: '', amount: 0, remark: '' })
+
+function openAdvanceEdit(row, index) {
+  advanceEditIndex.value = index
+  advEditDraft.value = {
+    date: row.date || '',
+    amount: Number(row.amount || 0),
+    remark: row.remark || ''
+  }
+  advanceEditDialog.value = true
+}
+
+async function saveAdvanceEdit() {
+  const idx = advanceEditIndex.value
+  if (idx < 0) return
+  advSaving.value = true
+  try {
+    const list = suppliers.value.map(s => ({ ...s }))
+    const s = list.find(x => x.code === supplier.value.code)
+    if (!s) return ElMessage.error('供应商档案未找到，请刷新页面重试')
+    // 保留 order/fromDeposit 等标记字段，仅改日期/金额/备注
+    s.advances = (s.advances || []).map((a, i) => i === idx
+      ? { ...a, date: advEditDraft.value.date || a.date, amount: Number(advEditDraft.value.amount || 0), remark: advEditDraft.value.remark || '' }
+      : a)
+    await api.saveSuppliers(list)
+    suppliers.value = list
+    advanceEditDialog.value = false
+    ElMessage.success('已保存修改')
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || e}`)
+  } finally { advSaving.value = false }
 }
 const products = computed(() => {
   const codes = new Set(supplier.value.products || [])

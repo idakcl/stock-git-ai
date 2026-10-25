@@ -222,7 +222,7 @@ function openDialog(row) {
 
 // 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则刷新商品并关窗
-async function onOrderSaved({ entry, isEdit }) {
+async function onOrderSaved({ entry, isEdit, depositDeduct }) {
   saving.value = true
   try {
     const snapshot = [...list.value]
@@ -245,9 +245,16 @@ async function onOrderSaved({ entry, isEdit }) {
     }
     // 商品建档、库存、供应商关系均由后端自动推导
     itemOptions.value = await api.getItems().catch(() => itemOptions.value)
+    supplierOptions.value = await api.getSuppliers().catch(() => supplierOptions.value)
     dialog.value = false
     editingOrder.value = null
     ElMessage.success(isEdit ? '已保存修改' : '采购入库成功')
+    // 新增单用预付款抵扣：从供应商档案按订单 id 幂等扣减（资金不泄漏）
+    if (depositDeduct && Number(depositDeduct.amount) > 0) {
+      const sup2 = await applyDepositFlows(api, 'payable', entry.supplier, entry.id, 0, depositDeduct.amount).catch(() => null)
+      if (sup2) supplierOptions.value = sup2
+      ElMessage.success(`已从供应商预付款扣减 ¥${Number(depositDeduct.amount).toFixed(2)}`)
+    }
   } finally {
     saving.value = false
   }
