@@ -8,20 +8,21 @@
       </template>
 
       <el-alert type="info" :closable="false" show-icon class="intro">
-        <b>导出</b>：把全部数据（商品、客户、供应商、销售单、采购单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
-        <b>导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，操作前建议先导出一份当前数据。
+        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
+        <b>全量导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，操作前建议先导出一份当前数据。<br />
+        <b>分类导入导出</b>：按数据类型单独导出、导入；导入时与库内现有数据<b>按编码/单号比对去重</b>，已存在的自动跳过，只追加新记录，不覆盖已有数据。
       </el-alert>
 
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
-        <template #header><b>导出备份</b></template>
+        <template #header><b>全量导出备份</b></template>
         <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单及各自的预存款/预付款流水）。</p>
         <el-button type="primary" :loading="exporting" @click="doExport">导出全部数据</el-button>
       </el-card>
 
       <!-- 导入恢复 -->
       <el-card shadow="never" class="panel">
-        <template #header><b>导入恢复</b></template>
+        <template #header><b>全量导入恢复</b></template>
         <p class="desc">选择 JSON 备份文件，校验通过后会显示数据摘要，确认后才写入。<b class="danger-text">导入会覆盖全部现有数据，且不可撤销。</b></p>
         <el-upload
           drag
@@ -59,15 +60,109 @@
           </div>
         </div>
       </el-card>
+
+      <!-- 分类导入导出 -->
+      <el-card shadow="never" class="panel">
+        <template #header><b>分类导入导出（按编码/单号去重）</b></template>
+        <p class="desc">
+          五种数据类型各自独立导出、导入。导入时先与库内现有数据比对：<b class="ok-text">编码/单号已存在的自动跳过</b>，
+          客户/供应商还会按名称查重（防止同名多码把一家单位拆成两份档案），只追加真正的新记录，已有数据不会被覆盖或删除。
+        </p>
+        <el-table :data="typeRows" border size="small" class="type-table">
+          <el-table-column label="数据类型" prop="label" min-width="90" align="center" />
+          <el-table-column label="库内数量" min-width="100" align="center">
+            <template #default="{ row }">
+              <span v-if="row.count == null">—</span>
+              <span v-else>{{ row.count }} {{ row.unit }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="导出" min-width="130" align="center">
+            <template #default="{ row }">
+              <el-button size="small" :loading="row.exporting" @click="exportType(row)">导出{{ row.label }}</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column label="导入（去重合并）" min-width="230">
+            <template #default="{ row }">
+              <el-upload
+                class="upload-inline"
+                :auto-upload="false"
+                :show-file-list="false"
+                accept=".json"
+                :on-change="(f) => onImportFile(row, f)"
+              >
+                <el-button size="small">选择文件</el-button>
+              </el-upload>
+              <el-button size="small" class="paste-btn" @click="openPaste(row)">粘贴文本</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </el-card>
     </el-card>
+
+    <!-- 分类导入：比对预览弹窗（确认前不写任何数据） -->
+    <el-dialog
+      v-model="previewVisible"
+      :title="preview ? `导入${preview.label} · 比对预览` : '导入预览'"
+      width="760px"
+      top="8vh"
+      @closed="preview = null"
+    >
+      <div v-if="previewLoading" v-loading="true" class="preview-loading" />
+      <template v-else-if="preview">
+        <el-alert type="info" :closable="false" show-icon class="preview-alert">
+          来源：{{ preview.source }} · 解析到 {{ preview.total }} 条记录 · 确认后只追加「将新增」的记录
+        </el-alert>
+        <div class="preview-stats">
+          <span class="stat-add">将新增 {{ preview.diff.added.length }}</span>
+          <span class="stat-skip">重复跳过 {{ preview.diff.skippedKey.length + preview.diff.skippedName.length }}</span>
+          <span class="stat-invalid">无效 {{ preview.diff.invalid.length }}</span>
+        </div>
+        <el-table :data="preview.rows" border size="small" max-height="360">
+          <el-table-column label="编码/单号" prop="key" min-width="150" show-overflow-tooltip />
+          <el-table-column label="名称" prop="name" min-width="140" show-overflow-tooltip />
+          <el-table-column label="比对结果" min-width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="resultTagType(row.result)" size="small">{{ row.result }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="说明" prop="reason" min-width="150" show-overflow-tooltip />
+        </el-table>
+      </template>
+      <template #footer>
+        <el-button @click="previewVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="importing"
+          :disabled="!preview || !preview.diff.added.length"
+          @click="confirmImport"
+        >
+          确认导入（追加 {{ preview ? preview.diff.added.length : 0 }} 条）
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 粘贴文本导入 -->
+    <el-dialog v-model="pasteVisible" :title="pasteRow ? `粘贴${pasteRow.label} JSON` : '粘贴导入'" width="680px" top="10vh">
+      <el-input
+        v-model="pasteText"
+        type="textarea"
+        :rows="12"
+        placeholder="粘贴以前导出的 JSON 内容。支持裸数组 [{...}]、{ data: [...] }、{ items: [...] } 等格式"
+      />
+      <template #footer>
+        <el-button @click="pasteVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmPaste">解析并比对</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { api } from '../api'
+import { diffImport, extractRecords } from '../utils/dedupe'
 
 const exporting = ref(false)
 const importing = ref(false)
@@ -79,6 +174,181 @@ const parseError = ref('')
 const DATA_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
 const KEY_LABELS = { items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单' }
 const MAX_SIZE = 30 * 1024 * 1024   // 30MB 上限：正常备份在几百 KB~几 MB
+
+// ---------- 分类导入导出 ----------
+const TYPES = [
+  { key: 'items', label: '商品', unit: '条' },
+  { key: 'customers', label: '客户', unit: '条' },
+  { key: 'suppliers', label: '供应商', unit: '条' },
+  { key: 'sales', label: '销售单', unit: '单' },
+  { key: 'purchases', label: '采购单', unit: '单' }
+]
+const typeRows = ref(TYPES.map(t => ({ ...t, count: null, exporting: false })))
+
+const FETCHERS = {
+  items: () => api.getItems(),
+  customers: () => api.getCustomers(),
+  suppliers: () => api.getSuppliers(),
+  sales: () => api.getSales(),
+  purchases: () => api.getPurchases()
+}
+
+// 页面打开时拉一次各类型库内数量（走 15 秒内存缓存，不重复请求）
+async function loadCounts() {
+  await Promise.all(TYPES.map(async t => {
+    try {
+      const records = await FETCHERS[t.key]()
+      const row = typeRows.value.find(r => r.key === t.key)
+      if (row) row.count = Array.isArray(records) ? records.length : 0
+    } catch { /* 拉取失败显示 —，不阻塞其他类型 */ }
+  }))
+}
+onMounted(loadCounts)
+
+// 分类导出：单类型打包 { app, version, type, exportedAt, count, data }
+async function exportType(row) {
+  row.exporting = true
+  try {
+    const records = await FETCHERS[row.key]()
+    const payload = {
+      app: 'stock-git-ai',
+      version: 1,
+      type: row.key,
+      exportedAt: new Date().toISOString(),
+      count: records.length,
+      data: records
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${row.label}-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    ElMessage.success(`已导出${row.label} ${records.length} ${row.unit}`)
+  } catch (e) {
+    ElMessage.error(`导出失败：${e.message || '网络异常'}`)
+  } finally {
+    row.exporting = false
+  }
+}
+
+// ---------- 分类导入：解析 → 前端预比对 → 弹窗预览 → 确认写库 ----------
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const preview = ref(null)   // { key, label, unit, source, diff, rows, total }
+const pasteVisible = ref(false)
+const pasteRow = ref(null)
+const pasteText = ref('')
+
+function displayNameOf(key, rec) {
+  if (!rec || typeof rec !== 'object') return '—'
+  if (rec.name != null && String(rec.name)) return String(rec.name)
+  if (key === 'purchases' && rec.supplier) return String(rec.supplier)
+  if (key === 'sales' && rec.customer) return String(rec.customer)
+  return '—'
+}
+
+// 把去重结果摊平成预览明细表：主键 / 名称 / 结果 / 说明
+function buildPreviewRows(key, diff) {
+  const rows = []
+  const field = key === 'purchases' || key === 'sales' ? 'id' : 'code'
+  const push = (rec, result, reason) => rows.push({
+    key: rec && rec[field] != null && String(rec[field]) !== '' ? String(rec[field]) : '—',
+    name: displayNameOf(key, rec),
+    result,
+    reason: reason || ''
+  })
+  diff.added.forEach(r => push(r, '新增'))
+  diff.skippedKey.forEach(r => push(r, '重复跳过', `${field === 'id' ? '单号' : '编码'}在库内已存在`))
+  diff.skippedName.forEach(r => push(r, '同名跳过', `库内已有同名${KEY_LABELS[key] || ''}`))
+  diff.invalid.forEach(x => push(x.record, '无效', x.reason))
+  return rows
+}
+
+// 解析文本并拉库内数据做预比对（纯前端计算，不写库）
+async function openPreview(row, text, source) {
+  const records = extractRecords(row.key, text)
+  if (!records || !records.length) {
+    ElMessage.error(`无法解析导入内容：不是有效的 JSON，或其中没有${row.label}记录数组`)
+    return
+  }
+  previewLoading.value = true
+  previewVisible.value = true
+  try {
+    const existing = await FETCHERS[row.key]()
+    const diff = diffImport(row.key, records, existing || [])
+    preview.value = {
+      key: row.key,
+      label: row.label,
+      unit: row.unit,
+      source,
+      diff,
+      rows: buildPreviewRows(row.key, diff),
+      total: diff.added.length + diff.skippedKey.length + diff.skippedName.length + diff.invalid.length
+    }
+  } catch (e) {
+    previewVisible.value = false
+    ElMessage.error(`获取现有数据失败：${e.message || '网络异常'}`)
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+function onImportFile(row, file) {
+  const f = file && file.raw
+  if (!f) return
+  if (f.size > MAX_SIZE) {
+    ElMessage.error(`文件过大（${(f.size / 1024 / 1024).toFixed(1)}MB，上限 30MB），请确认是本系统导出的 JSON 文件`)
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => openPreview(row, String(reader.result || ''), f.name)
+  reader.onerror = () => ElMessage.error('文件读取失败，请重试')
+  reader.readAsText(f)
+}
+
+function openPaste(row) {
+  pasteRow.value = row
+  pasteText.value = ''
+  pasteVisible.value = true
+}
+
+function confirmPaste() {
+  const text = pasteText.value
+  const row = pasteRow.value
+  if (!text.trim()) { ElMessage.warning('请先粘贴 JSON 内容'); return }
+  pasteVisible.value = false
+  openPreview(row, text, '粘贴的文本')
+}
+
+// 确认导入：只传预览判定为「新增」的记录；服务端会重新比对一次（预览到确认之间数据可能变化），以服务端结果为准
+async function confirmImport() {
+  const p = preview.value
+  if (!p || !p.diff.added.length) return
+  importing.value = true
+  try {
+    const r = await api.importMerge(p.key, p.diff.added)
+    const skip = (r.skippedKey || 0) + (r.skippedName || 0)
+    ElMessage.success(
+      `导入完成：新增 ${r.added} ${p.unit}${skip ? `，跳过重复 ${skip}` : ''}${r.invalid ? `，无效 ${r.invalid}` : ''}，当前共 ${r.total} ${p.unit}`
+    )
+    previewVisible.value = false
+    loadCounts()
+  } catch (e) {
+    ElMessage.error(`导入失败：${e.message || '网络异常'}。已写入的部分会保留，可重试同一文件（按编码/单号去重，不会重复叠加）`)
+  } finally {
+    importing.value = false
+  }
+}
+
+function resultTagType(result) {
+  if (result === '新增') return 'success'
+  if (result === '无效') return 'danger'
+  return 'info'
+}
 
 // 拉全站数据打包成 JSON 并触发浏览器下载
 async function doExport() {
@@ -196,6 +466,7 @@ async function doImport() {
 .panel:last-child { margin-bottom: 0; }
 .desc { color: var(--text-regular); font-size: var(--fs-base); margin: 0 0 12px; line-height: 1.7; }
 .danger-text { color: var(--color-danger); }
+.ok-text { color: var(--el-color-success); }
 .backup-upload { width: 100%; }
 .upload-inner { padding: 12px 0; }
 .upload-icon { font-size: 40px; color: var(--text-placeholder); margin-bottom: 8px; }
@@ -204,4 +475,13 @@ async function doImport() {
 .summary { margin-top: 16px; }
 .summary-title { font-weight: 600; margin-bottom: 10px; }
 .import-bar { margin-top: 14px; display: flex; gap: 10px; }
+.type-table { margin-bottom: 4px; }
+.upload-inline { display: inline-block; vertical-align: middle; }
+.paste-btn { margin-left: 8px; }
+.preview-loading { height: 220px; }
+.preview-alert { margin-bottom: 12px; }
+.preview-stats { display: flex; gap: 20px; margin-bottom: 12px; font-size: var(--fs-base); flex-wrap: wrap; }
+.stat-add { color: var(--el-color-success); font-weight: 600; }
+.stat-skip { color: var(--el-color-info); }
+.stat-invalid { color: var(--el-color-danger); }
 </style>

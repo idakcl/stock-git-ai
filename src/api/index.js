@@ -125,6 +125,17 @@ export const api = {
   },
   getStock: () => cachedGet('/stock'),
   getLogs: () => request('/logs'),
+  // 分类合并导入：与库内现有数据按主键比对去重后追加（不覆盖）。
+  // 前端会先用同一份 dedupe 逻辑做预览，这里传预览判定为「新增」的记录，
+  // 服务端仍会重新比对一次（预览到确认之间数据可能变化），以服务端结果为准。
+  importMerge: async (key, records) => {
+    const r = await request('/import-merge', { method: 'POST', body: JSON.stringify({ key, records }) })
+    invalidate(`/${key}`)
+    // 商品导入后服务端会重算供应商档案里的商品列表；单据导入后会重算库存/商品档案/供应商/客户
+    if (key === 'items') invalidate('/suppliers')
+    if (key === 'purchases' || key === 'sales') invalidateAfterOrderSave()
+    return r
+  },
   // 上传图片/单据照片到图床，返回 { url }
   uploadPhoto: async (file) => {
     const fd = new FormData()

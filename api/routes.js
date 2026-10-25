@@ -1,5 +1,6 @@
 import { readJSON, writeJSON } from './github.js'
 import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
+import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -416,6 +417,70 @@ export async function handleApi(req, url, env) {
         await writeJSON(env, 'logs.json', logs.slice(-200), 'append log')
 
         return json(req, env, { ok: true, results })
+      }
+      // 分类合并导入：单类数据按主键与库内现有记录比对去重后「追加」，
+      // 不覆盖、不删除已有数据（与上面 /import 的整表覆盖语义互补：
+      // 那个面向 AI 全量导入，这个面向人工补录/换设备迁移/外部数据合并）。
+      // 前端导入前会用同一份 dedupe 逻辑先做预览，两边口径一致。
+      if (path === '/import-merge') {
+        const key = typeof body.key === 'string' ? body.key : ''
+        const records = body.records
+        if (!isValidImportKey(key)) {
+          return json(req, env, { error: `不支持的导入类型：${key || '（未提供）'}` }, 400)
+        }
+        if (!Array.isArray(records) || !records.length) {
+          return json(req, env, { error: '导入内容为空' }, 400)
+        }
+        if (records.length > 5000) {
+          return json(req, env, { error: '单次导入超过 5000 条上限，请分批导入' }, 400)
+        }
+        if (records.some(x => !x || typeof x !== 'object' || Array.isArray(x))) {
+          return json(req, env, { error: '存在非对象记录，已中止导入' }, 400)
+        }
+
+        const existing = await readJSON(env, `${key}.json`)
+        const { added, skippedKey, skippedName, invalid } = diffImport(key, records, existing || [])
+        const stats = {
+          added: added.length,
+          skippedKey: skippedKey.length,
+          skippedName: skippedName.length,
+          invalid: invalid.length
+        }
+        // 全部重复/无效时不必写库，直接回结果（前端预览与这里可能因并发略有差异，以这里为准）
+        if (!added.length) {
+          return json(req, env, { ok: true, ...stats, total: (existing || []).length })
+        }
+        // 单据类落库前过一遍收付款规范化：与 /purchases、/sales、/import 同一缺陷同一修法，
+        // 杜绝「payments 空数组 + 旧 paid/received」造成实付漏算、幽灵欠款
+        const finalAdded = (key === 'purchases' || key === 'sales')
+          ? added.map(o => normalizeOrderPayments(o, key === 'purchases' ? 'paid' : 'received'))
+          : added
+        const merged = (existing || []).concat(finalAdded)
+        await writeJSON(env, `${key}.json`, merged, `merge import ${key}`)
+
+        if (key === 'items') {
+          // 与 POST /items 同策略：商品导入后重算供应商档案里的商品列表（products 是派生字段）
+          try {
+            const suppliers = await readJSON(env, 'suppliers.json')
+            const synced = (suppliers || []).map(s => ({
+              ...s,
+              products: merged.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
+            }))
+            await writeJSON(env, 'suppliers.json', synced, 'sync supplier products after merge import')
+          } catch (e) {
+            return json(req, env, { error: `商品已导入，但供应商的商品列表同步失败（${e.message || e}）。请重新保存一次商品，系统会自动重建` }, 500)
+          }
+        }
+        // 采购/销售单导入后必须按全部单据重算派生数据（商品链接、历史价、库存、客户档案）；
+        // 只传本次合并后的完整数组，另一类单据由 syncDerived 读库内现值，互不影响
+        if (key === 'purchases') await syncDerived(env, { purchases: merged })
+        if (key === 'sales') await syncDerived(env, { sales: merged })
+
+        const logs = await readJSON(env, 'logs.json')
+        logs.push({ time: new Date().toISOString(), source: 'merge', key, ...stats })
+        await writeJSON(env, 'logs.json', logs.slice(-200), 'append log')
+
+        return json(req, env, { ok: true, ...stats, total: merged.length })
       }
     }
 
