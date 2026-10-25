@@ -33,11 +33,18 @@
         <span>
           未付：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b>
         </span>
-        <span>
+        <span class="settle-cell">
           结算：
           <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
             {{ settleLabel }}
           </el-tag>
+          <!-- 标记结清：未付差额记为抹零优惠，未付自动归 0（与列表页、编辑弹窗同口径） -->
+          <el-button link size="small" type="primary" class="settle-btn"
+            :disabled="!found || autoSettled"
+            :title="autoSettled ? '未付金额为 0，按金额自动结清' : ''"
+            @click="toggleSettle">
+            {{ settleLabel === '结清' ? '改挂账' : '结清' }}
+          </el-button>
         </span>
         <span v-if="purchase.remark">备注：{{ purchase.remark }}</span>
       </div>
@@ -113,7 +120,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf } from '../utils/account'
+import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2 } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -156,6 +163,42 @@ const paidSum = computed(() => paidSumOf(purchase.value))
 const payments = computed(() => ensurePayments(purchase.value, 'paid'))
 // 展示层结算口径：未付金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
 const settleLabel = computed(() => isSettledOf(unpaid.value, purchase.value.settle) ? '结清' : '挂账')
+// 未付金额为 0 时按金额已自动结清：无需再点「结清」（与列表页 autoSettled 同口径）
+const autoSettled = computed(() => unpaid.value <= 0 && (purchase.value.settle || '挂账') !== '结清')
+
+// 点「结清」：未付差额记为抹零优惠（不产生实际付款流水，现金不减少），
+// 应付随之减少、未付自动归 0，syncPayments 按金额自动判定结清——状态与金额保持一致。
+// 与采购列表页 toggleSettle、编辑弹窗保存逻辑三处同口径
+async function toggleSettle() {
+  const willSettle = settleLabel.value !== '结清'
+  if (willSettle && unpaid.value > 0) {
+    const due = dueAmount.value
+    const paid = paidSum.value
+    const gap = unpaid.value
+    try {
+      await ElMessageBox.confirm(
+        `该单应付 ¥${due.toFixed(2)}，已实付 ¥${paid.toFixed(2)}，未付 ¥${gap.toFixed(2)}。\n标记结清将把差额 ¥${gap.toFixed(2)} 记为抹零优惠（不产生实际付款，现金不减少），本单按 ¥${paid.toFixed(2)} 结清。`,
+        '标记结清', { type: 'warning' })
+    } catch { return }
+    const updated = syncPayments({ ...purchase.value, discount: round2(Number(purchase.value.discount || 0) + gap) }, 'payable')
+    const idx = purchases.value.findIndex(p => p.id === updated.id)
+    if (idx >= 0) purchases.value[idx] = updated
+  } else {
+    // 未付已为 0：直接标记结清；或从「结清」改回「挂账」
+    const idx = purchases.value.findIndex(p => p.id === purchase.value.id)
+    if (idx >= 0) purchases.value[idx] = { ...purchases.value[idx], settle: willSettle ? '结清' : '挂账' }
+  }
+  // 保存失败：明确报错并回滚为线上数据，避免页面显示已结清但线上未生效
+  try {
+    await api.savePurchases(purchases.value)
+  } catch (e) {
+    ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    const fresh = await api.getPurchases().catch(() => null)
+    if (fresh) purchases.value = fresh
+    return
+  }
+  ElMessage.success(willSettle ? '已标记为结清，未付已清零' : '已改回挂账')
+}
 
 // 明细行原价合计与单项折扣合计（合计字段为折后金额）
 const grossSum = computed(() => (purchase.value.items || []).reduce((s, l) => s + Number(l.qty || 0) * Number(l.price || 0), 0))
@@ -375,6 +418,8 @@ onMounted(async () => {
 .opt-cb { margin-right: 4px; white-space: nowrap; }
 .opt-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
+.settle-cell { display: inline-flex; align-items: center; gap: 4px; }
+.settle-btn { margin-left: 2px; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color:var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .pay-card { margin-top: 12px; }
