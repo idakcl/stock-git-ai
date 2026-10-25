@@ -3,7 +3,8 @@
        resolveLine 传参、结清补流水方向），统一由 kind 派生，逻辑只维护一份。
        落库由父组件完成：本组件只组装 entry 并 emit('saved')，失败时弹窗保持打开便于重试 -->
   <el-dialog v-model="visible" :title="title" width="620">
-    <el-form :model="form" label-width="80px">
+    <!-- label-width 110px：容纳「整单优惠金额」6 个字不换行（80px 会折成两行与下行挤压） -->
+    <el-form :model="form" label-width="110px">
       <el-form-item :label="partyLabel">
         <!-- 采购：供应商下拉（可选已有档案，也可直接新建）；销售：客户下拉（同上） -->
         <el-select
@@ -37,8 +38,8 @@
           <el-radio-button label="挂账" />
           <el-radio-button label="结清" />
         </el-radio-group>
-        <div v-if="form.settle === '结清' && unpaidAmount > 0" class="settle-hint">
-          结清后未{{ payWord }}的 <b>¥{{ unpaidAmount.toFixed(2) }}</b> 将自动计入整单优惠（核销尾款，不虚增已{{ payWord }}）
+        <div v-if="form.settle === '结清' && !editingId" class="settle-hint">
+          已选「结清」：「实{{ payWord }}金额」与「整单优惠金额」实时联动，未{{ payWord }}的差额自动计入优惠，保存后本单标记结清（不虚增已{{ payWord }}）
         </div>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
@@ -64,17 +65,20 @@
         </template>
         <template v-else>
           <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额`" />
-            <el-button type="info" plain size="small" :disabled="depositAvailable <= 0" @click="payFromDeposit">
-              用{{ depositLabel }}支付（可用 ¥{{ depositAvailable.toFixed(2) }}）
-            </el-button>
-            <span v-if="Number(form.depositPay) > 0" class="deposit-used">
-              已用{{ depositLabel }}抵扣 <b>¥{{ Number(form.depositPay).toFixed(2) }}</b>
-              <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
-            </span>
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额（现金）`" />
+            <span class="pay-now-hint">现金{{ payWord }}款</span>
+          </div>
+          <div class="pay-now-row" style="margin-top:6px">
+            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" :placeholder="`${depositLabel}抵扣金额`" />
+            <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
+            <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
+          </div>
+          <div v-if="Number(form.depositPay) > 0" class="deposit-used" style="margin-top:4px">
+            已用{{ depositLabel }}抵扣 <b>¥{{ Number(form.depositPay).toFixed(2) }}</b>
+            <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
           </div>
           <div class="calc-hint" style="margin-top:4px">
-            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；选「结清」时若不足{{ dueWord }}，差额自动计入整单优惠金额。
+            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；{{ depositLabel }}可全额或手动填部分抵扣（不超过本单未{{ payWord }}金额）；选「结清」时「实{{ payWord }}金额」与「整单优惠金额」自动联动补差。
           </div>
         </template>
       </el-form-item>
@@ -243,15 +247,18 @@ const depositAvailable = computed(() => {
   return depositSumOf(p && (isPurchase.value ? p.advances : p.deposits))
 })
 
-// 用预付款/预收款支付：按「剩余未收」与「可用余额」较小值记一笔抵扣（保存时从档案扣减）
-function payFromDeposit() {
+// 全额抵扣：一键把抵扣额拉到「本单最大可抵」＝ min(本单未收 − 已填现金, 可用余额)。
+// 注意：预存款多于本单金额时也只抵本单未付部分，不会把客户余额清零
+function fullDeduct() {
   if (editingId.value) return ElMessage.warning('编辑已有单据请用「付款/收款」弹窗操作抵扣')
-  const remain = round2(dueTotal.value - sumPaid.value)
-  if (remain <= 0) return ElMessage.warning(`本单已无未${payWord.value}金额`)
-  const use = round2(Math.min(remain, depositAvailable.value))
-  if (use <= 0) return ElMessage.warning(`可用${depositLabel.value}不足`)
-  form.depositPay = round2(Number(form.depositPay || 0) + use)
-  ElMessage.success(`已用${depositLabel.value}抵扣 ¥${use.toFixed(2)}（点「保存」生效）`)
+  const max = deductMax.value
+  if (max <= 0) {
+    return ElMessage.warning(depositAvailable.value <= 0
+      ? `可用${depositLabel.value}不足`
+      : `本单已无未${payWord.value}金额`)
+  }
+  form.depositPay = max
+  ElMessage.success(`已用${depositLabel.value}全额抵扣 ¥${max.toFixed(2)}（点「保存」生效）`)
 }
 
 // 账务规则（与 src/utils/account.js 一致）：欠款按金额计算，与结算状态无关
@@ -269,6 +276,37 @@ const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0
 const effRate = computed(() => { const r = Number(form.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
 const dueTotal = computed(() => Math.max(0, round2(totalAmount.value * effRate.value) - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
+
+// 本单最大可抵扣额 = min(本单未收 − 已填现金实付, 可用预存款/预付款)。
+// 预存款余额大于本单金额时，最多只抵本单未付部分，不会超额扣成负数
+const deductMax = computed(() => Math.max(0, round2(Math.min(
+  dueTotal.value - round2(Number(form.paidNow || 0)),
+  depositAvailable.value
+))))
+
+// 手动填的抵扣额不允许超过上限（el-input-number 的 :max 之外再兜底一道）
+watch(() => form.depositPay, (v) => {
+  const max = deductMax.value
+  if (Number(v || 0) > max) form.depositPay = max
+})
+
+// 结清时「实付金额 ↔ 优惠金额」实时联动（仅新增单；编辑单改流水走付款/收款弹窗）：
+//   改实付/抵扣 → 优惠自动补差 = 毛应收 − 实付合计
+//   改优惠      → 实付自动补差 = 毛应收 − 优惠 − 抵扣
+// 毛应收 = 合计×整单折扣率（不含优惠金额）。两个 watch 互相收敛：一方补到目标值后另一方不再触发
+watch([() => form.settle, () => form.paidNow, () => form.depositPay, () => form.discountRate, totalAmount], () => {
+  if (editingId.value || form.settle !== '结清') return
+  const gross = round2(totalAmount.value * effRate.value)
+  const paid = round2(Number(form.paidNow || 0) + Number(form.depositPay || 0))
+  const disc = Math.max(0, round2(gross - paid))
+  if (disc !== Number(form.discount || 0)) form.discount = disc
+})
+watch(() => form.discount, () => {
+  if (editingId.value || form.settle !== '结清') return
+  const gross = round2(totalAmount.value * effRate.value)
+  const targetPaid = Math.max(0, round2(gross - Number(form.discount || 0) - Number(form.depositPay || 0)))
+  if (targetPaid !== Number(form.paidNow || 0)) form.paidNow = targetPaid
+})
 
 // ---- 销售侧单价策略：客户类别 → 商品分级售价字段 ----
 // 客户类别 → 商品上的对应分级售价字段
@@ -409,6 +447,8 @@ async function save() {
 </script>
 
 <style scoped>
+/* label 不换行：110px 下「整单优惠金额」6 字单行显示，两个字段各自独立一行 */
+:deep(.el-form-item__label){white-space:nowrap;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
 .lines-scroll{overflow-x:auto;}
@@ -427,6 +467,8 @@ async function save() {
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}
 .paid-summary .hint{color:var(--text-placeholder);}
 .pay-now-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
+.pay-now-hint{color:var(--text-placeholder);font-size:var(--fs-sub);}
+.deposit-avail{color:var(--text-regular);font-size:var(--fs-sub);}
 .deposit-used{color:var(--text-regular);font-size:var(--fs-table);}
 .deposit-used b{color:var(--color-success);}
 .discount{color:var(--color-success);}
