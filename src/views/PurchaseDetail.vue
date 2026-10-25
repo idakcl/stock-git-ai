@@ -82,12 +82,13 @@
 
     <PaymentDialog v-model="payDialog" :order="purchase" kind="payable" :deposit-balance="supplierAdvanceBalance" @saved="onPaySaved" />
 
-    <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件 -->
+    <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件（suppliers 必须传，否则供应商下拉无选项、编辑时无法回显） -->
     <OrderEditDialog
       v-model="editDialog"
       :order="purchase"
       :list="purchases"
       :items="items"
+      :suppliers="suppliers"
       kind="payable"
       :saving="saving"
       @saved="onOrderSaved"

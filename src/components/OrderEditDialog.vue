@@ -7,7 +7,8 @@
     <!-- label-width 110px：容纳「整单优惠金额」6 个字不换行（80px 会折成两行与下行挤压） -->
     <el-form :model="form" label-width="110px">
       <el-form-item :label="partyLabel">
-        <!-- 采购：供应商下拉（可选已有档案，也可直接新建）；销售：客户下拉（同上） -->
+        <!-- 采购：供应商下拉（可选已有档案，也可直接新建）；销售：客户下拉（同上）。
+             options 走 partyOptions：档案列表 + 回显兜底合成项，编辑老单名称对不上档案时也能显示原值 -->
         <el-select
           v-if="isPurchase"
           v-model="form.party"
@@ -18,7 +19,7 @@
           style="width:100%"
           @change="onPartyChange"
         >
-          <el-option v-for="s in suppliers" :key="s.code" :label="`${s.name} (${s.code})`" :value="s.name" />
+          <el-option v-for="s in partyOptions" :key="s.code || s.name" :label="optionLabel(s)" :value="s.name" />
         </el-select>
         <el-select
           v-else
@@ -30,7 +31,7 @@
           style="width:100%"
           @change="onPartyChange"
         >
-          <el-option v-for="c in customers" :key="c.code" :label="`${c.name} (${c.code})`" :value="c.name" />
+          <el-option v-for="c in partyOptions" :key="c.code || c.name" :label="optionLabel(c)" :value="c.name" />
         </el-select>
       </el-form-item>
       <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
@@ -251,6 +252,18 @@ const depositAvailable = computed(() => {
   const p = (list || []).find(x => x.name === name)
   return depositSumOf(p && (isPurchase.value ? p.advances : p.deposits))
 })
+
+// 往来单位下拉选项：档案列表 + 回显兜底合成项。
+// 编辑历史单据时，单据上的名称可能与档案对不上（档案被改名、大小写/空格差异、早期脏数据），
+// 没有对应选项时 el-select 显示为空，用户会误以为「供应商/客户没链接上」；
+// 合成一项同名选项，保证原值可见、可手动改，保存后仍按名称匹配档案
+const partyOptions = computed(() => {
+  const list = (isPurchase.value ? props.suppliers : props.customers) || []
+  const cur = (form.party || '').trim()
+  if (!cur || list.some(x => (x.name || '').trim() === cur)) return list
+  return [...list, { code: '', name: form.party, label: `${form.party}（档案中无同名，保存后按名称重新匹配）` }]
+})
+const optionLabel = (p) => p.label || `${p.name}${p.code ? ` (${p.code})` : ''}`
 
 // 全额抵扣：一键把抵扣额拉到「本单最大可抵」＝ min(本单未收 − 已填现金, 可用余额)。
 // 注意：预存款多于本单金额时也只抵本单未付部分，不会把客户余额清零
