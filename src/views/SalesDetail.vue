@@ -235,13 +235,16 @@ async function onOrderSaved({ entry, depositDeduct }) {
       ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
       return
     }
-    // 商品销售价历史、库存、客户档案均由后端自动推导，重拉保证页面与线上一致
-    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
-    sales.value = s
-    items.value = it
-    customers.value = cu || []
+    // 保存已成功：先关窗报成功；刷新单独容错，失败不再卡住弹窗（避免重复点击）
     editDialog.value = false
     ElMessage.success('已保存修改')
+    // 商品销售价历史、库存、客户档案均由后端自动推导，重拉保证页面与线上一致
+    try {
+      const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+      sales.value = s
+      items.value = it
+      customers.value = cu || []
+    } catch { /* 刷新失败：保留本地数据，下次进入页面会自动重拉 */ }
     // 兜底：若带预收款抵扣（正常编辑路径不会），一并扣减
     if (depositDeduct && Number(depositDeduct.amount) > 0) {
       const cu2 = await applyDepositFlows(api, 'receivable', entry.customer, entry.id, 0, depositDeduct.amount).catch(() => null)

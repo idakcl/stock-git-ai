@@ -2,7 +2,8 @@
   <!-- 采购/销售单据新增编辑弹窗：两侧仅 6 处差异（单号前缀、主体字段、文案、单价策略、
        resolveLine 传参、结清补流水方向），统一由 kind 派生，逻辑只维护一份。
        落库由父组件完成：本组件只组装 entry 并 emit('saved')，失败时弹窗保持打开便于重试 -->
-  <el-dialog v-model="visible" :title="title" width="620">
+  <!-- 保存中禁止误关：点遮罩/按 ESC 不会中断保存（关闭由保存结果驱动） -->
+  <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
     <!-- label-width 110px：容纳「整单优惠金额」6 个字不换行（80px 会折成两行与下行挤压） -->
     <el-form :model="form" label-width="110px">
       <el-form-item :label="partyLabel">
@@ -143,6 +144,7 @@
       </div>
     </div>
     <template #footer>
+      <span v-if="saving || emitting" class="saving-hint">保存中，请稍候…</span>
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="saving || emitting" @click="save">{{ saveLabel }}</el-button>
     </template>
@@ -473,6 +475,7 @@ async function save() {
 .calc-detail{display:flex;justify-content:flex-end;gap:16px;flex-wrap:wrap;margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);}
 .line-net{font-variant-numeric:tabular-nums;}
 .settle-hint{margin-top:6px;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.5;}
+.saving-hint{margin-right:12px;color:var(--color-primary);font-size:var(--fs-sub);}
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}
 .paid-summary .hint{color:var(--text-placeholder);}
 .pay-now-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}

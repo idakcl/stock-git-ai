@@ -223,35 +223,38 @@ function openDialog(row) {
 }
 
 // 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
-// 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则刷新商品与客户并关窗
+// 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则立即关窗报成功再后台刷新。
+// 刷新走独立容错：保存已落库，刷新失败只保留本地数据，绝不让弹窗卡在「存了却不开工」状态
+// （否则用户会重复点击，把同一单再 push 一遍生成重复单据）
 async function onOrderSaved({ entry, isEdit, depositDeduct }) {
   saving.value = true
   try {
     const snapshot = [...list.value]
-    if (isEdit) {
-      const idx = list.value.findIndex(s => s.id === entry.id)
-      if (idx >= 0) list.value[idx] = entry
-    } else {
-      list.value.push(entry)
-    }
+    // 幂等合并：同单号已存在则替换，防止「保存成功但刷新失败→重复点击」造成重复单
+    const exist = list.value.findIndex(s => s.id === entry.id)
+    if (exist >= 0) list.value[exist] = entry
+    else list.value.push(entry)
     try {
       await api.saveSales(list.value)
     } catch (e) {
       list.value = snapshot
       ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-      const [s, it] = await Promise.all([api.getSales(), api.getItems()])
-      list.value = s
-      itemOptions.value = it
+      const [s, it] = await Promise.all([api.getSales(), api.getItems()]).catch(() => [null, null])
+      if (s) list.value = s
+      if (it) itemOptions.value = it
       return
     }
-    // 商品销售价历史、库存、客户档案均由后端自动推导（销售单里的新客户会自动建档）
-    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
-    list.value = s
-    itemOptions.value = it
-    customerOptions.value = cu
+    // 保存已成功：先关窗 + 报成功，让用户立刻得到反馈；刷新放到后面且单独容错
     dialog.value = false
     editingOrder.value = null
     ElMessage.success(isEdit ? '已保存修改' : '销售出库成功')
+    // 商品销售价历史、库存、客户档案均由后端自动推导（销售单里的新客户会自动建档）
+    try {
+      const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+      list.value = s
+      itemOptions.value = it
+      customerOptions.value = cu
+    } catch { /* 刷新失败：保留本地数据，下次进入页面会自动重拉 */ }
     // 新增单用预收款抵扣：从客户档案按订单 id 幂等扣减（资金不泄漏）
     if (depositDeduct && Number(depositDeduct.amount) > 0) {
       const cu2 = await applyDepositFlows(api, 'receivable', entry.customer, entry.id, 0, depositDeduct.amount).catch(() => null)
