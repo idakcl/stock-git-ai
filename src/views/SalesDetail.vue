@@ -190,7 +190,7 @@ const hidePrice = ref(false)
 const showCostCol = ref(false)
 const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
 const exportColumns = computed(() => {
-  const cols = [
+  let cols = [
     { label: '编码', prop: 'code' },
     { label: '名称', prop: 'name' },
     { label: '单位', prop: 'unit' },
@@ -203,7 +203,11 @@ const exportColumns = computed(() => {
     { label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') },
     { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) }
   ]
-  return hidePrice.value ? cols.filter(c => !PRICE_LABELS.includes(c.label)) : cols
+  // 与页面表格同步：未勾选「显示进价」时，导出/打印一律不带进价列
+  if (!showCostCol.value) cols = cols.filter(c => c.label !== '进价')
+  // 隐藏单价与金额：剔除全部价格列（对外脱敏，优先级最高）
+  if (hidePrice.value) cols = cols.filter(c => !PRICE_LABELS.includes(c.label))
+  return cols
 })
 // 打印页副标题：单头关键信息；隐藏金额时同步去掉金额，避免价目从头行泄漏
 const docSubtitle = computed(() => {
