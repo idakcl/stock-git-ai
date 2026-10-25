@@ -22,6 +22,7 @@
         </el-table-column>
         <el-table-column prop="contact" label="联系人" width="130" />
         <el-table-column prop="phone" label="电话" width="130" />
+        <el-table-column prop="address" label="地址" min-width="180" show-overflow-tooltip />
         <el-table-column label="应付款" width="130" align="right">
           <template #default="{ row }">
             <span :class="payableMap[row.name] ? 'amount-debt' : 'amount-zero'">
@@ -59,6 +60,7 @@
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="联系人"><el-input v-model="form.contact" /></el-form-item>
         <el-form-item label="电话"><el-input v-model="form.phone" /></el-form-item>
+        <el-form-item label="地址"><el-input v-model="form.address" placeholder="详细地址，可空" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <template #footer><el-button @click="dialog=false">取消</el-button><el-button type="primary" :loading="saving" @click="save">保存</el-button></template>
@@ -84,7 +86,7 @@ const page = ref(1)
 const dialog = ref(false)
 // 保存中锁：配合按钮 loading，防止连点造成并发重复写入
 const saving = ref(false)
-const form = reactive({ code:'', name:'', contact:'', phone:'', remark:'' })
+const form = reactive({ code:'', name:'', contact:'', phone:'', address:'', remark:'' })
 // 列表排序：最新添加的排最前面。编码为 S+5 位序号、新增时取最大序号+1，序号越大越新；
 // 按编码数字部分倒序（兼容历史非定宽编码），无序号脏数据排最后
 const byNewest = (a, b) => {
@@ -93,7 +95,7 @@ const byNewest = (a, b) => {
   return nb - na
 }
 const filtered = computed(() => list.value
-  .filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark))
+  .filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark))
   .sort(byNewest)
 )
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
@@ -108,6 +110,7 @@ const exportColumns = [
   { label: '名称', prop: 'name' },
   { label: '联系人', prop: 'contact' },
   { label: '电话', prop: 'phone' },
+  { label: '地址', prop: 'address' },
   { label: '应付款', value: r => Number(payableMap.value[r.name] || 0).toFixed(2) },
   { label: '预付款', value: r => Number(advanceMap.value[r.code] || 0).toFixed(2) },
   { label: '备注', prop: 'remark' }
@@ -142,7 +145,7 @@ async function load() {
     purchases.value = pu
   } catch (e) { /* 刷新失败：保留当前数据 */ }
 }
-function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'S'), name:'', contact:'', phone:'', remark:'' }); dialog.value = true }
+function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'S'), name:'', contact:'', phone:'', address:'', remark:'' }); dialog.value = true }
 // 保存中锁：防止连点造成并发重复写入；按钮同步转 loading 给出明确反馈
 async function save() {
   if (saving.value) return

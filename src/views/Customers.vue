@@ -34,6 +34,7 @@
         </el-table-column>
         <el-table-column prop="contact" label="联系人" width="130" />
         <el-table-column prop="phone" label="电话" width="130" />
+        <el-table-column prop="address" label="地址" min-width="180" show-overflow-tooltip />
         <el-table-column label="应收款" width="130" align="right">
           <template #default="{ row }">
             <span :class="receivableMap[row.name] ? 'amount-debt' : 'amount-zero'">
@@ -71,6 +72,7 @@
         <el-form-item label="名称"><el-input v-model="form.name" /></el-form-item>
         <el-form-item label="联系人"><el-input v-model="form.contact" /></el-form-item>
         <el-form-item label="电话"><el-input v-model="form.phone" /></el-form-item>
+        <el-form-item label="地址"><el-input v-model="form.address" placeholder="详细地址，可空" /></el-form-item>
         <el-form-item label="类别">
           <el-select v-model="form.category" clearable placeholder="选择客户类别" style="width:100%">
             <el-option v-for="c in CATEGORIES" :key="c" :label="c" :value="c" />
@@ -103,7 +105,7 @@ const page = ref(1)
 const dialog = ref(false)
 // 保存中锁：配合按钮 loading，防止连点造成并发重复写入
 const saving = ref(false)
-const form = reactive({ code:'', name:'', contact:'', phone:'', category:'', remark:'' })
+const form = reactive({ code:'', name:'', contact:'', phone:'', address:'', category:'', remark:'' })
 
 // 列表排序：最新添加的排最前面。编码为 C+5 位序号、新增时取最大序号+1，序号越大越新；
 // 按编码数字部分倒序（兼容历史非定宽编码），无序号脏数据排最后
@@ -115,7 +117,7 @@ const byNewest = (a, b) => {
 const filtered = computed(() => list.value
   .filter(i => {
     if (categoryFilter.value && (i.category || '') !== categoryFilter.value) return false
-    return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.remark)
+    return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark)
   })
   .sort(byNewest)
 )
@@ -136,6 +138,7 @@ const exportColumns = [
   { label: '类别', prop: 'category' },
   { label: '联系人', prop: 'contact' },
   { label: '电话', prop: 'phone' },
+  { label: '地址', prop: 'address' },
   { label: '应收款', value: r => Number(receivableMap.value[r.name] || 0).toFixed(2) },
   { label: '预存款', value: r => Number(depositMap.value[r.code] || 0).toFixed(2) },
   { label: '备注', prop: 'remark' }
@@ -170,7 +173,7 @@ async function load() {
     sales.value = sa
   } catch (e) { /* 刷新失败：保留当前数据 */ }
 }
-function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'C'), name:'', contact:'', phone:'', category:'', remark:'' }); dialog.value = true }
+function openDialog(row) { if (row) Object.assign(form, row); else Object.assign(form, { code: nextEntityCode(list.value, 'C'), name:'', contact:'', phone:'', address:'', category:'', remark:'' }); dialog.value = true }
 // 保存中锁：防止连点造成并发重复写入；按钮同步转 loading 给出明确反馈
 async function save() {
   if (saving.value) return

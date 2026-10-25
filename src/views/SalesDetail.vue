@@ -209,22 +209,45 @@ const exportColumns = computed(() => {
   if (hidePrice.value) cols = cols.filter(c => !PRICE_LABELS.includes(c.label))
   return cols
 })
-// 打印页副标题：单头关键信息；隐藏金额时同步去掉金额，避免价目从头行泄漏
-const docSubtitle = computed(() => {
-  const parts = [`客户：${sale.value.customer || '—'}`, `日期：${sale.value.date || '—'}`]
-  if (!hidePrice.value) {
-    parts.push(`应收：¥${dueAmount.value.toFixed(2)}`, `实收：¥${receivedSum.value.toFixed(2)}`, `结算：${settleLabel.value}`)
-  }
-  return parts.join(' · ')
+// 打印页副标题：商品行数摘要（完整单头信息见下方 fields 字段区，避免重复）
+const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品`)
+// 单头信息：客户档案全量信息 + 单据关键字段（客户/日期/合计/优惠/应收/实收/未收/结算/备注，有折扣显示折扣）。
+// 「隐藏单价与金额」勾选时同步剔除金额类字段，与明细列保持同一脱敏口径
+const AMOUNT_FIELD_LABELS = ['合计', '原价合计', '整单折扣', '优惠', '应收', '实收', '未收']
+const docHeaderFields = computed(() => {
+  const o = sale.value
+  const c = (customers.value || []).find(x => x.name === o.customer) || {}
+  const fields = [
+    ['客户', o.customer || '—'],
+    ['客户编码', c.code],
+    ['联系人', c.contact],
+    ['电话', c.phone],
+    ['地址', c.address],
+    ['类别', c.category],
+    ['日期', o.date],
+    ['合计', `¥${Number(o.total || 0).toFixed(2)}`]
+  ]
+  if (lineDiscountSum.value > 0) fields.push(['原价合计', `¥${grossSum.value.toFixed(2)}（单项折扣 -¥${lineDiscountSum.value.toFixed(2)}）`])
+  if (orderRate.value !== 1) fields.push(['整单折扣', `×${orderRate.value.toFixed(2)}`])
+  fields.push(
+    ['优惠', `¥${Number(o.discount || 0).toFixed(2)}${Number(o.discount || 0) > 0 ? '（抹零优惠，未实际收款）' : ''}`],
+    ['应收', `¥${dueAmount.value.toFixed(2)}`],
+    ['实收', `¥${receivedSum.value.toFixed(2)}${payments.value.length ? `（${payments.value.length} 笔）` : ''}`],
+    ['未收', `¥${unpaid.value.toFixed(2)}`],
+    ['结算', settleLabel.value],
+    ['备注', o.remark]
+  )
+  if (hidePrice.value) return fields.filter(([label]) => !AMOUNT_FIELD_LABELS.includes(label))
+  return fields
 })
 function doExport() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value)
+  downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
   ElMessage.success(`已导出 ${detailItems.value.length} 行${hidePrice.value ? '（已隐藏单价与金额）' : ''}`)
 }
 function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value)
+  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value)
 }
 
 async function onPaySaved(updated, payload) {

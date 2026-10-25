@@ -16,6 +16,7 @@
       <div class="info">
         <span>联系人：{{ customer.contact || '—' }}</span>
         <span>电话：{{ customer.phone || '—' }}</span>
+        <span>地址：{{ customer.address || '—' }}</span>
         <span>关联商品：{{ products.length }} 个</span>
         <span class="amount-item">
           应收款：<b :class="receivable ? 'amount-debt' : 'amount-zero'">¥ {{ receivable.toFixed(2) }}</b>
@@ -219,7 +220,7 @@ const dateEnd = ref('')
 
 const categoryTagType = (c) => ({ '批发': 'warning', '零售': 'success', '安装师傅': 'primary' }[c] || 'info')
 
-const customer = computed(() => customers.value.find(c => c.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', remark: '', category: '' })
+const customer = computed(() => customers.value.find(c => c.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', address: '', remark: '', category: '' })
 
 // ---- 预存款：余额 = 客户档案 deposits 流水合计；支持单独充值/删除 ----
 const depositBalance = computed(() => depositSumOf(customer.value.deposits))

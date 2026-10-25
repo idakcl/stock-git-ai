@@ -13,6 +13,7 @@
       <div class="info">
         <span>联系人：{{ supplier.contact || '—' }}</span>
         <span>电话：{{ supplier.phone || '—' }}</span>
+        <span>地址：{{ supplier.address || '—' }}</span>
         <span>关联商品：{{ products.length }} 个</span>
         <span class="amount-item">
           应付款：<b :class="payable ? 'amount-debt' : 'amount-zero'">¥ {{ payable.toFixed(2) }}</b>
@@ -246,7 +247,7 @@ const tab = ref('products')
 const dateStart = ref('')
 const dateEnd = ref('')
 
-const supplier = computed(() => suppliers.value.find(s => s.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', remark: '' })
+const supplier = computed(() => suppliers.value.find(s => s.code === route.params.code) || { code: route.params.code, name: '未知', contact: '', phone: '', address: '', remark: '' })
 
 // ---- 预付款：余额 = 供应商档案 advances 流水合计；支持单独充值/删除 ----
 const advanceBalance = computed(() => depositSumOf(supplier.value.advances))
