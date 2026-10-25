@@ -55,11 +55,12 @@
         </el-table-column>
         <el-table-column label="结算" width="130">
           <template #default="{ row }">
-            <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
-              {{ row.settle || '挂账' }}
+            <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+              {{ settleLabelOf(row) }}
             </el-tag>
-            <el-button link size="small" type="primary" style="margin-left:4px" @click="toggleSettle(row)">
-              {{ row.settle === '结清' ? '改挂账' : '结清' }}
+            <el-button link size="small" type="primary" style="margin-left:4px" @click="toggleSettle(row)"
+              :disabled="autoSettled(row)" :title="autoSettled(row) ? '未付金额为 0，按金额自动结清' : ''">
+              {{ settleLabelOf(row) === '结清' ? '改挂账' : '结清' }}
             </el-button>
           </template>
         </el-table-column>
@@ -109,7 +110,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap } from '../utils/catalog'
-import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf } from '../utils/account'
+import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf } from '../utils/account'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
@@ -165,7 +166,7 @@ const filtered = computed(() => list.value
 const summaryAmount = ({ columns }) => {
   const rows = filtered.value
   const total = rows.reduce((sum, r) => sum + Number(r.total || 0), 0)
-  const settled = rows.filter(r => (r.settle || '挂账') === '结清').length
+  const settled = rows.filter(r => settleLabelOf(r) === '结清').length
   return columns.map((c, idx) => {
     if (idx === 0) return `合计（${rows.length} 单，结清 ${settled}）`
     if (c.label === '应付') return rows.reduce((s, r) => s + grossOf(r), 0).toFixed(2)
@@ -176,6 +177,11 @@ const summaryAmount = ({ columns }) => {
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, dateStart, dateEnd], () => { page.value = 1 })
+
+// 展示层结算口径：未付金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
+const settleLabelOf = (row) => isSettledOf(payableOf(row), row.settle) ? '结清' : '挂账'
+// 金额驱动结清（未付为 0 但库内仍挂账）：标签已按金额显示结清，禁止再手动改挂账
+const autoSettled = (row) => payableOf(row) <= 0 && (row.settle || '挂账') !== '结清'
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
@@ -192,7 +198,7 @@ const exportColumns = [
   { label: '实付', value: r => { const n = ensurePayments(r, 'paid').length; return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未付', value: r => payableOf(r).toFixed(2) },
-  { label: '结算', value: r => (r.settle || '挂账') },
+  { label: '结算', value: r => settleLabelOf(r) },
   { label: '备注', prop: 'remark' }
 ]
 
@@ -371,7 +377,9 @@ async function deductSupplierAdvance(name, entry) {
 
 async function toggleSettle(row) {
   // 欠款以金额为准：标记结清时，未付差额全部记为抹零优惠（不产生实际付款流水），保证状态与金额一致
-  if ((row.settle || '挂账') !== '结清') {
+  // 分支按展示口径判定（未付为 0 即视为结清），提示与分支一一对应
+  const willSettle = settleLabelOf(row) !== '结清'
+  if (willSettle) {
     const due = grossOf(row)
     const unpaid = payableOf(row)
     if (unpaid > 0) {
@@ -403,9 +411,7 @@ async function toggleSettle(row) {
     itemOptions.value = it
     return
   }
-  // 以保存后的最新状态判断提示（差额付款路径下 row 本身未被就地修改）
-  const fresh = list.value.find(p => p.id === row.id)
-  ElMessage.success(fresh && fresh.settle === '结清' ? '已标记为结清' : '已改回挂账')
+  ElMessage.success(willSettle ? '已标记为结清' : '已改回挂账')
 }
 
 async function remove(row) {

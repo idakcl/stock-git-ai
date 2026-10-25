@@ -91,8 +91,8 @@
             </el-table-column>
             <el-table-column label="结算" width="90">
               <template #default="{ row }">
-                <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
-                  {{ row.settle || '挂账' }}
+                <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+                  {{ settleLabelOf(row) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -157,7 +157,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf } from '../utils/account'
+import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import TableToolbar from './TableToolbar.vue'
@@ -203,6 +203,8 @@ const dueOf = (row) => grossOf(row)
 const netOf = (row) => netOfOrder(row, props.kind)
 const paidSumOf = (row) => ensurePayments(row, isPayable.value ? 'paid' : 'received').reduce((s, p) => s + Number(p.amount || 0), 0)
 const payCountOf = (row) => ensurePayments(row, isPayable.value ? 'paid' : 'received').length
+// 展示层结算口径：未收/未付金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
+const settleLabelOf = (row) => isSettledOf(netOf(row), row.settle) ? '结清' : '挂账'
 // 当前单据对应往来单位的预存款/预付款可用余额（供「用预存款支付」抵扣）
 const depositBalanceOf = (row) => {
   const p = (parties.value || []).find(x => x.name === (row && row[partyKey.value]))
@@ -284,7 +286,7 @@ const exportColumns = computed(() => [
   { label: L.value.paid, value: r => { const n = payCountOf(r); return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => Number(r.discount || 0) > 0 ? '-' + Number(r.discount).toFixed(2) : '—' },
   { label: L.value.unpaid, value: r => netOf(r).toFixed(2) },
-  { label: '结算', value: r => (r.settle || '挂账') },
+  { label: '结算', value: r => settleLabelOf(r) },
   { label: '备注', prop: 'remark' }
 ])
 

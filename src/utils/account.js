@@ -61,6 +61,15 @@ export function netOf(order, kind) {
   return kind === 'payable' ? payableOf(order) : receivableOf(order)
 }
 
+// 展示层结清判定：库内 settle 已标记「结清」，或按口径算出的未收/未付金额为 0
+//（容忍 1e-6 浮点尘，与 syncPayments 的结清口径一致）
+// unpaid：receivableOf/payableOf 的结果，或来往账等展示行里的未结金额
+// 用途：列表/详情/来往账无需打开编辑弹窗，金额收清即显示结清
+export function isSettledOf(unpaid, settle) {
+  if ((settle || '挂账') === '结清') return true
+  return Number(unpaid || 0) <= 1e-6
+}
+
 // 累计收付字段名：销售单 received / 采购单 paid
 export function sumFieldOf(kind) {
   return kind === 'payable' ? 'paid' : 'received'

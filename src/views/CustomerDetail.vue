@@ -63,8 +63,8 @@
             </el-table-column>
             <el-table-column label="结算" width="100">
               <template #default="{ row }">
-                <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
-                  {{ row.settle || '挂账' }}
+                <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+                  {{ settleLabelOf(row) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -206,7 +206,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
-import { receivableOf, grossOf, receivedSumOf, depositSumOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 
 const route = useRoute()
@@ -327,6 +327,9 @@ const filteredSales = computed(() => saleList.value.filter(s => {
   return true
 }))
 
+// 展示层结算口径：未收金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
+const settleLabelOf = (row) => isSettledOf(receivableOf(row), row.settle) ? '结清' : '挂账'
+
 // 应收款：该客户全部销售单未结金额合计（欠款按金额计算，与结算状态无关）
 const receivable = computed(() => saleList.value.reduce((sum, s) => sum + receivableOf(s), 0))
 
@@ -357,7 +360,7 @@ const ledgerRows = computed(() => {
       const deposit = (s.payments || []).filter(p => p.fromDeposit).reduce((a, p) => a + Number(p.amount || 0), 0)
       const unpaid = Math.max(0, amount - received)
       balance += unpaid
-      return { date: s.date, id: s.id, summary: '销售出库', amount, discount, received, deposit, unpaid, balance, settle: s.settle || '挂账' }
+      return { date: s.date, id: s.id, summary: '销售出库', amount, discount, received, deposit, unpaid, balance, settle: isSettledOf(unpaid, s.settle) ? '结清' : '挂账' }
     })
 })
 

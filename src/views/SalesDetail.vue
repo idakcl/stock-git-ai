@@ -31,8 +31,8 @@
         </span>
         <span>
           结算：
-          <el-tag :type="sale.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
-            {{ sale.settle || '挂账' }}
+          <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+            {{ settleLabel }}
           </el-tag>
         </span>
         <span v-if="sale.remark">备注：{{ sale.remark }}</span>
@@ -109,7 +109,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf } from '../utils/account'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 
@@ -148,6 +148,8 @@ const dueAmount = computed(() => grossOf(sale.value))
 const unpaid = computed(() => receivableOf(sale.value))
 const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
+// 展示层结算口径：未收金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
+const settleLabel = computed(() => isSettledOf(unpaid.value, sale.value.settle) ? '结清' : '挂账')
 
 // 明细行原价合计与单项折扣合计（合计字段为折后金额）
 const grossSum = computed(() => (sale.value.items || []).reduce((s, l) => s + Number(l.qty || 0) * Number(l.price || 0), 0))
