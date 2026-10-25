@@ -153,7 +153,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
@@ -233,6 +233,10 @@ watch(() => props.modelValue, (open) => {
     form.depositPay = 0
     form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
   }
+  // 打开弹窗后主动检查一次自动结清：unpaidAmount 可能「回填前后都是 0」
+  // （首次打开就是全付旧单、或上一张处理过的单也未付为 0），值没变化 watch 不会触发，
+  // 旧订单就会漏掉自动结清。nextTick 等 computed 重算完再判定
+  nextTick(checkAutoSettle)
 })
 
 // 编辑中的原始单据（用于展示累计实付/实收，实收实付不在表单里改，统一走流水）
@@ -297,9 +301,13 @@ const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
 
 // 未付/未收为 0（且本单有金额）时自动标记「结清」：状态与实付金额保持一致，
 // 避免「钱已全收/全付却还挂着挂账标签」。仅单向自动（不自动改回挂账，用户可手动选）
-watch(unpaidAmount, (v) => {
-  if (v <= 0 && dueTotal.value > 0 && form.settle !== '结清') form.settle = '结清'
-})
+function checkAutoSettle() {
+  if (unpaidAmount.value <= 0 && dueTotal.value > 0 && form.settle !== '结清') {
+    form.settle = '结清'
+  }
+}
+// 值变化时持续检查（新增单填实付、编辑单改金额/折扣等）
+watch(unpaidAmount, checkAutoSettle)
 
 // 本单最大可抵扣额 = min(本单未收 − 已填现金实付, 可用预存款/预付款)。
 // 预存款余额大于本单金额时，最多只抵本单未付部分，不会超额扣成负数
