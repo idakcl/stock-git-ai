@@ -26,12 +26,12 @@ export function ensurePayments(order, field) {
   return []
 }
 
-// 销售单累计实收 / 采购单累计实付（兼容旧字段）
+// 销售单累计实收 / 采购单累计实付（兼容旧字段；末位 round2 消除累加浮点尘）
 export function receivedSumOf(sale) {
-  return sum(ensurePayments(sale, 'received'))
+  return round2(sum(ensurePayments(sale, 'received')))
 }
 export function paidSumOf(purchase) {
-  return sum(ensurePayments(purchase, 'paid'))
+  return round2(sum(ensurePayments(purchase, 'paid')))
 }
 
 // 两位小数四舍五入：消除 5×1.91=9.549999… 这类浮点残留（金额统一 2 位）
@@ -41,19 +41,21 @@ export const round4 = (v) => Math.round((Number(v) + Number.EPSILON) * 10000) / 
 
 // 单据最终应收/应付金额（合计 × 整单折扣率 − 整单优惠金额）
 // discountRate：整单折扣率，1＝不打折；缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
+// 末位 round2：total×rate 与 discount 相减会产生 1e-15 级浮点尘（如 9.55−4.55=5.000000000000001），
+// 不收敛会让未收=尘>0，统计卡误判「有未结清」、 badge 多数一笔
 export function grossOf(order) {
   const total = Number(order?.total || 0)
   const rate = Number(order?.discountRate)
   const effective = Number.isFinite(rate) && rate > 0 ? rate : 1
-  return Math.max(0, round2(total * effective) - Number(order?.discount || 0))
+  return round2(Math.max(0, round2(total * effective) - Number(order?.discount || 0)))
 }
 
 export function receivableOf(sale) {
-  return Math.max(0, grossOf(sale) - receivedSumOf(sale))
+  return Math.max(0, round2(grossOf(sale) - receivedSumOf(sale)))
 }
 
 export function payableOf(purchase) {
-  return Math.max(0, grossOf(purchase) - paidSumOf(purchase))
+  return Math.max(0, round2(grossOf(purchase) - paidSumOf(purchase)))
 }
 
 // kind: 'receivable'(销售单) | 'payable'(采购单)

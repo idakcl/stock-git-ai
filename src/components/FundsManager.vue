@@ -46,7 +46,13 @@
         </div>
         <div class="stat-item">
           <el-statistic :title="`${L.unpaid}合计`" :value="stats.unpaid" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
-          <div class="stat-sub">{{ stats.openCount }} 单未结清</div>
+          <div class="stat-sub">
+            <span>{{ stats.openCount }} 单未结清</span>
+            <el-button v-if="stats.openCount > 0 || onlyOpen" class="open-only-btn" size="small"
+              :type="onlyOpen ? 'primary' : 'default'" @click="onlyOpen = !onlyOpen">
+              {{ onlyOpen ? '显示全部' : '仅看未结清' }}
+            </el-button>
+          </div>
         </div>
       </div>
 
@@ -157,7 +163,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf } from '../utils/account'
+import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2 } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import TableToolbar from './TableToolbar.vue'
@@ -190,6 +196,8 @@ const dateEnd = ref('')
 const partyFilter = ref('')
 const page = ref(1)
 const tab = ref('orders')
+// 「仅看未结清」开关：统计卡未收/未付卡片上一键筛选，与列表结算标签同一口径
+const onlyOpen = ref(false)
 const payDialog = ref(false)
 const payOrder = ref({})
 
@@ -215,6 +223,8 @@ const filtered = computed(() => (list.value || []).filter(row => {
   if (dateStart.value && (row.date || '') < dateStart.value) return false
   if (dateEnd.value && (row.date || '') > dateEnd.value) return false
   if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false
+  // 仅看未结清：按展示口径过滤（与列表结算标签、统计卡 openCount 完全一致）
+  if (onlyOpen.value && isSettledOf(netOf(row), row.settle)) return false
   // 搜索商品名时按编码解析为商品主数据当前名：单据快照名过期也能命中（改名后老单可搜）
   if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark,
     ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
@@ -223,7 +233,7 @@ const filtered = computed(() => (list.value || []).filter(row => {
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-watch([keyword, dateStart, dateEnd, partyFilter], () => { page.value = 1 })
+watch([keyword, dateStart, dateEnd, partyFilter, onlyOpen], () => { page.value = 1 })
 
 // 汇总卡片
 const stats = reactive({ due: 0, paid: 0, unpaid: 0, count: 0, payCount: 0, openCount: 0, discount: 0, discountCount: 0 })
@@ -232,9 +242,11 @@ function recompute() {
   stats.count = rows.length
   stats.due = rows.reduce((s, r) => s + dueOf(r), 0)
   stats.paid = rows.reduce((s, r) => s + paidSumOf(r), 0)
-  stats.unpaid = rows.reduce((s, r) => s + netOf(r), 0)
+  // 末位 round2：逐单未收已收敛到分，累加仍可能产生 1e-16 级尘（会被统计卡格式化成可见数字）
+  stats.unpaid = round2(rows.reduce((s, r) => s + netOf(r), 0))
   stats.payCount = rows.reduce((s, r) => s + payCountOf(r), 0)
-  stats.openCount = rows.filter(r => netOf(r) > 0).length
+  // 未结清数与列表结算标签同一口径（金额收清即结清），避免「全部结清却显示 N 单未结清」
+  stats.openCount = rows.filter(r => !isSettledOf(netOf(r), r.settle)).length
   stats.discount = rows.reduce((s, r) => s + Number(r.discount || 0), 0)
   stats.discountCount = rows.filter(r => Number(r.discount || 0) > 0).length
 }
@@ -382,6 +394,7 @@ onMounted(async () => {
 .stat-item .el-statistic__head,
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color:var(--text-secondary); font-size:var(--fs-sub); }
+.open-only-btn { margin-left: 8px; }
 .funds-tabs { margin-top: 12px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 .pay-count { color:var(--text-secondary); font-size:var(--fs-sub); margin-left: 2px; }

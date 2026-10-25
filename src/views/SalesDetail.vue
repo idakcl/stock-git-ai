@@ -8,6 +8,9 @@
           </div>
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
+            <el-checkbox v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
+            <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
+            <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
             <el-button type="primary" :disabled="!found" @click="editDialog = true">编辑</el-button>
             <el-button type="danger" :disabled="!found" @click="removeOrder">删除</el-button>
             <el-button @click="$router.push('/sales')">返回列表</el-button>
@@ -110,6 +113,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf } from '../utils/account'
+import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 
@@ -177,6 +181,44 @@ const detailItems = computed(() => {
     }
   })
 })
+
+// ---- 导出 CSV / 打印(A4) ----
+// 「隐藏单价与金额」勾选后剔除所有价格列，只留商品与数量：用于对外送货单、不带价对账场景
+const hidePrice = ref(false)
+const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
+const exportColumns = computed(() => {
+  const cols = [
+    { label: '编码', prop: 'code' },
+    { label: '名称', prop: 'name' },
+    { label: '单位', prop: 'unit' },
+    { label: '供应商', value: r => (r.suppliers || []).join('、') },
+    { label: '进价', value: r => (r.cost == null || r.cost === '' ? '' : Number(r.cost).toFixed(2)) },
+    { label: '售价', value: r => (r.price == null || r.price === '' ? '' : Number(r.price).toFixed(2)) },
+    { label: '备注', prop: 'remark' },
+    { label: '本次数量', prop: '_qty' },
+    { label: '本次单价', value: r => (r._price == null || r._price === '' ? '' : Number(r._price).toFixed(2)) },
+    { label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') },
+    { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) }
+  ]
+  return hidePrice.value ? cols.filter(c => !PRICE_LABELS.includes(c.label)) : cols
+})
+// 打印页副标题：单头关键信息；隐藏金额时同步去掉金额，避免价目从头行泄漏
+const docSubtitle = computed(() => {
+  const parts = [`客户：${sale.value.customer || '—'}`, `日期：${sale.value.date || '—'}`]
+  if (!hidePrice.value) {
+    parts.push(`应收：¥${dueAmount.value.toFixed(2)}`, `实收：¥${receivedSum.value.toFixed(2)}`, `结算：${settleLabel.value}`)
+  }
+  return parts.join(' · ')
+})
+function doExport() {
+  if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
+  downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value)
+  ElMessage.success(`已导出 ${detailItems.value.length} 行${hidePrice.value ? '（已隐藏单价与金额）' : ''}`)
+}
+function doPrint() {
+  if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
+  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value)
+}
 
 async function onPaySaved(updated, payload) {
   const idx = sales.value.findIndex(s => s.id === updated.id)
@@ -296,6 +338,8 @@ onMounted(async () => {
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.hide-price-cb { margin-right: 4px; white-space: nowrap; }
+.hide-price-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color:var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
