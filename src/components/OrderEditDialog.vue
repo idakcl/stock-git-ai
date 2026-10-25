@@ -41,6 +41,9 @@
         <div v-if="form.settle === '结清' && !editingId" class="settle-hint">
           已选「结清」：「实{{ payWord }}金额」与「整单优惠金额」实时联动，未{{ payWord }}的差额自动计入优惠，保存后本单标记结清（不虚增已{{ payWord }}）
         </div>
+        <div v-else-if="!editingId && dueTotal > 0" class="settle-hint">
+          实{{ payWord }}金额（含{{ depositLabel }}抵扣）填满本单金额、未{{ payWord }}为 0 时，结算将自动标记为「结清」
+        </div>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="单据照片">
@@ -276,6 +279,12 @@ const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0
 const effRate = computed(() => { const r = Number(form.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
 const dueTotal = computed(() => Math.max(0, round2(totalAmount.value * effRate.value) - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
+
+// 未付/未收为 0（且本单有金额）时自动标记「结清」：状态与实付金额保持一致，
+// 避免「钱已全收/全付却还挂着挂账标签」。仅单向自动（不自动改回挂账，用户可手动选）
+watch(unpaidAmount, (v) => {
+  if (v <= 0 && dueTotal.value > 0 && form.settle !== '结清') form.settle = '结清'
+})
 
 // 本单最大可抵扣额 = min(本单未收 − 已填现金实付, 可用预存款/预付款)。
 // 预存款余额大于本单金额时，最多只抵本单未付部分，不会超额扣成负数
