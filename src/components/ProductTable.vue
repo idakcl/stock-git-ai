@@ -47,7 +47,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="code" label="编码" width="120" />
-        <el-table-column label="名称" min-width="220">
+        <el-table-column label="名称" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
             <span>{{ row.name }}</span>
           </template>
@@ -64,9 +64,9 @@
           :label="col.label"
           width="110"
         />
-        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
         <slot name="extra" />
-        <el-table-column v-if="$slots.actions" label="操作" width="160">
+        <el-table-column v-if="$slots.actions" label="操作" width="160" class-name="ops-col">
           <template #default="{ row }"><slot name="actions" :row="row" /></template>
         </el-table-column>
       </el-table>

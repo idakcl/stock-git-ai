@@ -65,15 +65,9 @@
             </el-button>
           </template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="350" class-name="ops-col">
-          <template #default="{ row }">
-            <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
-            <el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button>
-            <el-button size="small" type="success" @click="openPay(row)">收款</el-button>
-            <el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button>
-            <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
-          </template>
+        <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
+        <el-table-column label="操作" width="400" class-name="ops-col">
+          <template #default="{ row }"><el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button><el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button><el-button size="small" type="success" @click="openPay(row)">收款</el-button><el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button><el-button size="small" type="danger" @click="remove(row)">删除</el-button></template>
         </el-table-column>
       </el-table>
       </div>

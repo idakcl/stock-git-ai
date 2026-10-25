@@ -85,11 +85,14 @@ function onExpired() {
 //   窄屏（手机/小平板，≤1024）——优先「页面左右对齐 + 能滑动看全列 + 不在表内上下拖动」：
 //     表格在卡片内横滑，且不限高，随整页自然滚动；代价是横滑容器困住 sticky，窄屏表头不吸顶；
 //   宽屏（笔记本/桌面）——保持整页滚动，sticky 列标题正常吸顶；
-//     若列总宽仍超出，用内容区横向滚动条查看（桌面有滚动条/触控板，不影响对齐观感）。
+//     但列总宽仍超出容器时，同样启用卡片内横向滚动条查看
+//     （否则表格会撑破页面右侧、内容被裁且整页出现横向滚动，笔记本上尤其明显）。
 function syncTableScroll() {
   const narrow = window.innerWidth <= 1024
   document.querySelectorAll('.table-wrap').forEach((wrap) => {
-    wrap.classList.toggle('is-scrollable', narrow)
+    // 溢出检测：表格为 width:max-content，scrollWidth 会包含溢出部分的宽度
+    const overflowing = wrap.scrollWidth > wrap.clientWidth + 1
+    wrap.classList.toggle('is-scrollable', narrow || overflowing)
   })
 }
 let rafId = 0
@@ -358,10 +361,10 @@ body {
 .table-wrap .el-table__body-wrapper { overflow: visible; }
 /* top 取负值抵消 .main 的 padding，使表头正好停在顶栏下沿而不露出缝隙 */
 .table-wrap .el-table__header-wrapper { position: sticky; top: -16px; z-index: 4; box-shadow: 0 1px 0 var(--border-color); }
-/* 表格放不下时（≤1024 窄屏由 JS 自动加上 is-scrollable）：
+/* 表格放不下时（窄屏或列总宽超出容器时由 JS 自动加上 is-scrollable）：
    在卡片内横向滑动看全列，避免整页被宽表撑出横向滚动区（页面左右被裁、手机上拖不动）。
    不限高：表格随整页自然滚动，不在表格内部制造小滚动区（手机上不用在表内上下拖动）；
-   代价是横滑容器会困住 sticky，窄屏下表头不吸顶——桌面端整页滚动不受影响，照常吸顶。 */
+   代价是横滑容器会困住 sticky，宽屏表格溢出时表头不吸顶——窄屏同理，桌面不溢出时照常吸顶。 */
 .table-wrap.is-scrollable { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: thin; scrollbar-color: var(--border-color) transparent; }
 .table-wrap.is-scrollable::-webkit-scrollbar { height: 6px; }
 .table-wrap.is-scrollable::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }

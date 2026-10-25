@@ -75,7 +75,7 @@
         <el-table-column label="金额" width="130" align="right">
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
-        <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
       </el-table>
       </div>
     </el-card>

@@ -96,8 +96,8 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip />
-            <el-table-column label="操作" width="130">
+            <el-table-column prop="remark" label="备注" width="120" show-overflow-tooltip />
+            <el-table-column label="操作" width="130" class-name="ops-col">
               <template #default="{ row }">
                 <el-button size="small" @click="$router.push(`${L.detailPath}${row.id}`)">查看</el-button>
                 <el-button size="small" type="success" @click="openPay(row)">{{ L.payBtn }}</el-button>
@@ -119,7 +119,7 @@
         <el-tab-pane :label="`按${L.party}汇总`" name="byParty">
           <div class="table-wrap">
           <el-table :data="byParty" stripe show-summary :summary-method="partySummary">
-            <el-table-column :label="L.party" min-width="180">
+            <el-table-column :label="L.party" min-width="180" show-overflow-tooltip>
               <template #default="{ row }">
                 <router-link :to="`${L.partyPath}${row.code || ''}`" class="link">{{ row.party }}</router-link>
               </template>
@@ -136,7 +136,7 @@
                 <span :class="row.unpaid > 0 ? 'debt' : 'none'">{{ row.unpaid.toFixed(2) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="110">
+            <el-table-column label="操作" width="110" class-name="ops-col">
               <template #default="{ row }">
                 <el-button size="small" @click="$router.push(`${L.partyPath}${row.code || ''}`)">来往账</el-button>
               </template>

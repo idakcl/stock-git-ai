@@ -21,7 +21,7 @@
       <div class="table-wrap">
       <el-table :data="paged" stripe>
         <el-table-column prop="code" label="编码" width="120" />
-        <el-table-column label="名称" min-width="200">
+        <el-table-column label="名称" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">
             <router-link :to="`/customer/${row.code}`" class="link">{{ row.name }}</router-link>
           </template>
@@ -48,7 +48,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160">
+        <el-table-column label="操作" width="160" class-name="ops-col">
           <template #default="{ row }">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
             <el-button size="small" type="danger" @click="remove(row)">删除</el-button>

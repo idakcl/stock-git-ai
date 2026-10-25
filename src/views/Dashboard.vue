@@ -52,7 +52,7 @@
           <el-table-column label="单号" width="180">
             <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
           </el-table-column>
-          <el-table-column prop="supplier" label="供应商" min-width="180" />
+          <el-table-column prop="supplier" label="供应商" min-width="180" show-overflow-tooltip />
           <el-table-column prop="date" label="日期" width="120" />
           <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
@@ -63,7 +63,7 @@
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
         </el-table>
       </div>
       <el-pagination
@@ -90,7 +90,7 @@
           <el-table-column label="单号" width="180">
             <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
           </el-table-column>
-          <el-table-column prop="customer" label="客户" min-width="160" />
+          <el-table-column prop="customer" label="客户" min-width="160" show-overflow-tooltip />
           <el-table-column prop="date" label="日期" width="120" />
           <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
@@ -101,7 +101,7 @@
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
         </el-table>
       </div>
       <el-pagination

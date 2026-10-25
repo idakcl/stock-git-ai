@@ -20,8 +20,8 @@
           <span v-else class="none">现金</span>
         </template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="130" show-overflow-tooltip />
-      <el-table-column label="操作" width="120">
+      <el-table-column prop="remark" label="备注" width="130" show-overflow-tooltip />
+      <el-table-column label="操作" width="120" class-name="ops-col">
         <template #default="{ row, $index }">
           <el-button size="small" type="primary" link :class="{ 'is-editing': editingIndex === $index }" @click="startEdit($index)">编辑</el-button>
           <el-button size="small" type="danger" link @click="removeRow($index)">删除</el-button>

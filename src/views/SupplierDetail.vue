@@ -67,7 +67,7 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
+            <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
           </el-table>
           </div>
           <div v-if="!filteredPurchases.length" class="empty">该时间段暂无采购单</div>
@@ -154,8 +154,8 @@
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
-            <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
-            <el-table-column label="操作" width="130">
+            <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
+            <el-table-column label="操作" width="130" class-name="ops-col">
               <template #default="{ row, $index }">
                 <el-button size="small" type="primary" link @click="openAdvanceEdit(row, $index)">编辑</el-button>
                 <el-button size="small" type="danger" link @click="removeAdvance($index)">删除</el-button>
