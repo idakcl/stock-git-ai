@@ -9,6 +9,7 @@
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
             <el-checkbox v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
+            <el-checkbox v-model="showCostCol" class="opt-cb">显示进价</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
             <el-button type="primary" :disabled="!found" @click="editDialog = true">编辑</el-button>
@@ -49,7 +50,7 @@
         </div>
         <PhotoThumbs v-if="(sale.photos || []).length" :value="sale.photos" />
       </div>
-      <ProductTable :items="detailItems" search-placeholder="搜索本单商品">
+      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :show-cost="showCostCol">
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
@@ -185,6 +186,8 @@ const detailItems = computed(() => {
 // ---- 导出 CSV / 打印(A4) ----
 // 「隐藏单价与金额」勾选后剔除所有价格列，只留商品与数量：用于对外送货单、不带价对账场景
 const hidePrice = ref(false)
+// 销售单详情默认不展示进价（成本列），需要时勾选「显示进价」查看
+const showCostCol = ref(false)
 const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
 const exportColumns = computed(() => {
   const cols = [
@@ -339,6 +342,8 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .hide-price-cb { margin-right: 4px; white-space: nowrap; }
+.opt-cb { margin-right: 4px; white-space: nowrap; }
+.opt-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .hide-price-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .photos-block { margin-bottom: 12px; }
