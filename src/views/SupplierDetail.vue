@@ -48,8 +48,8 @@
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="date" label="日期" width="120" />
-            <el-table-column prop="total" label="金额" width="110" align="right">
-              <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+            <el-table-column label="金额" width="110" align="right">
+              <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
             </el-table-column>
             <el-table-column label="实付" width="110" align="right">
               <template #default="{ row }">{{ row.paid != null ? Number(row.paid).toFixed(2) : '—' }}</template>
@@ -202,7 +202,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
-import { payableOf, paidSumOf, depositSumOf } from '../utils/account'
+import { payableOf, grossOf, paidSumOf, depositSumOf } from '../utils/account'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -377,12 +377,12 @@ const ledgerRows = computed(() => {
     .slice()
     .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)))
     .map(p => {
-      const amount = Number(p.total || 0)
+      const amount = grossOf(p)   // 应付金额 = 合计×整单折扣 − 整单优惠（与 grossOf 口径一致）
       const discount = Number(p.discount || 0)
       const paid = paidSumOf(p)
       // 该单从供应商预付款抵扣的金额（来源为预付款的付款流水）
       const deposit = (p.payments || []).filter(x => x.fromDeposit).reduce((a, x) => a + Number(x.amount || 0), 0)
-      const unpaid = Math.max(0, amount - discount - paid)
+      const unpaid = Math.max(0, amount - paid)
       balance += unpaid
       return { date: p.date, id: p.id, summary: '采购入库', amount, discount, paid, deposit, unpaid, balance, settle: p.settle || '挂账' }
     })
@@ -393,10 +393,10 @@ const closingBalance = computed(() => openingBalance.value + ledgerRows.value.re
 
 // 表格底部汇总：合计金额
 const summaryAmount = ({ columns, data }) => {
-  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+  const total = (data || []).reduce((sum, r) => sum + grossOf(r), 0)
   return columns.map((c, idx) => {
     if (idx === 0) return '合计'
-    if (c.property === 'total') return total.toFixed(2)
+    if (c.label === '金额') return total.toFixed(2)
     return ''
   })
 }

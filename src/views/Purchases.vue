@@ -26,10 +26,15 @@
             <router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link>
           </template>
         </el-table-column>
-        <el-table-column prop="supplier" label="供应商" width="170" />
+        <el-table-column label="供应商" width="170">
+          <template #default="{ row }">
+            <router-link v-if="supplierCodeMap[row.supplier]" :to="`/supplier/${supplierCodeMap[row.supplier]}`" class="link">{{ row.supplier }}</router-link>
+            <span v-else>{{ row.supplier }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="date" label="日期" width="120" />
-        <el-table-column prop="total" label="金额" width="110" align="right">
-          <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+        <el-table-column label="应付" width="110" align="right">
+          <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="实付" width="120" align="right">
           <template #default="{ row }">
@@ -85,6 +90,7 @@
       :order="editingOrder"
       :list="list"
       :items="itemOptions"
+      :suppliers="supplierOptions"
       kind="payable"
       :saving="saving"
       @saved="onOrderSaved"
@@ -104,6 +110,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap } from '../utils/catalog'
 import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf } from '../utils/account'
+import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -119,6 +126,12 @@ const page = ref(1)
 const itemOptions = ref([])
 // 供应商档案（预付款存这里）：付款弹窗超付部分转供应商预付款时使用
 const supplierOptions = ref([])
+// 供应商名 → 编码：列表里点名字跳转详情页
+const supplierCodeMap = computed(() => {
+  const m = {}
+  ;(supplierOptions.value || []).forEach(s => { if (s && s.name) m[s.name] = s.code })
+  return m
+})
 const dialog = ref(false)
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
@@ -155,7 +168,7 @@ const summaryAmount = ({ columns }) => {
   const settled = rows.filter(r => (r.settle || '挂账') === '结清').length
   return columns.map((c, idx) => {
     if (idx === 0) return `合计（${rows.length} 单，结清 ${settled}）`
-    if (c.property === 'total') return total.toFixed(2)
+    if (c.label === '应付') return rows.reduce((s, r) => s + grossOf(r), 0).toFixed(2)
     return ''
   })
 }
@@ -175,7 +188,7 @@ const exportColumns = [
   { label: '单号', prop: 'id' },
   { label: '供应商', prop: 'supplier' },
   { label: '日期', prop: 'date' },
-  { label: '金额', value: r => Number(r.total || 0).toFixed(2) },
+  { label: '应付', value: r => grossOf(r).toFixed(2) },
   { label: '实付', value: r => { const n = ensurePayments(r, 'paid').length; return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未付', value: r => payableOf(r).toFixed(2) },
@@ -293,9 +306,17 @@ async function onPaySaved(updated, payload) {
   supplierOptions.value = sup
   payDialog.value = false
   ElMessage.success('已保存付款流水')
-  // 超付部分转供应商预付款；用预付款抵扣的部分从余额扣减
-  if (payload?.add && Number(payload.add.amount) > 0) await addSupplierAdvance(updated.supplier, payload.add)
-  if (payload?.deduct && Number(payload.deduct.amount) > 0) await deductSupplierAdvance(updated.supplier, payload.deduct)
+  // 超付转供应商预付款 / 用预付款抵扣：按订单 id 幂等重建流水，重复保存不会重复加减（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const list2 = await applyDepositFlows(api, 'payable', updated.supplier, updated.id, addAmt, deductAmt)
+    if (list2) supplierOptions.value = list2
+    const parts = []
+    if (addAmt > 0) parts.push(`存入供应商预付款 ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减供应商预付款 ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
+  }
 }
 
 // 超付转供应商预付款
@@ -393,6 +414,9 @@ async function remove(row) {
   supplierOptions.value = sup
   list.value = p
   itemOptions.value = it
+  // 删除单据时同步清掉其超付转存/抵扣标记的预付款流水，避免删除后余额残留幽灵流水
+  const sup2 = await removeDepositFlows(api, 'payable', row.supplier, row.id).catch(() => null)
+  if (sup2) supplierOptions.value = sup2
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
   if (page.value > pageCount.value) page.value = pageCount.value
   ElMessage.success('已删除')

@@ -49,8 +49,8 @@
             <el-table-column label="商品数量" width="100" align="right">
               <template #default="{ row }">{{ orderKindCount(row) }}</template>
             </el-table-column>
-            <el-table-column prop="total" label="金额" width="110" align="right">
-              <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+            <el-table-column label="金额" width="110" align="right">
+              <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
             </el-table-column>
             <el-table-column label="实收" width="110" align="right">
               <template #default="{ row }">{{ receivedSumOf(row).toFixed(2) }}</template>
@@ -172,7 +172,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
-import { receivableOf, receivedSumOf, depositSumOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, depositSumOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 
 const route = useRoute()
@@ -280,12 +280,12 @@ const ledgerRows = computed(() => {
     .slice()
     .sort((a, b) => (a.date || '').localeCompare(b.date || '') || String(a.id).localeCompare(String(b.id)))
     .map(s => {
-      const amount = Number(s.total || 0)
+      const amount = grossOf(s)   // 应收金额 = 合计×整单折扣 − 整单优惠（与 grossOf 口径一致）
       const discount = Number(s.discount || 0)
       const received = receivedSumOf(s)
       // 该单从客户预存款抵扣的金额（来源为预存款的收款流水）
       const deposit = (s.payments || []).filter(p => p.fromDeposit).reduce((a, p) => a + Number(p.amount || 0), 0)
-      const unpaid = Math.max(0, amount - discount - received)
+      const unpaid = Math.max(0, amount - received)
       balance += unpaid
       return { date: s.date, id: s.id, summary: '销售出库', amount, discount, received, deposit, unpaid, balance, settle: s.settle || '挂账' }
     })
@@ -296,10 +296,10 @@ const closingBalance = computed(() => openingBalance.value + ledgerRows.value.re
 
 // 表格底部汇总：合计金额
 const summaryAmount = ({ columns, data }) => {
-  const total = (data || []).reduce((sum, r) => sum + Number(r.total || 0), 0)
+  const total = (data || []).reduce((sum, r) => sum + grossOf(r), 0)
   return columns.map((c, idx) => {
     if (idx === 0) return '合计'
-    if (c.property === 'total') return total.toFixed(2)
+    if (c.label === '金额') return total.toFixed(2)
     return ''
   })
 }

@@ -15,10 +15,14 @@
         </div>
       </template>
       <div class="info">
-        <span>客户：{{ sale.customer }}</span>
+        <span>客户：
+          <router-link v-if="customerCodeMap[sale.customer]" :to="`/customer/${customerCodeMap[sale.customer]}`" class="link">{{ sale.customer }}</router-link>
+          <span v-else>{{ sale.customer }}</span>
+        </span>
         <span>日期：{{ sale.date }}</span>
         <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
+        <span v-if="orderRate !== 1">整单折扣：×{{ orderRate.toFixed(2) }}</span>
         <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0">（抹零优惠，未实际收款）</template></span>
         <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实收：¥ {{ receivedSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
@@ -106,6 +110,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf } from '../utils/account'
+import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 
 const route = useRoute()
@@ -129,6 +134,14 @@ const customerDepositBalance = computed(() => {
   const c = customers.value.find(x => x.name === sale.value.customer)
   return depositSumOf(c && c.deposits)
 })
+// 客户名 → 编码：详情页点客户名跳转客户详情
+const customerCodeMap = computed(() => {
+  const m = {}
+  ;(customers.value || []).forEach(c => { if (c && c.name) m[c.name] = c.code })
+  return m
+})
+// 整单折扣率（1＝不打折）：与 account.grossOf 口径一致
+const orderRate = computed(() => { const r = Number(sale.value.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
 
 // 应收(合计−优惠) 与 未收(应收−累计实收)，与全站统一规则一致
 const dueAmount = computed(() => grossOf(sale.value))
@@ -177,28 +190,16 @@ async function onPaySaved(updated, payload) {
   }
   payDialog.value = false
   ElMessage.success('已保存收款流水')
-  // 超收转预存款 / 用预存款抵扣：按名字定位客户档案后写入或扣减 deposits
-  if (payload?.add && Number(payload.add.amount) > 0) await applyCustomerDeposit(updated.customer, payload.add, false)
-  if (payload?.deduct && Number(payload.deduct.amount) > 0) await applyCustomerDeposit(updated.customer, payload.deduct, true)
-}
-
-// 客户预存款变动：isDeduct=true 时记负值扣减余额，否则记正值存入
-async function applyCustomerDeposit(name, entry, isDeduct) {
-  try {
-    const list = await api.getCustomers()
-    const c = list.find(x => x.name === name)
-    if (!c) return ElMessage.warning(`客户「${name || '未知'}」不在名单中，预存款未${isDeduct ? '扣减' : '存入'}`)
-    c.deposits = [...(c.deposits || []), {
-      date: entry.date,
-      amount: isDeduct ? -Number(entry.amount) : Number(entry.amount),
-      remark: entry.remark || (isDeduct ? '抵扣货款' : '超收转预存款'),
-      time: entry.time || new Date().toISOString()
-    }]
-    await api.saveCustomers(list)
-    customers.value = list
-    ElMessage.success(isDeduct ? `已从客户预存款扣减 ¥${Number(entry.amount).toFixed(2)}` : `已存入客户预存款 ¥${Number(entry.amount).toFixed(2)}`)
-  } catch (e) {
-    ElMessage.error(`预存款${isDeduct ? '扣减' : '保存'}失败：${e.message || e}，请到客户详情手动调整`)
+  // 超收转预存款 / 用预存款抵扣：按订单 id 幂等重建流水，重复保存不会重复加减（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const list2 = await applyDepositFlows(api, 'receivable', updated.customer, updated.id, addAmt, deductAmt)
+    if (list2) customers.value = list2
+    const parts = []
+    if (addAmt > 0) parts.push(`存入客户预存款 ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减客户预存款 ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
   }
 }
 
@@ -263,6 +264,9 @@ async function removeOrder() {
       return
     }
     ElMessage.success('已删除')
+    // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水
+    const cu2 = await removeDepositFlows(api, 'receivable', sale.value.customer, sale.value.id).catch(() => null)
+    if (cu2) customers.value = cu2
     router.push('/sales')
   } finally { saving.value = false }
 }

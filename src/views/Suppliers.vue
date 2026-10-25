@@ -29,6 +29,13 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="预付款" width="130" align="right">
+          <template #default="{ row }">
+            <span :class="advanceMap[row.code] ? 'amount-deposit' : 'amount-zero'">
+              ¥ {{ Number(advanceMap[row.code] || 0).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button size="small" @click="openDialog(row)">编辑</el-button>
@@ -65,7 +72,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
-import { payableOf } from '../utils/account'
+import { payableOf, depositSumOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
@@ -100,6 +107,7 @@ const exportColumns = [
   { label: '联系人', prop: 'contact' },
   { label: '电话', prop: 'phone' },
   { label: '应付款', value: r => Number(payableMap.value[r.name] || 0).toFixed(2) },
+  { label: '预付款', value: r => Number(advanceMap.value[r.code] || 0).toFixed(2) },
   { label: '备注', prop: 'remark' }
 ]
 
@@ -109,6 +117,15 @@ const payableMap = computed(() => {
   for (const p of purchases.value || []) {
     const name = p.supplier || ''
     map[name] = (map[name] || 0) + payableOf(p)
+  }
+  return map
+})
+
+// 预付款余额：供应商档案 advances 流水合计（充值 + 超付转存 − 抵扣）
+const advanceMap = computed(() => {
+  const map = {}
+  for (const s of list.value || []) {
+    if (s && s.code) map[s.code] = depositSumOf(s.advances)
   }
   return map
 })
@@ -162,6 +179,7 @@ async function remove(row) {
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
 .amount-debt{color:var(--color-danger);font-weight:600;}
+.amount-deposit{color:var(--color-success);font-weight:600;}
 .amount-zero{color:var(--text-placeholder);}
 .pager{margin-top:12px;justify-content:flex-end;}
 </style>

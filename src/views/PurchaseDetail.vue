@@ -15,10 +15,14 @@
         </div>
       </template>
       <div class="info">
-        <span>供应商：{{ purchase.supplier }}</span>
+        <span>供应商：
+          <router-link v-if="supplierCodeMap[purchase.supplier]" :to="`/supplier/${supplierCodeMap[purchase.supplier]}`" class="link">{{ purchase.supplier }}</router-link>
+          <span v-else>{{ purchase.supplier }}</span>
+        </span>
         <span>日期：{{ purchase.date }}</span>
         <span>合计：¥ {{ Number(purchase.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
+        <span v-if="orderRate !== 1">整单折扣：×{{ orderRate.toFixed(2) }}</span>
         <span>优惠：¥ {{ Number(purchase.discount || 0).toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0">（抹零优惠，未实际付款）</template></span>
         <span>应付：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实付：¥ {{ paidSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
@@ -105,6 +109,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf } from '../utils/account'
+import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 
 const route = useRoute()
@@ -129,6 +134,14 @@ const supplierAdvanceBalance = computed(() => {
   const s = suppliers.value.find(x => x.name === purchase.value.supplier)
   return depositSumOf(s && s.advances)
 })
+// 供应商名 → 编码：详情页点供应商名跳转供应商详情
+const supplierCodeMap = computed(() => {
+  const m = {}
+  ;(suppliers.value || []).forEach(s => { if (s && s.name) m[s.name] = s.code })
+  return m
+})
+// 整单折扣率（1＝不打折）：与 account.grossOf 口径一致
+const orderRate = computed(() => { const r = Number(purchase.value.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
 
 // 应付(合计−优惠) 与 未付(应付−累计实付)，与全站统一规则一致
 const dueAmount = computed(() => grossOf(purchase.value))
@@ -178,28 +191,16 @@ async function onPaySaved(updated, payload) {
   }
   payDialog.value = false
   ElMessage.success('已保存付款流水')
-  // 超付转预付款 / 用预付款抵扣：按名字定位供应商档案后写入或扣减 advances
-  if (payload?.add && Number(payload.add.amount) > 0) await applySupplierAdvance(updated.supplier, payload.add, false)
-  if (payload?.deduct && Number(payload.deduct.amount) > 0) await applySupplierAdvance(updated.supplier, payload.deduct, true)
-}
-
-// 供应商预付款变动：isDeduct=true 时记负值扣减余额，否则记正值存入
-async function applySupplierAdvance(name, entry, isDeduct) {
-  try {
-    const list = await api.getSuppliers()
-    const s = list.find(x => x.name === name)
-    if (!s) return ElMessage.warning(`供应商「${name || '未知'}」不在名单中，预付款未${isDeduct ? '扣减' : '存入'}`)
-    s.advances = [...(s.advances || []), {
-      date: entry.date,
-      amount: isDeduct ? -Number(entry.amount) : Number(entry.amount),
-      remark: entry.remark || (isDeduct ? '抵扣货款' : '超付转预付款'),
-      time: entry.time || new Date().toISOString()
-    }]
-    await api.saveSuppliers(list)
-    suppliers.value = list
-    ElMessage.success(isDeduct ? `已从供应商预付款扣减 ¥${Number(entry.amount).toFixed(2)}` : `已存入供应商预付款 ¥${Number(entry.amount).toFixed(2)}`)
-  } catch (e) {
-    ElMessage.error(`预付款${isDeduct ? '扣减' : '保存'}失败：${e.message || e}，请到供应商详情手动调整`)
+  // 超付转预付款 / 用预付款抵扣：按订单 id 幂等重建流水，重复保存不会重复加减（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const list2 = await applyDepositFlows(api, 'payable', updated.supplier, updated.id, addAmt, deductAmt)
+    if (list2) suppliers.value = list2
+    const parts = []
+    if (addAmt > 0) parts.push(`存入供应商预付款 ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减供应商预付款 ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
   }
 }
 
@@ -264,6 +265,9 @@ async function removeOrder() {
       return
     }
     ElMessage.success('已删除')
+    // 删除单据时同步清掉其超付转存/抵扣标记的预付款流水
+    const sup2 = await removeDepositFlows(api, 'payable', purchase.value.supplier, purchase.value.id).catch(() => null)
+    if (sup2) suppliers.value = sup2
     router.push('/purchases')
   } finally { saving.value = false }
 }

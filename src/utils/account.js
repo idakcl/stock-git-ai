@@ -34,9 +34,18 @@ export function paidSumOf(purchase) {
   return sum(ensurePayments(purchase, 'paid'))
 }
 
-// 单据最终应收/应付金额（合计 − 优惠）
+// 两位小数四舍五入：消除 5×1.91=9.549999… 这类浮点残留（金额统一 2 位）
+export const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+// 比率保留 4 位小数（0.01% 粒度）：避免长串小数，也保证换算后金额分文不差
+export const round4 = (v) => Math.round((Number(v) + Number.EPSILON) * 10000) / 10000
+
+// 单据最终应收/应付金额（合计 × 整单折扣率 − 整单优惠金额）
+// discountRate：整单折扣率，1＝不打折；缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
 export function grossOf(order) {
-  return Math.max(0, Number(order?.total || 0) - Number(order?.discount || 0))
+  const total = Number(order?.total || 0)
+  const rate = Number(order?.discountRate)
+  const effective = Number.isFinite(rate) && rate > 0 ? rate : 1
+  return Math.max(0, round2(total * effective) - Number(order?.discount || 0))
 }
 
 export function receivableOf(sale) {

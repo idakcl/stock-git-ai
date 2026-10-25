@@ -59,7 +59,12 @@
                 <router-link :to="`${L.detailPath}${row.id}`" class="link">{{ row.id }}</router-link>
               </template>
             </el-table-column>
-            <el-table-column :prop="partyKey" :label="L.party" min-width="150" show-overflow-tooltip />
+            <el-table-column :label="L.party" min-width="150" show-overflow-tooltip>
+              <template #default="{ row }">
+                <router-link v-if="partyCodeMap[row[partyKey]]" :to="`${L.partyPath}${partyCodeMap[row[partyKey]]}`" class="link">{{ row[partyKey] }}</router-link>
+                <span v-else>{{ row[partyKey] }}</span>
+              </template>
+            </el-table-column>
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column :label="L.itemsLabel" width="100" align="right">
               <template #default="{ row }">{{ orderKindCount(row) }}</template>
@@ -143,7 +148,7 @@
       </el-tabs>
     </el-card>
 
-    <PaymentDialog v-model="payDialog" :order="payOrder" :kind="kind" @saved="onPaySaved" />
+    <PaymentDialog v-model="payDialog" :order="payOrder" :kind="kind" :deposit-balance="depositBalanceOf(payOrder)" @saved="onPaySaved" />
   </div>
 </template>
 
@@ -152,7 +157,8 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { grossOf, netOf as netOfOrder, ensurePayments } from '../utils/account'
+import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf } from '../utils/account'
+import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'
@@ -197,6 +203,11 @@ const dueOf = (row) => grossOf(row)
 const netOf = (row) => netOfOrder(row, props.kind)
 const paidSumOf = (row) => ensurePayments(row, isPayable.value ? 'paid' : 'received').reduce((s, p) => s + Number(p.amount || 0), 0)
 const payCountOf = (row) => ensurePayments(row, isPayable.value ? 'paid' : 'received').length
+// 当前单据对应往来单位的预存款/预付款可用余额（供「用预存款支付」抵扣）
+const depositBalanceOf = (row) => {
+  const p = (parties.value || []).find(x => x.name === (row && row[partyKey.value]))
+  return depositSumOf(p && (isPayable.value ? p.advances : p.deposits))
+}
 
 const filtered = computed(() => (list.value || []).filter(row => {
   if (dateStart.value && (row.date || '') < dateStart.value) return false
@@ -249,6 +260,12 @@ const byParty = computed(() => {
 
 // 下拉选项：全部单据中出现过的往来单位
 const partyOptions = computed(() => [...new Set((list.value || []).map(r => r[partyKey.value]).filter(Boolean))])
+// 往来单位名 → 编码：列表里点名字跳转往来账详情
+const partyCodeMap = computed(() => {
+  const m = {}
+  ;(parties.value || []).forEach(p => { if (p && p.name) m[p.name] = p.code })
+  return m
+})
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
@@ -303,7 +320,7 @@ function openPay(row) {
   payDialog.value = true
 }
 
-async function onPaySaved(updated) {
+async function onPaySaved(updated, payload) {
   const idx = list.value.findIndex(r => r.id === updated.id)
   if (idx >= 0) list.value[idx] = updated
   // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
@@ -318,6 +335,19 @@ async function onPaySaved(updated) {
   list.value = isPayable.value ? await api.getPurchases() : await api.getSales()
   payDialog.value = false
   ElMessage.success(`已保存${L.value.payBtn}流水`)
+  // 超额收付转预存款/预付款、用预存款/预付款抵扣：按订单 id 幂等重建流水（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const name = isPayable.value ? updated.supplier : updated.customer
+    const list2 = await applyDepositFlows(api, props.kind, name, updated.id, addAmt, deductAmt)
+    if (list2) parties.value = list2
+    const parts = []
+    const depWord = isPayable.value ? '供应商预付款' : '客户预存款'
+    if (addAmt > 0) parts.push(`存入${depWord} ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
+  }
 }
 
 onMounted(async () => {

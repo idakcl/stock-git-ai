@@ -24,13 +24,18 @@
         <el-table-column label="单号" width="170">
           <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
         </el-table-column>
-        <el-table-column prop="customer" label="客户" width="150" />
+        <el-table-column label="客户" width="150">
+          <template #default="{ row }">
+            <router-link v-if="customerCodeMap[row.customer]" :to="`/customer/${customerCodeMap[row.customer]}`" class="link">{{ row.customer }}</router-link>
+            <span v-else>{{ row.customer }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="date" label="日期" width="120" />
         <el-table-column label="商品数量" width="100" align="right">
           <template #default="{ row }">{{ orderKindCount(row) }}</template>
         </el-table-column>
-        <el-table-column prop="total" label="金额" width="110" align="right">
-          <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
+        <el-table-column label="应收" width="110" align="right">
+          <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column label="实收" width="120" align="right">
           <template #default="{ row }">
@@ -106,6 +111,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf, depositSumOf } from '../utils/account'
+import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -121,6 +127,12 @@ const dateEnd = ref('')
 const page = ref(1)
 const itemOptions = ref([])
 const customerOptions = ref([])
+// 客户名 → 编码：列表里点名字跳转详情页
+const customerCodeMap = computed(() => {
+  const m = {}
+  ;(customerOptions.value || []).forEach(c => { if (c && c.name) m[c.name] = c.code })
+  return m
+})
 const dialog = ref(false)
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
@@ -157,7 +169,7 @@ const summaryAmount = ({ columns }) => {
   const settled = rows.filter(r => (r.settle || '挂账') === '结清').length
   return columns.map((c, idx) => {
     if (idx === 0) return `合计（${rows.length} 单，结清 ${settled}）`
-    if (c.property === 'total') return total.toFixed(2)
+    if (c.label === '应收') return rows.reduce((s, r) => s + grossOf(r), 0).toFixed(2)
     return ''
   })
 }
@@ -178,7 +190,7 @@ const exportColumns = [
   { label: '客户', prop: 'customer' },
   { label: '日期', prop: 'date' },
   { label: '商品数量', value: r => orderKindCount(r) },
-  { label: '金额', value: r => Number(r.total || 0).toFixed(2) },
+  { label: '应收', value: r => grossOf(r).toFixed(2) },
   { label: '实收', value: r => { const n = ensurePayments(r, 'received').length; return receivedSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未收', value: r => receivableOf(r).toFixed(2) },
@@ -295,48 +307,16 @@ async function onPaySaved(updated, payload) {
   list.value = await api.getSales().catch(() => list.value)
   payDialog.value = false
   ElMessage.success('已保存收款流水')
-  // 超收部分转客户预存款（写入客户档案 deposits 流水）；用预存款抵扣的部分从余额扣减
-  if (payload?.add && Number(payload.add.amount) > 0) await addCustomerDeposit(updated.customer, payload.add)
-  if (payload?.deduct && Number(payload.deduct.amount) > 0) await deductCustomerDeposit(updated.customer, payload.deduct)
-}
-
-// 超收转客户预存款
-async function addCustomerDeposit(name, dep) {
-  try {
-    const customers = await api.getCustomers()
-    const c = customers.find(x => x.name === name)
-    if (!c) return ElMessage.warning(`客户「${name || '未知'}」不在名单中，超额部分 ¥${Number(dep.amount).toFixed(2)} 未入预存款`)
-    c.deposits = [...(c.deposits || []), {
-      date: dep.date,
-      amount: Number(dep.amount),
-      remark: dep.remark || '超收转预存款',
-      time: dep.time || new Date().toISOString()
-    }]
-    await api.saveCustomers(customers)
-    customerOptions.value = customers
-    ElMessage.success(`已存入客户预存款 ¥${Number(dep.amount).toFixed(2)}`)
-  } catch (e) {
-    ElMessage.error(`预存款保存失败：${e.message || e}，请到客户详情手动补记`)
-  }
-}
-
-// 用预存款抵扣货款：在客户档案 deposits 中记一笔负值，扣减可用余额
-async function deductCustomerDeposit(name, entry) {
-  try {
-    const customers = await api.getCustomers()
-    const c = customers.find(x => x.name === name)
-    if (!c) return ElMessage.warning(`客户「${name || '未知'}」不在名单中，抵扣 ¥${Number(entry.amount).toFixed(2)} 未扣减预存款`)
-    c.deposits = [...(c.deposits || []), {
-      date: entry.date,
-      amount: -Number(entry.amount),
-      remark: entry.remark || '抵扣货款',
-      time: entry.time || new Date().toISOString()
-    }]
-    await api.saveCustomers(customers)
-    customerOptions.value = customers
-    ElMessage.success(`已从客户预存款扣减 ¥${Number(entry.amount).toFixed(2)}`)
-  } catch (e) {
-    ElMessage.error(`预存款扣减失败：${e.message || e}，请到客户详情手动调整`)
+  // 超收转客户预存款 / 用预存款抵扣：按订单 id 幂等重建流水，重复保存不会重复加减（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const list2 = await applyDepositFlows(api, 'receivable', updated.customer, updated.id, addAmt, deductAmt)
+    if (list2) customerOptions.value = list2
+    const parts = []
+    if (addAmt > 0) parts.push(`存入客户预存款 ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减客户预存款 ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
   }
 }
 
@@ -395,6 +375,9 @@ async function remove(row) {
   const [s, it] = await Promise.all([api.getSales(), api.getItems()])
   list.value = s
   itemOptions.value = it
+  // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水，避免删除后余额残留幽灵流水
+  const cu2 = await removeDepositFlows(api, 'receivable', row.customer, row.id).catch(() => null)
+  if (cu2) customerOptions.value = cu2
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
   if (page.value > pageCount.value) page.value = pageCount.value
   ElMessage.success('已删除')

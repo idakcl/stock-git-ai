@@ -5,8 +5,19 @@
   <el-dialog v-model="visible" :title="title" width="620">
     <el-form :model="form" label-width="80px">
       <el-form-item :label="partyLabel">
-        <!-- 采购：供应商纯输入；销售：客户下拉（可选已有档案，也可直接新建） -->
-        <el-input v-if="isPurchase" v-model="form.party" />
+        <!-- 采购：供应商下拉（可选已有档案，也可直接新建）；销售：客户下拉（同上） -->
+        <el-select
+          v-if="isPurchase"
+          v-model="form.party"
+          filterable
+          allow-create
+          default-first-option
+          :placeholder="`选择或输入${partyLabel}`"
+          style="width:100%"
+          @change="onPartyChange"
+        >
+          <el-option v-for="s in suppliers" :key="s.code" :label="`${s.name} (${s.code})`" :value="s.name" />
+        </el-select>
         <el-select
           v-else
           v-model="form.party"
@@ -35,8 +46,12 @@
         <!-- :key 让每次打开都重建上传区，避免上一单的照片残留 -->
         <PhotoUpload ref="photoUpload" :key="photoKey" v-model="form.photos" />
       </el-form-item>
-      <el-form-item label="整单优惠">
+      <el-form-item label="整单优惠金额">
         <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
+      </el-form-item>
+      <el-form-item label="整单折扣">
+        <el-input-number v-model="form.discountRate" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:100%" />
+        <div class="calc-hint" style="margin-top:4px">折扣率：1＝不打折，0.9＝九折；按比例作用于单据合计（在「整单优惠金额」之前）</div>
       </el-form-item>
       <!-- 实付/实收为只读：不在表单里改，统一走「付款/收款」流水 -->
       <el-form-item :label="`实${payWord}金额`">
@@ -96,10 +111,11 @@
     <div style="margin-top:12px;text-align:right">
       <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
       <span class="calc-hint" style="margin-left:12px">{{ dueWord }} {{ dueTotal.toFixed(2) }} · 未{{ payWord }} {{ unpaidAmount.toFixed(2) }}</span>
-      <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0" class="calc-detail">
+      <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || effRate !== 1" class="calc-detail">
         <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
+        <span v-if="effRate !== 1" class="discount">整单折扣 ×{{ effRate.toFixed(2) }}</span>
         <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
-        <span v-if="Number(form.discount) > 0" class="discount">整单优惠 -¥ {{ Number(form.discount).toFixed(2) }}</span>
+        <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
       </div>
     </div>
     <template #footer>
@@ -111,7 +127,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments } from '../utils/account'
@@ -126,6 +142,8 @@ const props = defineProps({
   items: { type: Array, default: () => [] },
   // 客户档案（仅销售侧用）：定客户类别 → 分级售价、最近成交价
   customers: { type: Array, default: () => [] },
+  // 供应商档案（仅采购侧用）：下拉选已有供应商，也可直接新建
+  suppliers: { type: Array, default: () => [] },
   // payable=采购单 / receivable=销售单
   kind: { type: String, default: 'payable' },
   // 父级保存锁：配合按钮 loading，防止双击重复提交（会生成两张同内容单据、库存翻倍）
@@ -156,7 +174,7 @@ const photoKey = ref(0)
 const editingId = ref('')
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
-const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, lines:[] })
+const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRate:1, lines:[] })
 
 // 打开时整体重建表单：编辑回填原单（行折扣走 normalizeRate，兼容早期金额口径的旧数据）
 watch(() => props.modelValue, (open) => {
@@ -171,6 +189,7 @@ watch(() => props.modelValue, (open) => {
     form.settle = row.settle || '挂账'
     form.photos = [...(row.photos || [])]
     form.discount = Number(row.discount || 0)
+    form.discountRate = Number(row.discountRate || 1)
     form.lines = (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
   } else {
     editingId.value = ''
@@ -180,6 +199,7 @@ watch(() => props.modelValue, (open) => {
     form.settle = '挂账'
     form.photos = []
     form.discount = 0
+    form.discountRate = 1
     form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
   }
 })
@@ -199,9 +219,10 @@ const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
 const lineNet = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
 const grossAmount = computed(() => form.lines.reduce((s, l) => s + lineGross(l), 0))
 const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + lineDiscount(l), 0))
-// 合计＝折后小计之和（已含单项折扣）；应付/应收再减整单优惠
+// 合计＝折后小计之和（已含单项折扣）；应付/应收 = 合计 × 整单折扣率 − 整单优惠金额
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0))
-const dueTotal = computed(() => Math.max(0, totalAmount.value - Number(form.discount || 0)))
+const effRate = computed(() => { const r = Number(form.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
+const dueTotal = computed(() => Math.max(0, round2(totalAmount.value * effRate.value) - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
 
 // ---- 销售侧单价策略：客户类别 → 商品分级售价字段 ----
@@ -263,6 +284,18 @@ async function doSave() {
   if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
   if (!form.party) return ElMessage.warning(`请填写${partyLabel.value}`)
   if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning(`请完整填写${bizWord.value}明细`)
+  // 输入了名单中没有的${partyLabel}：保存后由后端自动建档，先提示用户确认，避免误建档案
+  const partyList = isPurchase.value ? props.suppliers : props.customers
+  const partyExists = (partyList || []).some(x => x.name === form.party)
+  if (!partyExists) {
+    try {
+      await ElMessageBox.confirm(
+        `「${form.party}」不在${partyLabel.value}名单中，保存后将自动新建该${partyLabel.value}档案，是否继续？`,
+        `新建${partyLabel.value}`,
+        { type: 'warning', confirmButtonText: '继续新建', cancelButtonText: '取消' }
+      )
+    } catch { return }
+  }
   let catalog = [...(props.items || [])]
   const resolved = []
   form.lines.forEach((l, idx) => {
@@ -287,6 +320,7 @@ async function doSave() {
     settle: form.settle || '挂账',
     photos: [...(form.photos || [])],
     discount: discountVal,
+    discountRate: effRate.value,
     items: resolved,
     total: amount
   }
@@ -297,8 +331,8 @@ async function doSave() {
     // 结清时把未收差额计入整单优惠（核销尾款），而不是补记一笔收款——
     // 避免账面「已收」虚高；应收也相应减少，账户自然平账
     const unpaid = isPurchase.value
-      ? payableOf({ total: amount, discount: discountVal, paid: paidSumOf(entry) })
-      : receivableOf({ total: amount, discount: discountVal, received: receivedSumOf(entry) })
+      ? payableOf({ total: amount, discount: discountVal, discountRate: effRate.value, paid: paidSumOf(entry) })
+      : receivableOf({ total: amount, discount: discountVal, discountRate: effRate.value, received: receivedSumOf(entry) })
     if (unpaid > 0) entry.discount = (Number(entry.discount) || 0) + unpaid
   }
   entry[sumField.value] = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
