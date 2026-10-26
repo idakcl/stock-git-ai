@@ -490,7 +490,7 @@ async function doSave() {
     const paidNow = round2(Number(form.paidNow || 0))
     const depositPay = round2(Number(form.depositPay || 0))
     const now = new Date().toISOString()
-    if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `实${payWord.value}`, time: now })
+    if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `现${payWord.value}`, time: now })
     if (depositPay > 0) payments.push({ date: form.date, amount: depositPay, remark: `用${depositLabel.value}抵扣`, fromDeposit: true, time: now })
     entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments, [sumField.value]: round2(paidNow + depositPay) }
   } else {
@@ -500,7 +500,7 @@ async function doSave() {
     const depositFromTotal = round2(depositFrom.reduce((s, p) => s + Number(p.amount || 0), 0))
     const cashNew = Math.max(0, round2(Number(form.paidNow || 0)))
     const rebuilt = [...depositFrom]
-    if (cashNew > 0) rebuilt.push({ date: form.date, amount: cashNew, remark: `实${payWord.value}`, time: new Date().toISOString() })
+    if (cashNew > 0) rebuilt.push({ date: form.date, amount: cashNew, remark: `现${payWord.value}`, time: new Date().toISOString() })
     entry.payments = rebuilt
     entry[sumField.value] = round2(cashNew + depositFromTotal)
     form.depositPay = depositFromTotal
