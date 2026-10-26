@@ -5,6 +5,21 @@
         <div class="card-header"><b>供应商</b><el-button type="primary" @click="openDialog()">新增</el-button></div>
       </template>
       <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称 / 联系人 / 电话" class="search-input" />
+      <div class="filter-row">
+        <span class="filter-label">时间段</span>
+        <el-date-picker
+          v-model="period"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          style="width:260px"
+        />
+        <el-button :type="sortMode==='amount' ? 'primary' : 'default'" @click="sortMode='amount'">按总金额排序</el-button>
+        <el-button :type="sortMode==='latest' ? 'primary' : 'default'" @click="sortMode='latest'">按最新成交排序</el-button>
+        <el-button v-if="sortMode!=='newest'" plain @click="sortMode='newest'">默认(按编码)</el-button>
+      </div>
       <TableToolbar
         filename="供应商"
         title="供应商"
@@ -35,6 +50,18 @@
             <span :class="advanceMap[row.code] ? 'amount-deposit' : 'amount-zero'">
               ¥ {{ Number(advanceMap[row.code] || 0).toFixed(2) }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="采购总金额" width="140" align="right">
+          <template #default="{ row }">
+            <span :class="purchaseTotalMap[row.name] ? 'amount-deposit' : 'amount-zero'">
+              ¥ {{ Number(purchaseTotalMap[row.name] || 0).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最新成交" width="120">
+          <template #default="{ row }">
+            <span :class="latestPurchaseMap[row.name] ? '' : 'amount-zero'">{{ latestPurchaseMap[row.name] || '—' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160" class-name="ops-col">
@@ -74,7 +101,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
-import { payableOf, depositSumOf } from '../utils/account'
+import { payableOf, depositSumOf, grossOf, round2 } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
@@ -82,6 +109,8 @@ const PAGE_SIZE = 60
 const list = ref([])
 const purchases = ref([])
 const keyword = ref('')
+const period = ref([])       // 时间段：[开始日期, 结束日期]（YYYY-MM-DD），空数组=全部
+const sortMode = ref('newest') // newest=按编码(默认) | amount=按采购总金额 | latest=按最新成交
 const page = ref(1)
 const dialog = ref(false)
 // 保存中锁：配合按钮 loading，防止连点造成并发重复写入
@@ -94,16 +123,56 @@ const byNewest = (a, b) => {
   const nb = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0
   return nb - na
 }
-const filtered = computed(() => list.value
-  .filter(i => matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark))
-  .sort(byNewest)
-)
+// 时间段筛选：未选则视为「全部」，选了则按采购单 date 落在区间内（含端点）
+const inPeriod = (date) => {
+  if (!period.value || period.value.length !== 2) return true
+  const [s, e] = period.value
+  return String(date || '') >= s && String(date || '') <= e
+}
+// 区间内采购单（按时间段过滤）
+const periodPurchases = computed(() => (purchases.value || []).filter(p => inPeriod(p.date)))
+// 区间内采购总金额（折后成交金额合计）与最新成交日期，按供应商名称归并
+const purchaseTotalMap = computed(() => {
+  const map = {}
+  for (const p of periodPurchases.value) {
+    const name = p.supplier || ''
+    map[name] = round2((map[name] || 0) + grossOf(p))
+  }
+  return map
+})
+const latestPurchaseMap = computed(() => {
+  const map = {}
+  for (const p of periodPurchases.value) {
+    const name = p.supplier || ''
+    if (!map[name] || String(p.date || '') > map[name]) map[name] = p.date
+  }
+  return map
+})
+
+const base = computed(() => list.value.filter(i =>
+  matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark)))
+// 排序：默认按编码(最新添加)，可按区间内采购总金额、或最新成交日期
+const filtered = computed(() => {
+  const arr = base.value.slice()
+  if (sortMode.value === 'amount') {
+    arr.sort((a, b) => (purchaseTotalMap.value[b.name] || 0) - (purchaseTotalMap.value[a.name] || 0) || byNewest(a, b))
+  } else if (sortMode.value === 'latest') {
+    arr.sort((a, b) => String(latestPurchaseMap.value[b.name] || '').localeCompare(String(latestPurchaseMap.value[a.name] || '')) || byNewest(a, b))
+  } else {
+    arr.sort(byNewest)
+  }
+  return arr
+})
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-watch(keyword, () => { page.value = 1 })
+watch([keyword, period, sortMode], () => { page.value = 1 })
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
-const subtitle = computed(() => `共 ${filtered.value.length} 条 · 导出当前第 ${page.value}/${pageCount.value} 页`)
+const subtitle = computed(() => {
+  const parts = [`共 ${filtered.value.length} 条`, `导出当前第 ${page.value}/${pageCount.value} 页`]
+  if (period.value && period.value.length === 2) parts.push(`时间段：${period.value[0]} ~ ${period.value[1]}`)
+  return parts.join(' · ')
+})
 
 const exportColumns = [
   { label: '编码', prop: 'code' },
@@ -113,6 +182,8 @@ const exportColumns = [
   { label: '地址', prop: 'address' },
   { label: '应付款', value: r => Number(payableMap.value[r.name] || 0).toFixed(2) },
   { label: '预付款', value: r => Number(advanceMap.value[r.code] || 0).toFixed(2) },
+  { label: '采购总金额', value: r => Number(purchaseTotalMap.value[r.name] || 0).toFixed(2) },
+  { label: '最新成交', value: r => latestPurchaseMap.value[r.name] || '—' },
   { label: '备注', prop: 'remark' }
 ]
 
@@ -198,6 +269,8 @@ async function remove(row) {
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin-bottom:12px;max-width:360px;}
+.filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.filter-label{color:var(--text-regular);font-size:var(--fs-base);}
 .amount-debt{color:var(--color-danger);font-weight:600;}
 .amount-deposit{color:var(--color-success);font-weight:600;}
 .amount-zero{color:var(--text-placeholder);}

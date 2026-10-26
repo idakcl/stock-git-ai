@@ -9,6 +9,19 @@
         <el-select v-model="categoryFilter" clearable placeholder="全部类别" style="width:150px">
           <el-option v-for="c in CATEGORIES" :key="c" :label="c" :value="c" />
         </el-select>
+        <span class="filter-label">时间段</span>
+        <el-date-picker
+          v-model="period"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          style="width:260px"
+        />
+        <el-button :type="sortMode==='amount' ? 'primary' : 'default'" @click="sortMode='amount'">按总金额排序</el-button>
+        <el-button :type="sortMode==='latest' ? 'primary' : 'default'" @click="sortMode='latest'">按最新成交排序</el-button>
+        <el-button v-if="sortMode!=='newest'" plain @click="sortMode='newest'">默认(按编码)</el-button>
       </div>
       <el-input v-model="keyword" clearable placeholder="搜索编码 / 名称 / 联系人 / 电话" class="search-input" />
       <TableToolbar
@@ -47,6 +60,18 @@
             <span :class="depositMap[row.code] ? 'amount-deposit' : 'amount-zero'">
               ¥ {{ Number(depositMap[row.code] || 0).toFixed(2) }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="销售总金额" width="140" align="right">
+          <template #default="{ row }">
+            <span :class="salesTotalMap[row.name] ? 'amount-deposit' : 'amount-zero'">
+              ¥ {{ Number(salesTotalMap[row.name] || 0).toFixed(2) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="最新成交" width="120">
+          <template #default="{ row }">
+            <span :class="latestSalesMap[row.name] ? '' : 'amount-zero'">{{ latestSalesMap[row.name] || '—' }}</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="160" class-name="ops-col">
@@ -91,7 +116,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
-import { receivableOf, depositSumOf } from '../utils/account'
+import { receivableOf, depositSumOf, grossOf, round2 } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
@@ -101,6 +126,8 @@ const list = ref([])
 const sales = ref([])
 const keyword = ref('')
 const categoryFilter = ref('')
+const period = ref([])        // 时间段：[开始日期, 结束日期]（YYYY-MM-DD），空数组=全部
+const sortMode = ref('newest') // newest=按编码(默认) | amount=按销售总金额 | latest=按最新成交
 const page = ref(1)
 const dialog = ref(false)
 // 保存中锁：配合按钮 loading，防止连点造成并发重复写入
@@ -114,22 +141,58 @@ const byNewest = (a, b) => {
   const nb = parseInt(String(b.code || '').replace(/\D/g, ''), 10) || 0
   return nb - na
 }
-const filtered = computed(() => list.value
-  .filter(i => {
-    if (categoryFilter.value && (i.category || '') !== categoryFilter.value) return false
-    return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark)
-  })
-  .sort(byNewest)
-)
+// 时间段筛选：未选则视为「全部」，选了则按销售单 date 落在区间内（含端点）
+const inPeriod = (date) => {
+  if (!period.value || period.value.length !== 2) return true
+  const [s, e] = period.value
+  return String(date || '') >= s && String(date || '') <= e
+}
+// 区间内销售单（按时间段过滤）
+const periodSales = computed(() => (sales.value || []).filter(s => inPeriod(s.date)))
+// 区间内销售总金额（折后成交金额合计）与最新成交日期，按客户名称归并
+const salesTotalMap = computed(() => {
+  const map = {}
+  for (const s of periodSales.value) {
+    const name = s.customer || ''
+    map[name] = round2((map[name] || 0) + grossOf(s))
+  }
+  return map
+})
+const latestSalesMap = computed(() => {
+  const map = {}
+  for (const s of periodSales.value) {
+    const name = s.customer || ''
+    if (!map[name] || String(s.date || '') > map[name]) map[name] = s.date
+  }
+  return map
+})
+
+const base = computed(() => list.value.filter(i => {
+  if (categoryFilter.value && (i.category || '') !== categoryFilter.value) return false
+  return matchText(keyword.value, i.code, i.name, i.contact, i.phone, i.address, i.remark)
+}))
+// 排序：默认按编码(最新添加)，可按区间内销售总金额、或最新成交日期
+const filtered = computed(() => {
+  const arr = base.value.slice()
+  if (sortMode.value === 'amount') {
+    arr.sort((a, b) => (salesTotalMap.value[b.name] || 0) - (salesTotalMap.value[a.name] || 0) || byNewest(a, b))
+  } else if (sortMode.value === 'latest') {
+    arr.sort((a, b) => String(latestSalesMap.value[b.name] || '').localeCompare(String(latestSalesMap.value[a.name] || '')) || byNewest(a, b))
+  } else {
+    arr.sort(byNewest)
+  }
+  return arr
+})
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-watch([keyword, categoryFilter], () => { page.value = 1 })
+watch([keyword, categoryFilter, period, sortMode], () => { page.value = 1 })
 
 const categoryTagType = (c) => ({ '批发': 'warning', '零售': 'success', '安装师傅': 'primary' }[c] || 'info')
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
   const parts = [`共 ${filtered.value.length} 条`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (categoryFilter.value) parts.push('类别：' + categoryFilter.value)
+  if (period.value && period.value.length === 2) parts.push(`时间段：${period.value[0]} ~ ${period.value[1]}`)
   return parts.join(' · ')
 })
 const exportColumns = [
@@ -141,6 +204,8 @@ const exportColumns = [
   { label: '地址', prop: 'address' },
   { label: '应收款', value: r => Number(receivableMap.value[r.name] || 0).toFixed(2) },
   { label: '预存款', value: r => Number(depositMap.value[r.code] || 0).toFixed(2) },
+  { label: '销售总金额', value: r => Number(salesTotalMap.value[r.name] || 0).toFixed(2) },
+  { label: '最新成交', value: r => latestSalesMap.value[r.name] || '—' },
   { label: '备注', prop: 'remark' }
 ]
 
