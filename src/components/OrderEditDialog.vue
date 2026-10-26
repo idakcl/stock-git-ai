@@ -158,6 +158,7 @@
         <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
         <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
         <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
+        <span v-if="hasDiscount" class="discount discounted">折后金额 ¥{{ discountedTotal.toFixed(2) }}</span>
         <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
       </div>
     </div>
@@ -333,6 +334,10 @@ const discountAmount = computed(() => Math.max(0, round2(totalAmount.value * (1 
 function addRate() { form.discountRates.push(1) }
 function removeRate(i) { form.discountRates.splice(i, 1) }
 const dueTotal = computed(() => Math.max(0, round2(totalAmount.value * effRate.value) - Number(form.discount || 0)))
+// 折后金额＝应用全部折扣后、未扣优惠前的金额（合计 × 整单等效折扣率）；与应收/应付(再扣优惠)区分展示
+const discountedTotal = computed(() => round2(totalAmount.value * effRate.value))
+// 是否有折扣（整单折扣链或单项折扣），用于控制「折后金额」展示
+const hasDiscount = computed(() => (form.discountRates || []).filter(r => Number(r) > 0).length > 0 || lineDiscountSum.value > 0)
 const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
 
 // 未付/未收为 0（且本单有金额）时自动标记「结清」：状态与实付金额保持一致，
@@ -505,8 +510,14 @@ async function doSave() {
     entry[sumField.value] = round2(cashNew + depositFromTotal)
     form.depositPay = depositFromTotal
   }
-  // 红线校验：结清状态下未付款必须为 0（按金额判定，与结算标签无关；容忍半分钱以内的浮点尘）
-  const debtAtSave = isPurchase.value ? payableOf(entry) : receivableOf(entry)
+  // 红线校验①：实付/实收合计不得超过应付/应收总额（折后总价），超额保存无意义（多付部分请走「收款/付款」弹窗转预存）
+  const paidAtSave = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
+  const dueAtSave = isPurchase.value ? payableOf(entry) : receivableOf(entry)
+  if (paidAtSave > dueAtSave + 0.005) {
+    return ElMessage.error(`实${payWord.value}金额不能超过应付/应收总额 ¥${dueAtSave.toFixed(2)}（当前实${payWord.value} ¥${paidAtSave.toFixed(2)}）。请调低「实${payWord.value}金额」或减少抵扣。`)
+  }
+  // 红线校验②：结清状态下未付款必须为 0（按金额判定，与结算标签无关；容忍半分钱以内的浮点尘）
+  const debtAtSave = dueAtSave
   if (form.settle === '结清' && debtAtSave > 0.005) {
     return ElMessage.error(`「结清」状态下未付款必须为 0，但当前仍有未付款 ¥${debtAtSave.toFixed(2)}。请调高「实${payWord.value}金额」或「整单优惠金额」后再保存。`)
   }

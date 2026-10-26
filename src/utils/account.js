@@ -84,6 +84,15 @@ export function discountAmountOf(order) {
   return Math.max(0, round2(total * (1 - rate)))
 }
 
+// 折后金额（应用全部折扣后、未扣优惠前的金额）＝ 合计 × 整单等效折扣率。
+// 与「折扣金额」「整单优惠金额」「应收/应付」的链路关系：
+//   原价合计 → 整单折扣链(×0.9×0.9×0.8) → 折后金额 → 整单优惠(抹零) → 应收/应付
+// 折后金额是中间量，不入库（可由 discountRates + total 还原）。无折扣时＝合计。
+export function discountedTotalOf(order) {
+  const total = Number(order?.total || 0)
+  return round2(total * effectiveRateOf(order))
+}
+
 // 结清模式「实收/抵扣/优惠」平衡：在保持未付款=0 的前提下，按锚点字段计算另一字段。
 // 这是录入弹窗「以用户手填金额为最优先基准」的唯一计算入口，纯函数便于单测。
 //   anchor='paid' | 'deposit'（实收或抵扣为基准）→ 优惠金额 = 毛额 − 实收合计

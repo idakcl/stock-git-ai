@@ -27,6 +27,7 @@
         <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
         <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
+        <span v-if="hasDiscount">折后金额：¥ {{ discountedTotal.toFixed(2) }}</span>
         <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0">（抹零优惠，未实际收款）</template></span>
         <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实收：¥ {{ receivedSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
@@ -120,7 +121,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2, discountRatesTextOf, discountAmountOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -156,6 +157,9 @@ const customerCodeMap = computed(() => {
 const orderRate = computed(() => discountRatesTextOf(sale.value))
 // 整单折扣金额（人民币绝对值）：折扣链连乘后从合计减掉的钱，与「优惠」并列构成应收减项（折扣金额与优惠金额联动）
 const discountAmount = computed(() => discountAmountOf(sale.value))
+// 折后金额（应用全部折扣后、未扣优惠前）：合计 × 整单等效折扣率；与应收(再扣优惠)区分
+const discountedTotal = computed(() => discountedTotalOf(sale.value))
+const hasDiscount = computed(() => Boolean(orderRate.value) || lineDiscountSum.value > 0)
 
 // 应收(合计−优惠) 与 未收(应收−累计实收)，与全站统一规则一致
 const dueAmount = computed(() => grossOf(sale.value))
@@ -274,6 +278,7 @@ const docHeaderFields = computed(() => {
   ]
   if (lineDiscountSum.value > 0) fields.push(['原价合计', `¥${grossSum.value.toFixed(2)}（单项折扣 -¥${lineDiscountSum.value.toFixed(2)}）`])
   if (orderRate.value) fields.push(['整单折扣', `${orderRate.value}（减 ¥${discountAmount.value.toFixed(2)}）`])
+  if (hasDiscount.value) fields.push(['折后金额', `¥${discountedTotal.value.toFixed(2)}`])
   fields.push(
     ['优惠', `¥${Number(o.discount || 0).toFixed(2)}${Number(o.discount || 0) > 0 ? '（抹零优惠，未实际收款）' : ''}`],
     ['应收', `¥${dueAmount.value.toFixed(2)}`],
