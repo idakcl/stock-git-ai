@@ -265,17 +265,46 @@ async function save() {
 }
 async function remove(row) {
   if (saving.value) return
+  // 预删除校验：预存款余额 / 未结应收 / 名下销售单
+  const dep = round2(depositMap.value[row.code] || 0)
+  const recv = round2(receivableMap.value[row.name] || 0)
+  const saleCount = (sales.value || []).filter(s => s.customer === row.name).length
+  // 1) 预存款余额 > 0：硬性拦截，避免钱蒸发（必须去详情页清零/提现）
+  if (dep > 0.005) {
+    ElMessage.error(`该客户还有预存款余额 ¥${dep.toFixed(2)}，请先到客户详情页提现/清零后再删除，否则余额将丢失`)
+    return
+  }
+  // 2) 有未结应收或名下有销售单：明确告知后果，二次确认
+  let msg = `确定删除客户「${row.name}」?`
+  const tips = []
+  if (saleCount > 0) tips.push(`名下 ${saleCount} 张销售单将标记为「(已删除客户) ${row.name}」，仍可查询但不再计入该客户档案`)
+  if (recv > 0.005) tips.push(`仍有未结应收 ¥${recv.toFixed(2)}`)
+  if (tips.length) msg += ` 注意：${tips.join('；')}。`
   try {
-    await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(msg, '删除客户', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
   } catch { return }
   saving.value = true
   try {
-    const snapshot = [...list.value]
+    const snapshotList = [...list.value]
+    // 3) 先标记孤儿销售单（改名），仅当有孤儿时写 sales
+    const orphans = (sales.value || []).filter(s => s.customer === row.name)
+    let snapshotSales = null
+    if (orphans.length) {
+      snapshotSales = [...(sales.value || [])]
+      const newSales = (sales.value || []).map(s => s.customer === row.name ? { ...s, customer: `(已删除客户) ${row.name}` } : s)
+      try { await api.saveSales(newSales) } catch (e) {
+        ElMessage.error(`标记历史销售单失败：${e.message || '网络异常'}，已取消删除`)
+        return
+      }
+      sales.value = newSales
+    }
+    // 再删除客户档案（破坏性操作放最后，失败可回滚订单改名）
     list.value = list.value.filter(i => i.code !== row.code)
     try {
       await api.saveCustomers(list.value)
     } catch (e) {
-      list.value = snapshot
+      if (snapshotSales) { await api.saveSales(snapshotSales).catch(() => {}); sales.value = snapshotSales }
+      list.value = snapshotList
       ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
       return
     }

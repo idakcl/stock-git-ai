@@ -247,17 +247,46 @@ async function save() {
 }
 async function remove(row) {
   if (saving.value) return
+  // 预删除校验：预付款余额 / 未结应付 / 名下采购单
+  const adv = round2(advanceMap.value[row.code] || 0)
+  const pay = round2(payableMap.value[row.name] || 0)
+  const purchaseCount = (purchases.value || []).filter(p => p.supplier === row.name).length
+  // 1) 预付款余额 > 0：硬性拦截，避免钱蒸发（必须去详情页清零/提现）
+  if (adv > 0.005) {
+    ElMessage.error(`该供应商还有预付款余额 ¥${adv.toFixed(2)}，请先到供应商详情页提现/清零后再删除，否则余额将丢失`)
+    return
+  }
+  // 2) 有未结应付或名下有采购单：明确告知后果，二次确认
+  let msg = `确定删除供应商「${row.name}」?`
+  const tips = []
+  if (purchaseCount > 0) tips.push(`名下 ${purchaseCount} 张采购单将标记为「(已删除供应商) ${row.name}」，仍可查询但不再计入该供应商档案`)
+  if (pay > 0.005) tips.push(`仍有未结应付 ¥${pay.toFixed(2)}`)
+  if (tips.length) msg += ` 注意：${tips.join('；')}。`
   try {
-    await ElMessageBox.confirm(`确定删除 ${row.name}?`, '提示', { type: 'warning' })
+    await ElMessageBox.confirm(msg, '删除供应商', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
   } catch { return }
   saving.value = true
   try {
-    const snapshot = [...list.value]
+    const snapshotList = [...list.value]
+    // 3) 先标记孤儿采购单（改名），仅当有孤儿时写 purchases
+    const orphans = (purchases.value || []).filter(p => p.supplier === row.name)
+    let snapshotPurchases = null
+    if (orphans.length) {
+      snapshotPurchases = [...(purchases.value || [])]
+      const newPurchases = (purchases.value || []).map(p => p.supplier === row.name ? { ...p, supplier: `(已删除供应商) ${row.name}` } : p)
+      try { await api.savePurchases(newPurchases) } catch (e) {
+        ElMessage.error(`标记历史采购单失败：${e.message || '网络异常'}，已取消删除`)
+        return
+      }
+      purchases.value = newPurchases
+    }
+    // 再删除供应商档案（破坏性操作放最后，失败可回滚订单改名）
     list.value = list.value.filter(i => i.code !== row.code)
     try {
       await api.saveSuppliers(list.value)
     } catch (e) {
-      list.value = snapshot
+      if (snapshotPurchases) { await api.savePurchases(snapshotPurchases).catch(() => {}); purchases.value = snapshotPurchases }
+      list.value = snapshotList
       ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
       return
     }
