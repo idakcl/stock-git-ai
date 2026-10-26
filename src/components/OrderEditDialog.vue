@@ -56,8 +56,19 @@
         <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
       </el-form-item>
       <el-form-item label="整单折扣">
-        <el-input-number v-model="form.discountRate" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:100%" />
-        <div class="calc-hint" style="margin-top:4px">折扣率：1＝不打折，0.9＝九折；按比例作用于单据合计（在「整单优惠金额」之前）</div>
+        <!-- 多级折扣链：每级一个折扣率(0~1) 连乘生效，支持「打完9折再打9折、再打8折」这类逐级叠加 -->
+        <div class="rate-chain">
+          <div v-for="(r, i) in form.discountRates" :key="i" class="rate-row">
+            <span class="rate-idx">第 {{ i + 1 }} 级</span>
+            <el-input-number v-model="form.discountRates[i]" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:120px" />
+            <el-button link type="danger" size="small" @click="removeRate(i)">删除</el-button>
+          </div>
+          <el-button size="small" type="primary" plain @click="addRate">+ 添加一级折扣</el-button>
+        </div>
+        <div class="calc-hint" style="margin-top:4px">
+          支持多级折扣：每级 0~1（1＝不打折，0.9＝九折），各级连乘。例如 0.9 → 0.9 → 0.8 等效 6.5 折；按比例作用于单据合计（在「整单优惠金额」之前）。全部删空即不打折。
+        </div>
+        <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
       </el-form-item>
       <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只读汇总，改流水走「付款/收款」弹窗 -->
       <el-form-item :label="`实${payWord}金额`">
@@ -137,9 +148,9 @@
     <div style="margin-top:12px;text-align:right">
       <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
       <span class="calc-hint" style="margin-left:12px">{{ dueWord }} {{ dueTotal.toFixed(2) }} · 未{{ payWord }} {{ unpaidAmount.toFixed(2) }}</span>
-      <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || effRate !== 1" class="calc-detail">
+      <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || orderRateText" class="calc-detail">
         <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
-        <span v-if="effRate !== 1" class="discount">整单折扣 ×{{ effRate.toFixed(2) }}</span>
+        <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}</span>
         <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
         <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
       </div>
@@ -157,7 +168,7 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf } from '../utils/account'
+import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 
 const props = defineProps({
@@ -201,7 +212,7 @@ const photoKey = ref(0)
 const editingId = ref('')
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
-const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRate:1, paidNow:0, depositPay:0, lines:[] })
+const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRates:[], paidNow:0, depositPay:0, lines:[] })
 
 // 打开时整体重建表单：编辑回填原单（行折扣走 normalizeRate，兼容早期金额口径的旧数据）
 watch(() => props.modelValue, (open) => {
@@ -216,7 +227,11 @@ watch(() => props.modelValue, (open) => {
     form.settle = row.settle || '挂账'
     form.photos = [...(row.photos || [])]
     form.discount = Number(row.discount || 0)
-    form.discountRate = Number(row.discountRate || 1)
+    // 多级折扣回填：优先 discountRates 数组；旧单只有标量 discountRate 时转为单级链；都没有则不打折
+    const r = row
+    if (Array.isArray(r.discountRates) && r.discountRates.length) form.discountRates = r.discountRates.map(Number)
+    else if (Number(r.discountRate) > 0) form.discountRates = [Number(r.discountRate)]
+    else form.discountRates = []
     form.paidNow = 0
     form.depositPay = 0
     form.lines = (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
@@ -228,7 +243,7 @@ watch(() => props.modelValue, (open) => {
     form.settle = '挂账'
     form.photos = []
     form.discount = 0
-    form.discountRate = 1
+    form.discountRates = []
     form.paidNow = 0
     form.depositPay = 0
     form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
@@ -295,7 +310,17 @@ const grossAmount = computed(() => form.lines.reduce((s, l) => s + lineGross(l),
 const lineDiscountSum = computed(() => form.lines.reduce((s, l) => s + lineDiscount(l), 0))
 // 合计＝折后小计之和（已含单项折扣）；应付/应收 = 合计 × 整单折扣率 − 整单优惠金额
 const totalAmount = computed(() => form.lines.reduce((s, l) => s + lineNet(l), 0))
-const effRate = computed(() => { const r = Number(form.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
+// 整单等效折扣率：discountRates 连乘；无折扣返回 1（与 account.effectiveRateOf 口径一致）
+const effRate = computed(() => {
+  const rates = (form.discountRates || []).map(Number).filter(r => Number.isFinite(r) && r > 0)
+  if (!rates.length) return 1
+  return rates.reduce((a, b) => a * b, 1)
+})
+// 折扣链展示文本（单级 ×0.90 / 多级 ×0.90 ×0.90 ×0.80 = ×0.65 / 无折扣空串）
+const orderRateText = computed(() => discountRatesTextOf({ discountRates: form.discountRates }))
+// 多级折扣：添加 / 删除一级（可删到空＝不打折）
+function addRate() { form.discountRates.push(1) }
+function removeRate(i) { form.discountRates.splice(i, 1) }
 const dueTotal = computed(() => Math.max(0, round2(totalAmount.value * effRate.value) - Number(form.discount || 0)))
 const unpaidAmount = computed(() => Math.max(0, dueTotal.value - sumPaid.value))
 
@@ -326,7 +351,7 @@ watch(() => form.depositPay, (v) => {
 //   改实付/抵扣 → 优惠自动补差 = 毛应收 − 实付合计
 //   改优惠      → 实付自动补差 = 毛应收 − 优惠 − 抵扣
 // 毛应收 = 合计×整单折扣率（不含优惠金额）。两个 watch 互相收敛：一方补到目标值后另一方不再触发
-watch([() => form.settle, () => form.paidNow, () => form.depositPay, () => form.discountRate, totalAmount], () => {
+watch([() => form.settle, () => form.paidNow, () => form.depositPay, () => form.discountRates.join('|'), totalAmount], () => {
   if (editingId.value || form.settle !== '结清') return
   const gross = round2(totalAmount.value * effRate.value)
   const paid = round2(Number(form.paidNow || 0) + Number(form.depositPay || 0))
@@ -435,7 +460,8 @@ async function doSave() {
     settle: form.settle || '挂账',
     photos: [...(form.photos || [])],
     discount: discountVal,
-    discountRate: effRate.value,
+    discountRates: (form.discountRates || []).map(Number).filter(r => Number.isFinite(r) && r > 0),
+    discountRate: round2(effRate.value),
     items: resolved,
     total: amount
   }
@@ -453,8 +479,8 @@ async function doSave() {
     // 结清时把未收差额计入整单优惠（核销尾款），而不是补记一笔收款——
     // 避免账面「已收」虚高；应收也相应减少，账户自然平账
     const unpaid = isPurchase.value
-      ? payableOf({ total: amount, discount: discountVal, discountRate: effRate.value, paid: paidSumOf(entry) })
-      : receivableOf({ total: amount, discount: discountVal, discountRate: effRate.value, received: receivedSumOf(entry) })
+      ? payableOf({ total: amount, discount: discountVal, discountRates: entry.discountRates, paid: paidSumOf(entry) })
+      : receivableOf({ total: amount, discount: discountVal, discountRates: entry.discountRates, received: receivedSumOf(entry) })
     if (unpaid > 0) entry.discount = (Number(entry.discount) || 0) + unpaid
   }
   entry[sumField.value] = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
@@ -493,6 +519,10 @@ async function save() {
   .lines-scroll :deep(.el-table .el-input__wrapper),
   .lines-scroll :deep(.el-table .el-select__wrapper){padding-left:6px;padding-right:6px;}
 }
+.rate-chain{display:flex;flex-direction:column;gap:6px;}
+.rate-row{display:flex;align-items:center;gap:8px;}
+.rate-idx{color:var(--text-secondary);font-size:var(--fs-sub);min-width:44px;}
+.rate-eff{margin-top:2px;color:var(--color-success);font-size:var(--fs-sub);font-weight:600;}
 .calc-detail{display:flex;justify-content:flex-end;gap:16px;flex-wrap:wrap;margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);}
 .line-net{font-variant-numeric:tabular-nums;}
 .settle-hint{margin-top:6px;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.5;}

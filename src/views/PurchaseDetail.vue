@@ -26,7 +26,7 @@
         <span>日期：{{ purchase.date }}</span>
         <span>合计：¥ {{ Number(purchase.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
-        <span v-if="orderRate !== 1">整单折扣：×{{ orderRate.toFixed(2) }}</span>
+        <span v-if="orderRate">整单折扣：{{ orderRate }}</span>
         <span>优惠：¥ {{ Number(purchase.discount || 0).toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0">（抹零优惠，未实际付款）</template></span>
         <span>应付：¥ {{ dueAmount.toFixed(2) }}</span>
         <span>实付：¥ {{ paidSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
@@ -120,7 +120,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2 } from '../utils/account'
+import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2, discountRatesTextOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -153,8 +153,8 @@ const supplierCodeMap = computed(() => {
   ;(suppliers.value || []).forEach(s => { if (s && s.name) m[s.name] = s.code })
   return m
 })
-// 整单折扣率（1＝不打折）：与 account.grossOf 口径一致
-const orderRate = computed(() => { const r = Number(purchase.value.discountRate); return Number.isFinite(r) && r > 0 ? r : 1 })
+// 整单折扣链文本（单级 ×0.90 / 多级 ×0.90 ×0.90 ×0.80 = ×0.65 / 无折扣空串）：与 account 口径一致
+const orderRate = computed(() => discountRatesTextOf(purchase.value))
 
 // 应付(合计−优惠) 与 未付(应付−累计实付)，与全站统一规则一致
 const dueAmount = computed(() => grossOf(purchase.value))
@@ -273,7 +273,7 @@ const docHeaderFields = computed(() => {
     ['合计', `¥${Number(o.total || 0).toFixed(2)}`]
   ]
   if (lineDiscountSum.value > 0) fields.push(['原价合计', `¥${grossSum.value.toFixed(2)}（单项折扣 -¥${lineDiscountSum.value.toFixed(2)}）`])
-  if (orderRate.value !== 1) fields.push(['整单折扣', `×${orderRate.value.toFixed(2)}`])
+  if (orderRate.value) fields.push(['整单折扣', orderRate.value])
   fields.push(
     ['优惠', `¥${Number(o.discount || 0).toFixed(2)}${Number(o.discount || 0) > 0 ? '（抹零优惠，未实际付款）' : ''}`],
     ['应付', `¥${dueAmount.value.toFixed(2)}`],

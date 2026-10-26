@@ -39,15 +39,50 @@ export const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 10
 // 比率保留 4 位小数（0.01% 粒度）：避免长串小数，也保证换算后金额分文不差
 export const round4 = (v) => Math.round((Number(v) + Number.EPSILON) * 10000) / 10000
 
-// 单据最终应收/应付金额（合计 × 整单折扣率 − 整单优惠金额）
-// discountRate：整单折扣率，1＝不打折；缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
+// ---- 整单折扣：支持「多级折扣链」 ----
+// 数据结构：优先用数组 discountRates（如 [0.9, 0.9, 0.8] 表示先打9折、再打9折、再打8折），
+// 回退旧标量 discountRate（单级折扣）。无折扣 / 缺失 / 非法一律按 1 处理。
+// 兼容旧单据：早期数据只有标量 discountRate，仍按单级折扣生效，不会丢折扣。
+// 数组元素必须是 (0,1] 区间的数值；越界或非法一律剔除，避免脏数据污染乘积。
+
+// 规范化折扣链：返回干净的数值数组（剔除非法项）。旧标量 discountRate 视为单级链。
+export function discountRatesOf(order) {
+  const rates = order?.discountRates
+  if (Array.isArray(rates) && rates.length) {
+    const valid = rates.map(Number).filter(r => Number.isFinite(r) && r > 0 && r <= 1)
+    return valid
+  }
+  const r = Number(order?.discountRate)
+  if (Number.isFinite(r) && r > 0 && r <= 1) return [r]
+  return []
+}
+
+// 整单等效折扣率：折扣链连乘；无折扣返回 1。1＝不打折。
+export function effectiveRateOf(order) {
+  const rates = discountRatesOf(order)
+  if (!rates.length) return 1
+  return rates.reduce((a, b) => a * b, 1)
+}
+
+// 折扣链展示文本：单级 "×0.90"；多级 "×0.90 ×0.90 ×0.80 = ×0.65"（含等效）；
+// 无折扣返回空串（调用方据此决定是否展示该字段）。
+export function discountRatesTextOf(order) {
+  const rates = discountRatesOf(order)
+  if (!rates.length) return ''
+  const parts = rates.map(r => `×${round4(r).toFixed(2)}`)
+  if (rates.length === 1) return parts[0]
+  return `${parts.join(' ')} = ×${round2(effectiveRateOf(order)).toFixed(2)}`
+}
+
+// 单据最终应收/应付金额（合计 × 整单等效折扣率 − 整单优惠金额）
+// 整单折扣率既支持多级折扣链 discountRates，也兼容旧单标量 discountRate（见 discountRatesOf）。
+// 缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
 // 末位 round2：total×rate 与 discount 相减会产生 1e-15 级浮点尘（如 9.55−4.55=5.000000000000001），
 // 不收敛会让未收=尘>0，统计卡误判「有未结清」、 badge 多数一笔
 export function grossOf(order) {
   const total = Number(order?.total || 0)
-  const rate = Number(order?.discountRate)
-  const effective = Number.isFinite(rate) && rate > 0 ? rate : 1
-  return round2(Math.max(0, round2(total * effective) - Number(order?.discount || 0)))
+  const rate = effectiveRateOf(order)
+  return round2(Math.max(0, round2(total * rate) - Number(order?.discount || 0)))
 }
 
 export function receivableOf(sale) {
