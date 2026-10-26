@@ -40,8 +40,8 @@
           <el-radio-button label="挂账" />
           <el-radio-button label="结清" />
         </el-radio-group>
-        <div v-if="form.settle === '结清' && !editingId" class="settle-hint">
-          已选「结清」：「实{{ payWord }}金额」与「整单优惠金额」实时联动，未{{ payWord }}的差额自动计入优惠，保存后本单标记结清（不虚增已{{ payWord }}）
+        <div v-if="form.settle === '结清'" class="settle-hint">
+          已选「结清」：未{{ payWord }}必须为 0。你手填的「实{{ payWord }}金额」「整单优惠金额」优先，另一项自动补差；保存时会校验未{{ payWord }}是否为 0。
         </div>
         <div v-else-if="!editingId && dueTotal > 0" class="settle-hint">
           实{{ payWord }}金额（含{{ depositLabel }}抵扣）填满本单金额、未{{ payWord }}为 0 时，结算将自动标记为「结清」
@@ -53,7 +53,7 @@
         <PhotoUpload ref="photoUpload" :key="photoKey" v-model="form.photos" />
       </el-form-item>
       <el-form-item label="整单优惠金额">
-        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" />
+        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" @input="reconcile('discount')" />
       </el-form-item>
       <el-form-item label="整单折扣">
         <!-- 多级折扣链：每级一个折扣率(0~1) 连乘生效，支持「打完9折再打9折、再打8折」这类逐级叠加 -->
@@ -70,22 +70,28 @@
         </div>
         <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
       </el-form-item>
-      <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只读汇总，改流水走「付款/收款」弹窗 -->
+      <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：现金实收/实付可直接改（抵扣部分沿用原单，改抵扣走「付款/收款」弹窗） -->
       <el-form-item :label="`实${payWord}金额`">
         <template v-if="editingId">
-          <div class="paid-summary">
-            <span>累计实{{ payWord }}：<b>{{ sumPaid.toFixed(2) }}</b></span>
-            <span v-if="payCount > 0">（{{ payCount }} 笔，见「{{ payWord }}款」流水）</span>
-            <span v-else class="hint">未{{ payWord }}款，可在列表点「{{ payWord }}款」分多笔记录</span>
+          <div class="pay-now-row">
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
+            <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
+          </div>
+          <div v-if="Number(form.depositPay) > 0" class="pay-now-row" style="margin-top:6px">
+            <el-input-number :model-value="Number(form.depositPay)" :min="0" :precision="2" :controls="false" style="width:150px" disabled />
+            <span class="pay-now-hint">已用{{ depositLabel }}抵扣 ¥{{ Number(form.depositPay).toFixed(2) }}（改抵扣请走「{{ payWord }}款」弹窗）</span>
+          </div>
+          <div class="calc-hint" style="margin-top:4px">
+            编辑单可直接修改现金实{{ payWord }}金额（抵扣部分沿用原单，改抵扣请走「{{ payWord }}款」弹窗）；选「结清」时与优惠金额联动，未付款必须为 0。
           </div>
         </template>
         <template v-else>
           <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额（现金）`" />
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
             <span class="pay-now-hint">现金{{ payWord }}款</span>
           </div>
           <div class="pay-now-row" style="margin-top:6px">
-            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" :placeholder="`${depositLabel}抵扣金额`" />
+            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
             <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
             <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
           </div>
@@ -94,7 +100,7 @@
             <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
           </div>
           <div class="calc-hint" style="margin-top:4px">
-            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；{{ depositLabel }}可全额或手动填部分抵扣（不超过本单未{{ payWord }}金额）；选「结清」时「实{{ payWord }}金额」与「整单优惠金额」自动联动补差。
+            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；{{ depositLabel }}可全额或手动填部分抵扣（不超过本单未{{ payWord }}金额）；选「结清」时「实{{ payWord }}金额」「整单优惠金额」实时联动（你填的金额优先，其余自动补差），保存时校验未付款必须为 0。
           </div>
         </template>
       </el-form-item>
@@ -168,7 +174,7 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf } from '../utils/account'
+import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 
 const props = defineProps({
@@ -232,8 +238,11 @@ watch(() => props.modelValue, (open) => {
     if (Array.isArray(r.discountRates) && r.discountRates.length) form.discountRates = r.discountRates.map(Number)
     else if (Number(r.discountRate) > 0) form.discountRates = [Number(r.discountRate)]
     else form.discountRates = []
-    form.paidNow = 0
-    form.depositPay = 0
+    // 编辑单：现金实收/实付（paidNow）与已用抵扣（depositPay）分别回填；抵扣部分来自原单 fromDeposit 流水，改写时沿用、不重复扣减档案余额
+    const originPayments = ensurePayments(row, sumField.value)
+    const depositFromTotal = round2(originPayments.filter(p => p.fromDeposit).reduce((s, p) => s + Number(p.amount || 0), 0))
+    form.paidNow = Math.max(0, round2((isPurchase.value ? paidSumOf(row) : receivedSumOf(row)) - depositFromTotal))
+    form.depositPay = depositFromTotal
     form.lines = (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
   } else {
     editingId.value = ''
@@ -257,10 +266,8 @@ watch(() => props.modelValue, (open) => {
 // 编辑中的原始单据（用于展示累计实付/实收，实收实付不在表单里改，统一走流水）
 const editOrder = computed(() => (editingId.value ? (props.list || []).find(o => o.id === editingId.value) : null) || {})
 const payCount = computed(() => ensurePayments(editOrder.value, sumField.value).length)
-// 累计实付/实收：编辑单取原流水；新增单取本次填的「现金实付 + 预付款/预收款抵扣」
-const sumPaid = computed(() => editingId.value
-  ? (isPurchase.value ? paidSumOf(editOrder.value) : receivedSumOf(editOrder.value))
-  : round2(Number(form.paidNow || 0) + Number(form.depositPay || 0)))
+// 累计实付/实收（实时跟随表单）：编辑单取表单当前现金实付+抵扣（用户可直接改），新增单取本次填的「现金+抵扣」
+const sumPaid = computed(() => round2(Number(form.paidNow || 0) + Number(form.depositPay || 0)))
 
 // 预付款（采购）/ 预收款（销售）：当前所选往来单位的可用余额
 const depositLabel = computed(() => (isPurchase.value ? '预付款' : '预收款'))
@@ -345,29 +352,35 @@ const deductMax = computed(() => Math.max(0, round2(Math.min(
   depositAvailable.value
 ))))
 
-// 手动填的抵扣额不允许超过上限（el-input-number 的 :max 之外再兜底一道）
+// 手动填的抵扣额不允许超过上限（el-input-number 的 :max 之外再兜底一道）。编辑单的抵扣为只读（沿用原单已用预付款），不动它
 watch(() => form.depositPay, (v) => {
+  if (editingId.value) return
   const max = deductMax.value
   if (Number(v || 0) > max) form.depositPay = max
 })
 
-// 结清时「实付金额 ↔ 优惠金额」实时联动（仅新增单；编辑单改流水走付款/收款弹窗）：
-//   改实付/抵扣 → 优惠自动补差 = 毛应收 − 实付合计
-//   改优惠      → 实付自动补差 = 毛应收 − 优惠 − 抵扣
-// 毛应收 = 合计×整单折扣率（不含优惠金额）。两个 watch 互相收敛：一方补到目标值后另一方不再触发
-watch([() => form.settle, () => form.paidNow, () => form.depositPay, () => form.discountRates.join('|'), totalAmount], () => {
-  if (editingId.value || form.settle !== '结清') return
+// 结清模式联动：用户手填的金额优先，另一项自动补差，保持「未付款=0」（红线）。
+// 锚点 anchor：'paid'（实收为基准→优惠补差）/ 'deposit'（抵扣为基准→优惠补差）/ 'discount'（优惠为基准→实收补差）。
+// 仅结清模式生效；挂账模式三项独立、互不联动。计算入口统一走 account.settleBalance，便于单测。
+const settleAnchor = ref('paid')
+function reconcile(anchor) {
+  if (anchor) settleAnchor.value = anchor
+  if (form.settle !== '结清') return
   const gross = round2(totalAmount.value * effRate.value)
-  const paid = round2(Number(form.paidNow || 0) + Number(form.depositPay || 0))
-  const disc = Math.max(0, round2(gross - paid))
-  if (disc !== Number(form.discount || 0)) form.discount = disc
-})
-watch(() => form.discount, () => {
-  if (editingId.value || form.settle !== '结清') return
-  const gross = round2(totalAmount.value * effRate.value)
-  const targetPaid = Math.max(0, round2(gross - Number(form.discount || 0) - Number(form.depositPay || 0)))
-  if (targetPaid !== Number(form.paidNow || 0)) form.paidNow = targetPaid
-})
+  const { discount: d, paidNow: p } = settleBalance({
+    gross,
+    paidNow: form.paidNow,
+    depositPay: form.depositPay,
+    discount: form.discount,
+    anchor: settleAnchor.value
+  })
+  if (Number(form.discount || 0) !== d) form.discount = d
+  if (Number(form.paidNow || 0) !== p) form.paidNow = p
+}
+// 切换为结清：以当前实收为基准，优惠自动补差（未付款归 0）
+watch(() => form.settle, (v) => { if (v === '结清') { settleAnchor.value = 'paid'; reconcile() } })
+// 改合计 / 整单折扣率（毛额变化）时按当前锚点重新平衡（不切换基准）
+watch([totalAmount, () => form.discountRates.join('|')], () => reconcile())
 
 // ---- 销售侧单价策略：客户类别 → 商品分级售价字段 ----
 // 客户类别 → 商品上的对应分级售价字段
@@ -455,7 +468,9 @@ async function doSave() {
   const discountVal = Number(form.discount || 0)
   const isEdit = !!editingId.value
   const origin = isEdit ? (props.list || []).find(o => o.id === editingId.value) : null
-  // 收付款统一走 payments 流水（编辑时保留原流水）；标记结清时自动补一笔差额收/付款，保证状态与金额一致
+  // 收付款统一走 payments 流水。新增单：现金实付 + 预付款/预收款抵扣直接落成流水；
+  // 编辑单：现金实收/实付由表单 paidNow 决定，抵扣部分沿用原单已用预付款（fromDeposit 流水原样保留，避免重复扣减档案余额）。
+  // 结清时的「未付款=0」由录入时的实时联动（settleBalance）保证，保存前再做一次红线校验。
   let entry = {
     ...(origin || {}),
     [partyField.value]: form.party,
@@ -478,14 +493,22 @@ async function doSave() {
     if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `实${payWord.value}`, time: now })
     if (depositPay > 0) payments.push({ date: form.date, amount: depositPay, remark: `用${depositLabel.value}抵扣`, fromDeposit: true, time: now })
     entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments, [sumField.value]: round2(paidNow + depositPay) }
+  } else {
+    // 编辑单：实收/实付（现金部分）直接由表单 paidNow 决定；抵扣部分沿用原单已用预付款（fromDeposit 流水原样保留，避免重复扣减档案余额）
+    const originPayments = ensurePayments(origin, sumField.value)
+    const depositFrom = originPayments.filter(p => p.fromDeposit)
+    const depositFromTotal = round2(depositFrom.reduce((s, p) => s + Number(p.amount || 0), 0))
+    const cashNew = Math.max(0, round2(Number(form.paidNow || 0)))
+    const rebuilt = [...depositFrom]
+    if (cashNew > 0) rebuilt.push({ date: form.date, amount: cashNew, remark: `实${payWord.value}`, time: new Date().toISOString() })
+    entry.payments = rebuilt
+    entry[sumField.value] = round2(cashNew + depositFromTotal)
+    form.depositPay = depositFromTotal
   }
-  if (form.settle === '结清') {
-    // 结清时把未收差额计入整单优惠（核销尾款），而不是补记一笔收款——
-    // 避免账面「已收」虚高；应收也相应减少，账户自然平账
-    const unpaid = isPurchase.value
-      ? payableOf({ total: amount, discount: discountVal, discountRates: entry.discountRates, paid: paidSumOf(entry) })
-      : receivableOf({ total: amount, discount: discountVal, discountRates: entry.discountRates, received: receivedSumOf(entry) })
-    if (unpaid > 0) entry.discount = (Number(entry.discount) || 0) + unpaid
+  // 红线校验：结清状态下未付款必须为 0（按金额判定，与结算标签无关；容忍半分钱以内的浮点尘）
+  const debtAtSave = isPurchase.value ? payableOf(entry) : receivableOf(entry)
+  if (form.settle === '结清' && debtAtSave > 0.005) {
+    return ElMessage.error(`「结清」状态下未付款必须为 0，但当前仍有未付款 ¥${debtAtSave.toFixed(2)}。请调高「实${payWord.value}金额」或「整单优惠金额」后再保存。`)
   }
   entry[sumField.value] = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
   // 用预付款/预收款抵扣的部分：随保存一并交父组件从对应档案余额扣减（幂等，按订单 id 标记）

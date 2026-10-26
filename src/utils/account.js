@@ -84,6 +84,26 @@ export function discountAmountOf(order) {
   return Math.max(0, round2(total * (1 - rate)))
 }
 
+// 结清模式「实收/抵扣/优惠」平衡：在保持未付款=0 的前提下，按锚点字段计算另一字段。
+// 这是录入弹窗「以用户手填金额为最优先基准」的唯一计算入口，纯函数便于单测。
+//   anchor='paid' | 'deposit'（实收或抵扣为基准）→ 优惠金额 = 毛额 − 实收合计
+//   anchor='discount'        （优惠为基准）        → 实收金额 = 毛额 − 优惠 − 抵扣
+// 毛额 gross ＝ 合计 × 整单等效折扣率（不含整单优惠金额）。
+// 返回 { discount, paidNow }：锚点字段原样返回、另一字段为平衡后值，全部 ≥ 0；
+// 任一输入非法按 0 处理。整单折扣链已在 gross 处连乘完毕，此处只看金额。
+// 红线约束：结清时调用方必须保证返回后 未付款=0；超额（实收>毛额）受 ≥0 夹取，
+// 余额由未付款=0（max(0,...)）吸收，不在此处制造欠款。
+export function settleBalance({ gross = 0, paidNow = 0, depositPay = 0, discount = 0, anchor = 'paid' } = {}) {
+  const g = Math.max(0, round2(Number(gross) || 0))
+  const dep = Math.max(0, round2(Number(depositPay) || 0))
+  if (anchor === 'discount') {
+    const paid = Math.max(0, round2(g - round2(Number(discount) || 0) - dep))
+    return { discount: Math.max(0, round2(Number(discount) || 0)), paidNow: paid }
+  }
+  const paid = Math.max(0, round2(Number(paidNow) || 0) + dep)
+  return { discount: Math.max(0, round2(g - paid)), paidNow: Math.max(0, round2(Number(paidNow) || 0)) }
+}
+
 // 单据最终应收/应付金额（合计 × 整单等效折扣率 − 整单优惠金额）
 // 整单折扣率既支持多级折扣链 discountRates，也兼容旧单标量 discountRate（见 discountRatesOf）。
 // 缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
