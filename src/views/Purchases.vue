@@ -424,8 +424,8 @@ async function remove(row) {
   supplierOptions.value = sup
   list.value = p
   itemOptions.value = it
-  // 删除单据时同步清掉其超付转存/抵扣标记的预付款流水，避免删除后余额残留幽灵流水
-  const sup2 = await removeDepositFlows(api, 'payable', row.supplier, row.id).catch(() => null)
+  // 删除单据时同步清掉其超付转存/抵扣标记的预付款流水（含历史无标记抵扣的补回），避免删除后余额残留幽灵流水或预付款丢失
+  const sup2 = await removeDepositFlows(api, 'payable', row.supplier, row.id, row).catch(() => null)
   if (sup2) supplierOptions.value = sup2
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
   if (page.value > pageCount.value) page.value = pageCount.value

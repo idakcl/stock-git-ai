@@ -384,8 +384,8 @@ async function remove(row) {
   const [s, it] = await Promise.all([api.getSales(), api.getItems()])
   list.value = s
   itemOptions.value = it
-  // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水，避免删除后余额残留幽灵流水
-  const cu2 = await removeDepositFlows(api, 'receivable', row.customer, row.id).catch(() => null)
+  // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水（含历史无标记抵扣的补回），避免删除后余额残留幽灵流水或预存款丢失
+  const cu2 = await removeDepositFlows(api, 'receivable', row.customer, row.id, row).catch(() => null)
   if (cu2) customerOptions.value = cu2
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
   if (page.value > pageCount.value) page.value = pageCount.value
