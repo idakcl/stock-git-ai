@@ -74,6 +74,16 @@ export function discountRatesTextOf(order) {
   return `${parts.join(' ')} = ×${round2(effectiveRateOf(order)).toFixed(2)}`
 }
 
+// 整单折扣对应的「折扣金额」（人民币绝对值）：折扣链连乘后从合计里减掉的钱
+// = 合计 × (1 − 等效折扣率)。与折扣率文本并列展示，让用户直观看到「这折减了多少钱」，
+// 并与「整单优惠金额」共同构成应收/应付的减项（二者联动：改折扣率→折扣金额与应收同步更新）。
+// 不入库：可由 discountRates + total 还原，避免冗余字段与源数据失同步。
+export function discountAmountOf(order) {
+  const total = Number(order?.total || 0)
+  const rate = effectiveRateOf(order)
+  return Math.max(0, round2(total * (1 - rate)))
+}
+
 // 单据最终应收/应付金额（合计 × 整单等效折扣率 − 整单优惠金额）
 // 整单折扣率既支持多级折扣链 discountRates，也兼容旧单标量 discountRate（见 discountRatesOf）。
 // 缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变

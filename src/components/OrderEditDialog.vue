@@ -150,7 +150,7 @@
       <span class="calc-hint" style="margin-left:12px">{{ dueWord }} {{ dueTotal.toFixed(2) }} · 未{{ payWord }} {{ unpaidAmount.toFixed(2) }}</span>
       <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || orderRateText" class="calc-detail">
         <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
-        <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}</span>
+        <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
         <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
         <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
       </div>
@@ -318,6 +318,10 @@ const effRate = computed(() => {
 })
 // 折扣链展示文本（单级 ×0.90 / 多级 ×0.90 ×0.90 ×0.80 = ×0.65 / 无折扣空串）
 const orderRateText = computed(() => discountRatesTextOf({ discountRates: form.discountRates }))
+// 整单折扣金额（人民币绝对值）：折扣链连乘后从合计里减掉的钱 = 合计 × (1 − 等效折扣率)。
+// 与「整单优惠金额」共同构成应收/应付的减项——改折扣率时二者随折扣金额同步联动（折扣金额与优惠金额联动）。
+// 与 account.discountAmountOf 口径一致；此处直接由 form 派生，避免组装临时 order 对象
+const discountAmount = computed(() => Math.max(0, round2(totalAmount.value * (1 - effRate.value))))
 // 多级折扣：添加 / 删除一级（可删到空＝不打折）
 function addRate() { form.discountRates.push(1) }
 function removeRate(i) { form.discountRates.splice(i, 1) }
