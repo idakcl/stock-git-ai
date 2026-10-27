@@ -97,6 +97,25 @@
           </el-table-column>
         </el-table>
       </el-card>
+
+      <!-- 清空数据 -->
+      <el-card shadow="never" class="panel danger-panel">
+        <template #header><b class="danger-title">清空数据</b></template>
+        <el-alert type="error" :closable="false" show-icon class="danger-intro">
+          清空后数据<b>不可恢复</b>，执行前请务必先「导出全部数据」备份。每项清空均需两步确认并验证管理密码。
+        </el-alert>
+        <div class="clear-block clear-all">
+          <div class="clear-label">全部数据（商品 / 客户 / 供应商 / 销售单 / 采购单）</div>
+          <el-button type="danger" @click="requestClear('all')">清空所有数据</el-button>
+        </div>
+        <el-divider>或仅清空某一类</el-divider>
+        <div class="clear-group">
+          <div class="clear-block" v-for="t in TYPES" :key="t.key">
+            <div class="clear-label">{{ t.label }}（库内 {{ t.count == null ? '—' : t.count }}）</div>
+            <el-button type="danger" plain size="small" @click="requestClear(t.key)">清空{{ t.label }}</el-button>
+          </div>
+        </div>
+      </el-card>
     </el-card>
 
     <!-- 分类导入：比对预览弹窗（确认前不写任何数据） -->
@@ -154,13 +173,27 @@
         <el-button type="primary" @click="confirmPaste">解析并比对</el-button>
       </template>
     </el-dialog>
+
+    <!-- 清空数据：管理密码确认弹窗（第二步） -->
+    <el-dialog v-model="pwdVisible" :title="`清空确认 · ${clearTargetLabel}`" width="420px" top="12vh" @closed="pwdText=''">
+      <p class="pwd-warn">{{ clearWarnText }}</p>
+      <el-form @submit.prevent="confirmClear">
+        <el-form-item :error="pwdError">
+          <el-input v-model="pwdText" type="password" show-password placeholder="请输入管理密码" :prefix-icon="Lock" @keyup.enter="confirmClear" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="pwdVisible=false">取消</el-button>
+        <el-button type="danger" :loading="clearing" @click="confirmClear">确认清空</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { UploadFilled } from '@element-plus/icons-vue'
+import { UploadFilled, Lock } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { diffImport, extractRecords } from '../utils/dedupe'
 
@@ -204,6 +237,85 @@ async function loadCounts() {
   }))
 }
 onMounted(loadCounts)
+
+// ---------- 清空数据：两步确认（警告 → 管理密码校验） ----------
+const pwdVisible = ref(false)
+const pwdText = ref('')
+const pwdError = ref('')
+const clearing = ref(false)
+const clearTarget = ref('')
+const clearTargetLabel = ref('')
+const clearWarnText = ref('')
+
+const CLEAR_LABELS = { all: '全部数据', items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单' }
+const CLEAR_WARN = {
+  all: '将清空全部数据（商品、客户、供应商、销售单、采购单），此操作不可恢复！',
+  items: '将清空全部商品，已建立的库存与历史价关系将丢失。',
+  customers: '将清空全部客户档案（含预存款流水）；其名下销售单将变为孤儿单，不再计入客户档案。',
+  suppliers: '将清空全部供应商档案（含预付款流水）；其名下采购单将变为孤儿单，不再计入供应商档案。',
+  sales: '将清空全部销售单。',
+  purchases: '将清空全部采购单。'
+}
+
+// 第一步：警告确认；通过后弹出密码输入框
+async function requestClear(key) {
+  if (clearing.value) return
+  const label = CLEAR_LABELS[key] || key
+  try {
+    await ElMessageBox.confirm(
+      `${CLEAR_WARN[key] || ''}\n\n此操作不可撤销，执行前建议先「导出全部数据」备份。确定要继续吗？`,
+      `确认清空${label}`,
+      { type: 'warning', confirmButtonText: '下一步：输入密码', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  clearTarget.value = key
+  clearTargetLabel.value = label
+  clearWarnText.value = CLEAR_WARN[key] || ''
+  pwdText.value = ''
+  pwdError.value = ''
+  pwdVisible.value = true
+}
+
+const SAVERS = {
+  items: (d) => api.saveItems(d),
+  customers: (d) => api.saveCustomers(d),
+  suppliers: (d) => api.saveSuppliers(d),
+  sales: (d) => api.saveSales(d),
+  purchases: (d) => api.savePurchases(d)
+}
+const ALL_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
+
+// 第二步：验证管理密码（复用登录接口），通过后整表写入空数组清空
+async function confirmClear() {
+  if (clearing.value) return
+  if (!pwdText.value) { pwdError.value = '请输入管理密码'; return }
+  pwdError.value = ''
+  clearing.value = true
+  const key = clearTarget.value
+  try {
+    await api.login(pwdText.value, false)
+  } catch (e) {
+    const msg = (e && e.message) || '登录失败'
+    pwdError.value = /密码|password|unauthorized|401|登录/i.test(msg) ? '管理密码错误，请重试' : msg
+    clearing.value = false
+    return
+  }
+  try {
+    if (key === 'all') {
+      await Promise.all(ALL_KEYS.map(k => SAVERS[k]([])))
+    } else {
+      await SAVERS[key]([])
+    }
+    pwdVisible.value = false
+    ElMessage.success(`已清空${clearTargetLabel.value}`)
+    if (key === 'all') setTimeout(() => window.location.reload(), 700)
+    else loadCounts()
+  } catch (e) {
+    ElMessage.error(`清空失败：${e.message || '网络异常'}，请重试`)
+  } finally {
+    clearing.value = false
+  }
+}
 
 // 分类导出：单类型打包 { app, version, type, exportedAt, count, data }
 async function exportType(row) {
@@ -484,4 +596,12 @@ async function doImport() {
 .stat-add { color: var(--el-color-success); font-weight: 600; }
 .stat-skip { color: var(--el-color-info); }
 .stat-invalid { color: var(--el-color-danger); }
+.danger-panel { border-color: var(--color-danger, #f56c6c); }
+.danger-title { color: var(--color-danger, #f56c6c); }
+.danger-intro { margin-bottom: 14px; line-height: 1.7; }
+.clear-block { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 8px; background: var(--bg-card, #fff); }
+.clear-all { border-color: var(--color-danger, #f56c6c); margin-bottom: 4px; }
+.clear-label { font-size: var(--fs-sub); color: var(--text-regular); }
+.clear-group { display: flex; align-items: stretch; gap: 14px; flex-wrap: wrap; }
+.pwd-warn { color: var(--color-danger, #f56c6c); font-size: var(--fs-base); line-height: 1.7; margin: 0 0 16px; }
 </style>
