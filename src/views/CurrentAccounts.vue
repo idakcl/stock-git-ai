@@ -58,9 +58,18 @@
             <div class="net-bar-track"><div class="net-bar-fill pay" :style="{ width: netBreakdown.payNetPct + '%' }"></div></div>
             <span class="net-bar-val amount-out">¥ {{ netBreakdown.payNet.toFixed(2) }} · {{ netBreakdown.payNetPct.toFixed(1) }}%</span>
           </div>
+          <div class="net-side-subtitle">金额区间分布（按净额绝对值）</div>
+          <div class="net-bar-row" v-for="b in bucketBreakdown.buckets" :key="b.key">
+            <span class="net-bar-label">{{ b.label }}</span>
+            <div class="net-bar-track"><div class="net-bar-fill bucket" :style="{ width: bucketPct[b.key] + '%' }"></div></div>
+            <span class="net-bar-val">¥ {{ b.amount.toFixed(2) }} · {{ bucketPct[b.key].toFixed(1) }}%（{{ b.count }} 家）</span>
+          </div>
         </div>
         <div class="net-side">
-          <div class="net-side-title">往来排行（按净额）</div>
+          <div class="net-side-title net-side-title-row">
+            <span>往来排行（按净额）</span>
+            <TableToolbar filename="来往账-债权债务排行" title="来往账·债权债务排行" :subtitle="rankSubtitle" :columns="rankColumns" :rows="rankExportRows" />
+          </div>
           <div class="rank-group">
             <div class="rank-head">债权 Top · 客户欠我方</div>
             <div class="rank-list">
@@ -311,6 +320,38 @@ const netBreakdown = computed(() => {
 const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, 5))
 const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, 5))
 
+// 金额区间分布：按净额绝对值分桶（>1万 / 1千~1万 / ≤1千），统计各桶金额合计与单位数占比
+const bucketBreakdown = computed(() => {
+  const rows = partyFiltered.value
+  const defs = [
+    { key: 'gt1w', label: '> 1万', test: v => v > 10000 },
+    { key: 'mid', label: '1千 ~ 1万', test: v => v > 1000 && v <= 10000 },
+    { key: 'lt1k', label: '≤ 1千', test: v => v <= 1000 }
+  ]
+  const buckets = defs.map(d => {
+    const items = rows.filter(r => d.test(Math.abs(r.net)))
+    return { key: d.key, label: d.label, amount: round2(items.reduce((s, r) => s + Math.abs(r.net), 0)), count: items.length }
+  })
+  const total = round2(buckets.reduce((s, b) => s + b.amount, 0))
+  const pct = {}
+  buckets.forEach(b => { pct[b.key] = total > 0 ? round2((b.amount / total) * 100) : 0 })
+  return { buckets, total, pct }
+})
+const bucketPct = computed(() => bucketBreakdown.value.pct)
+
+// 往来排行导出数据（债权 Top + 债务 Top 合并，带类别与排名）
+const rankSubtitle = computed(() => '债权 Top 5 与债务 Top 5（随筛选 / 时间段联动）')
+const rankColumns = [
+  { label: '排名', prop: '排名' },
+  { label: '类别', prop: '类别' },
+  { label: '往来单位', prop: '往来单位' },
+  { label: '净额', prop: '净额' }
+]
+const rankExportRows = computed(() => [
+  ...topDebtors.value.map((r, i) => ({ 排名: i + 1, 类别: '债权·客户欠我方', 往来单位: r.party, 净额: '+' + r.net.toFixed(2) })),
+  ...topCreditors.value.map((r, i) => ({ 排名: i + 1, 类别: '债务·我方欠供应商', 往来单位: r.party, 净额: r.net.toFixed(2) }))
+])
+
 const subtitle = computed(() => {
   const parts = [`共 ${partyFiltered.value.length} 个往来单位`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
@@ -451,12 +492,16 @@ onMounted(async () => {
 .net-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .net-side { padding: 12px 16px; background: var(--bg-stat); border-radius: 8px; min-width: 0; }
 .net-side-title { font-weight: 600; margin-bottom: 10px; color: var(--text-regular); font-size: var(--fs-base); }
+.net-side-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.net-side-title-row :deep(.export-bar) { margin-bottom: 0; }
+.net-side-subtitle { font-weight: 600; margin: 14px 0 10px; color: var(--text-regular); font-size: var(--fs-sub); border-top: 1px dashed var(--el-border-color-lighter); padding-top: 10px; }
 .net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
 .net-bar-track { flex: 1; min-width: 80px; height: 12px; background: var(--el-fill-color-light); border-radius: 6px; overflow: hidden; }
 .net-bar-fill { height: 100%; border-radius: 6px; transition: width .3s ease; }
 .net-bar-fill.recv { background: var(--color-success); }
 .net-bar-fill.pay { background: var(--el-color-primary); }
+.net-bar-fill.bucket { background: var(--el-color-warning); }
 .net-bar-val { font-size: var(--fs-sub); font-weight: 600; white-space: nowrap; }
 .rank-group { margin-bottom: 10px; }
 .rank-head { font-size: var(--fs-sub); color: var(--text-secondary); margin-bottom: 6px; }
