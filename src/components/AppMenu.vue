@@ -60,6 +60,10 @@
         <el-icon><Postcard /></el-icon>
         <span>来往账</span>
       </el-menu-item>
+      <el-menu-item index="/vouchers">
+        <el-icon><Tickets /></el-icon>
+        <span>收付款单</span>
+      </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item-group title="系统">
@@ -79,7 +83,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

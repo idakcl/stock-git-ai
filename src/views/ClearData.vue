@@ -61,7 +61,9 @@ const TYPES = [
   { key: 'customers', label: '客户', unit: '条' },
   { key: 'suppliers', label: '供应商', unit: '条' },
   { key: 'sales', label: '销售单', unit: '单' },
-  { key: 'purchases', label: '采购单', unit: '单' }
+  { key: 'purchases', label: '采购单', unit: '单' },
+  { key: 'receipts', label: '收款单', unit: '单' },
+  { key: 'payment-vouchers', label: '付款单', unit: '单' }
 ]
 const typeRows = ref(TYPES.map(t => ({ ...t, count: null })))
 const FETCHERS = {
@@ -69,7 +71,9 @@ const FETCHERS = {
   customers: () => api.getCustomers(),
   suppliers: () => api.getSuppliers(),
   sales: () => api.getSales(),
-  purchases: () => api.getPurchases()
+  purchases: () => api.getPurchases(),
+  receipts: () => api.getReceipts(),
+  'payment-vouchers': () => api.getPaymentVouchers()
 }
 async function loadCounts() {
   await Promise.all(TYPES.map(async t => {
@@ -91,14 +95,16 @@ const clearTarget = ref('')
 const clearTargetLabel = ref('')
 const clearWarnText = ref('')
 
-const CLEAR_LABELS = { all: '全部数据', items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单' }
+const CLEAR_LABELS = { all: '全部数据', items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单', receipts: '收款单', 'payment-vouchers': '付款单' }
 const CLEAR_WARN = {
-  all: '将清空全部数据（商品、客户、供应商、销售单、采购单），此操作不可恢复！',
+  all: '将清空全部数据（商品、客户、供应商、销售单、采购单、收款单、付款单），此操作不可恢复！',
   items: '将清空全部商品，已建立的库存与历史价关系将丢失。',
   customers: '将清空全部客户档案（含预存款流水）；其名下销售单将标记为「(已删除客户) …」，不再计入客户档案。',
   suppliers: '将清空全部供应商档案（含预付款流水）；其名下采购单将标记为「(已删除供应商) …」，不再计入供应商档案。',
   sales: '将清空全部销售单。',
-  purchases: '将清空全部采购单。'
+  purchases: '将清空全部采购单。',
+  receipts: '将清空全部收款单（不影响销售单本身的已收记录）。',
+  'payment-vouchers': '将清空全部付款单（不影响采购单本身的已付记录）。'
 }
 
 // 第一步：警告确认；通过后弹出密码输入框
@@ -125,9 +131,11 @@ const SAVERS = {
   customers: (d) => api.saveCustomers(d),
   suppliers: (d) => api.saveSuppliers(d),
   sales: (d) => api.saveSales(d),
-  purchases: (d) => api.savePurchases(d)
+  purchases: (d) => api.savePurchases(d),
+  receipts: (d) => api.saveReceipts(d),
+  'payment-vouchers': (d) => api.savePaymentVouchers(d)
 }
-const ALL_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
+const ALL_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
 
 // 第二步：验证管理密码（复用登录接口），通过后整表写入空数组清空
 async function confirmClear() {

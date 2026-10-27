@@ -19,12 +19,14 @@ function extractData(text) {
 }
 
 function normalizeImport(obj) {
-  const out = { items: [], suppliers: [], customers: [], purchases: [], sales: [], stock: {} }
+  const out = { items: [], suppliers: [], customers: [], purchases: [], sales: [], receipts: [], 'payment-vouchers': [], stock: {} }
   if (Array.isArray(obj.items)) out.items = obj.items
   if (Array.isArray(obj.suppliers)) out.suppliers = obj.suppliers
   if (Array.isArray(obj.customers)) out.customers = obj.customers
   if (Array.isArray(obj.purchases)) out.purchases = obj.purchases
   if (Array.isArray(obj.sales)) out.sales = obj.sales
+  if (Array.isArray(obj.receipts)) out.receipts = obj.receipts
+  if (Array.isArray(obj['payment-vouchers'])) out['payment-vouchers'] = obj['payment-vouchers']
   if (obj.stock && typeof obj.stock === 'object') out.stock = obj.stock
   return out
 }
@@ -294,6 +296,8 @@ export async function handleApi(req, url, env) {
     if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))
     if (path === '/purchases' && method === 'GET') return json(req, env, await readJSON(env, 'purchases.json'))
     if (path === '/sales' && method === 'GET') return json(req, env, await readJSON(env, 'sales.json'))
+    if (path === '/receipts' && method === 'GET') return json(req, env, await readJSON(env, 'receipts.json'))
+    if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readJSON(env, 'payment-vouchers.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
 
@@ -353,6 +357,15 @@ export async function handleApi(req, url, env) {
         await writeJSON(env, 'customers.json', body.customers || [], 'update customers')
         return json(req, env, { ok: true })
       }
+      // 收款单/付款单：纯资金单据，不触发 syncDerived（不影响库存/商品派生数据）
+      if (path === '/receipts') {
+        await writeJSON(env, 'receipts.json', body.receipts || [], 'update receipts')
+        return json(req, env, { ok: true })
+      }
+      if (path === '/payment-vouchers') {
+        await writeJSON(env, 'payment-vouchers.json', body['payment-vouchers'] || [], 'update payment-vouchers')
+        return json(req, env, { ok: true })
+      }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
         const purchases = (body.purchases || []).map(p => normalizeOrderPayments(p, 'paid'))
@@ -387,7 +400,7 @@ export async function handleApi(req, url, env) {
         if (parsed.purchases && parsed.purchases.length) parsed.purchases = parsed.purchases.map(p => normalizeOrderPayments(p, 'paid'))
         if (parsed.sales && parsed.sales.length) parsed.sales = parsed.sales.map(s => normalizeOrderPayments(s, 'received'))
         const results = []
-        for (const key of ['items', 'suppliers', 'customers', 'purchases', 'sales']) {
+        for (const key of ['items', 'suppliers', 'customers', 'purchases', 'sales', 'receipts', 'payment-vouchers']) {
           const arr = parsed[key]
           if (!Array.isArray(arr) || !arr.length) continue
           if (arr.length > 5000) {

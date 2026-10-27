@@ -109,6 +109,19 @@ export const api = {
     invalidate('/customers')
     return r
   },
+  // 收款单/付款单：纯资金单据集合，照抄客户集合范式（保存后失效自身缓存，不触发派生数据重算）
+  getReceipts: () => cachedGet('/receipts'),
+  saveReceipts: async (receipts) => {
+    const r = await request('/receipts', { method: 'POST', body: JSON.stringify({ receipts }) })
+    invalidate('/receipts')
+    return r
+  },
+  getPaymentVouchers: () => cachedGet('/payment-vouchers'),
+  savePaymentVouchers: async (vouchers) => {
+    const r = await request('/payment-vouchers', { method: 'POST', body: JSON.stringify({ 'payment-vouchers': vouchers }) })
+    invalidate('/payment-vouchers')
+    return r
+  },
   getPurchases: () => cachedGet('/purchases'),
   savePurchases: async (purchases) => {
     const r = await request('/purchases', { method: 'POST', body: JSON.stringify({ purchases }) })

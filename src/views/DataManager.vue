@@ -16,7 +16,7 @@
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导出备份</b></template>
-        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单及各自的预存款/预付款流水）。</p>
+        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单及各自的预存款/预付款流水）。</p>
         <el-button type="primary" :loading="exporting" @click="doExport">导出全部数据</el-button>
       </el-card>
 
@@ -171,9 +171,14 @@ const fileList = ref([])
 const pending = ref(null)   // 校验通过的备份：{ data, counts, exportedAt, sizeText }
 const parseError = ref('')
 
-// 备份里必须完整包含的 5 类数据（缺一类就拒绝，避免导入半截数据把库写坏）
+// 备份「全量导入」必须完整包含的 5 类核心数据（缺一类就拒绝，避免导入半截数据把库写坏）
 const DATA_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
-const KEY_LABELS = { items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单' }
+// 全量备份/恢复实际覆盖的全部数据（含收款单/付款单；旧备份可能不含这两者，导入时按"存在才覆盖"处理，不报错）
+const BACKUP_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
+const KEY_LABELS = {
+  items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单',
+  receipts: '收款单', 'payment-vouchers': '付款单'
+}
 const MAX_SIZE = 30 * 1024 * 1024   // 30MB 上限：正常备份在几百 KB~几 MB
 
 // ---------- 分类导入导出 ----------
@@ -182,7 +187,9 @@ const TYPES = [
   { key: 'customers', label: '客户', unit: '条' },
   { key: 'suppliers', label: '供应商', unit: '条' },
   { key: 'sales', label: '销售单', unit: '单' },
-  { key: 'purchases', label: '采购单', unit: '单' }
+  { key: 'purchases', label: '采购单', unit: '单' },
+  { key: 'receipts', label: '收款单', unit: '单' },
+  { key: 'payment-vouchers', label: '付款单', unit: '单' }
 ]
 const typeRows = ref(TYPES.map(t => ({ ...t, count: null, exporting: false })))
 
@@ -191,7 +198,9 @@ const FETCHERS = {
   customers: () => api.getCustomers(),
   suppliers: () => api.getSuppliers(),
   sales: () => api.getSales(),
-  purchases: () => api.getPurchases()
+  purchases: () => api.getPurchases(),
+  receipts: () => api.getReceipts(),
+  'payment-vouchers': () => api.getPaymentVouchers()
 }
 
 // 页面打开时拉一次各类型库内数量（走 15 秒内存缓存，不重复请求）
@@ -249,6 +258,7 @@ function displayNameOf(key, rec) {
   if (rec.name != null && String(rec.name)) return String(rec.name)
   if (key === 'purchases' && rec.supplier) return String(rec.supplier)
   if (key === 'sales' && rec.customer) return String(rec.customer)
+  if ((key === 'receipts' || key === 'payment-vouchers') && rec.party) return String(rec.party)
   return '—'
 }
 
@@ -355,14 +365,15 @@ function resultTagType(result) {
 async function doExport() {
   exporting.value = true
   try {
-    const [items, customers, suppliers, sales, purchases] = await Promise.all([
-      api.getItems(), api.getCustomers(), api.getSuppliers(), api.getSales(), api.getPurchases()
+    const [items, customers, suppliers, sales, purchases, receipts, paymentVouchers] = await Promise.all([
+      api.getItems(), api.getCustomers(), api.getSuppliers(), api.getSales(), api.getPurchases(),
+      api.getReceipts(), api.getPaymentVouchers()
     ])
     const payload = {
       app: 'stock-git-ai',
       version: 1,
       exportedAt: new Date().toISOString(),
-      data: { items, customers, suppliers, sales, purchases }
+      data: { items, customers, suppliers, sales, purchases, receipts, 'payment-vouchers': paymentVouchers }
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -373,7 +384,7 @@ async function doExport() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length}`)
+    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length}`)
   } catch (e) {
     ElMessage.error(`导出失败：${e.message || '网络异常'}`)
   } finally {
@@ -433,7 +444,12 @@ function cancelPending() {
 async function doImport() {
   const p = pending.value
   if (!p) return
-  const summary = DATA_KEYS.map(k => `${KEY_LABELS[k]} ${p.counts[k]}`).join('、')
+  // 覆盖摘要：核心 5 类必含；收款单/付款单若备份中存在才一并提示（旧备份可能不含）
+  const summaryKeys = DATA_KEYS.concat(
+    Array.isArray(p.data.receipts) ? ['receipts'] : [],
+    Array.isArray(p.data['payment-vouchers']) ? ['payment-vouchers'] : []
+  )
+  const summary = summaryKeys.map(k => `${KEY_LABELS[k]} ${Array.isArray(p.data[k]) ? p.data[k].length : 0}`).join('、')
   try {
     await ElMessageBox.confirm(
       `确定导入该备份？\n\n将整体覆盖：${summary}\n备份导出时间：${p.exportedAt}\n\n当前库内对应数据会被替换，此操作不可撤销。建议先「导出全部数据」保存当前数据。`,
@@ -450,6 +466,9 @@ async function doImport() {
     await api.saveCustomers(p.data.customers)
     await api.savePurchases(p.data.purchases)
     await api.saveSales(p.data.sales)
+    // 收款单/付款单：旧备份可能不含这两者，存在才整体覆盖，避免清空调已产生的单据
+    if (Array.isArray(p.data.receipts)) await api.saveReceipts(p.data.receipts)
+    if (Array.isArray(p.data['payment-vouchers'])) await api.savePaymentVouchers(p.data['payment-vouchers'])
     ElMessage.success('导入完成，页面即将刷新')
     setTimeout(() => window.location.reload(), 800)
   } catch (e) {

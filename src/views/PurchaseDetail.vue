@@ -8,12 +8,13 @@
           </div>
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
-            <el-checkbox v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
-            <el-checkbox v-model="showSellPrice" class="opt-cb">显示售价</el-checkbox>
+            <el-checkbox v-if="!externalView" v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
+            <el-checkbox v-if="!externalView" v-model="showSellPrice" class="opt-cb">显示售价</el-checkbox>
+            <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏进价·备注置底）</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
-            <el-button type="primary" :disabled="!found" @click="editDialog = true">编辑</el-button>
-            <el-button type="danger" :disabled="!found" @click="removeOrder">删除</el-button>
+            <el-button type="primary" :disabled="!found || externalView" @click="editDialog = true">编辑</el-button>
+            <el-button type="danger" :disabled="!found || externalView" @click="removeOrder">删除</el-button>
             <el-button @click="$router.push('/purchases')">返回列表</el-button>
           </div>
         </div>
@@ -52,13 +53,13 @@
       <div class="photos-block">
         <div class="photos-title">
           <span>原始单据照片<template v-if="(purchase.photos || []).length">（{{ (purchase.photos || []).length }} 张）</template></span>
-          <el-button size="small" type="primary" @click="photoDialog = true">
+          <el-button v-if="!externalView" size="small" type="primary" @click="photoDialog = true">
             {{ (purchase.photos || []).length ? '添加照片' : '上传原始单据照片' }}
           </el-button>
         </div>
         <PhotoThumbs v-if="(purchase.photos || []).length" :value="purchase.photos" />
       </div>
-      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :price-columns="tablePriceColumns">
+      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :price-columns="tablePriceColumns" :show-cost="!externalView" :remark-last="externalView">
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
@@ -77,7 +78,7 @@
       <template #header>
         <div class="card-header">
           <b>付款记录（{{ payments.length }} 笔 · 累计 ¥ {{ paidSum.toFixed(2) }} / 应付 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(purchase.discount).toFixed(2) }}（未实际付款）</template>）</b>
-          <el-button type="primary" size="small" @click="payDialog = true">记录付款</el-button>
+          <el-button v-if="!externalView" type="primary" size="small" @click="payDialog = true">记录付款</el-button>
         </div>
       </template>
       <div class="table-wrap">
@@ -88,6 +89,9 @@
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
+        <el-table-column label="单据编码" width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.voucher || '—' }}</template>
+        </el-table-column>
       </el-table>
       </div>
     </el-card>
@@ -239,6 +243,8 @@ const detailItems = computed(() => {
 const hidePrice = ref(false)
 // 采购单详情默认不展示售价（商品档案当前卖价），需要时勾选「显示售价」查看
 const showSellPrice = ref(false)
+// 对外查看（历史/对外）：隐藏进价、备注置底、隐藏写按钮，只保留财务头与本次数据
+const externalView = ref(false)
 const tablePriceColumns = computed(() => showSellPrice.value ? [{ prop: 'price', label: '售价' }] : [])
 const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
 const exportColumns = computed(() => {
@@ -257,8 +263,9 @@ const exportColumns = computed(() => {
   ]
   // 与页面表格同步：未勾选「显示售价」时，导出/打印一律不带售价列
   if (!showSellPrice.value) cols = cols.filter(c => c.label !== '售价')
-  // 隐藏单价与金额：剔除全部价格列（对外脱敏，优先级最高）
-  if (hidePrice.value) cols = cols.filter(c => !PRICE_LABELS.includes(c.label))
+  // 对外查看：隐藏进价（成本），保持脱敏；隐藏单价与金额则剔除全部价格列（优先级最高）
+  if (externalView.value) cols = cols.filter(c => c.label !== '进价')
+  if (hidePrice.value || externalView.value) cols = cols.filter(c => !PRICE_LABELS.includes(c.label))
   return cols
 })
 // 打印页副标题：商品行数摘要（完整单头信息见下方 fields 字段区，避免重复）
@@ -289,7 +296,7 @@ const docHeaderFields = computed(() => {
     ['结算', settleLabel.value],
     ['备注', o.remark]
   )
-  if (hidePrice.value) return fields.filter(([label]) => !AMOUNT_FIELD_LABELS.includes(label))
+  if (hidePrice.value || externalView.value) return fields.filter(([label]) => !AMOUNT_FIELD_LABELS.includes(label))
   return fields
 })
 function doExport() {

@@ -248,6 +248,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment, syncPayments } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
+import { genVoucherCode } from '../utils/voucher'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -260,6 +261,9 @@ const salesList = ref([])
 const purchasesList = ref([])
 const customers = ref([])
 const suppliers = ref([])
+// 资金单据（收款单 / 付款单）：记一笔/合并收付款时按组生成，详情页收款记录卡据此展示「单据编码」
+const receiptsList = ref([])
+const vouchersList = ref([])
 
 // 排序 / 筛选状态记忆到 localStorage，刷新后自动恢复
 const LS = {
@@ -580,12 +584,21 @@ async function onPaySaved(updated, payload) {
 //   2) 用 distributePayment 把每组金额按日期升序、封顶「优惠后未收」分摊到勾选单据；
 //   3) 标记「结清」的单据：若分摊后仍有未收，差额计入优惠（抹零结清），确保净额为 0；
 //   4) 超额（leftover）转存预存款/预付款（复用 applyDepositFlows 幂等逻辑，避免资金泄漏）。
+// 每组成交时同步生成一张资金单据（收款单 SK- / 付款单 FK-）：
+//   给每笔分摊流水补 voucher 字段（ensurePayments 返回克隆数组，可安全就地补，不影响其他调用方），
+//   组装 items（orderId/orderType/amount/本次优惠/是否结清），写回 receipts / payment-vouchers 集合。
 // BatchPayDialog 不传 discounts/settleIds，此处按缺失处理（仅分摊金额），保持兼容。
 async function onBatchApplied(groups) {
   const ts = Date.now()
   const salesMap = {}
   const purchasesMap = {}
   const depositOps = []
+  // 新生成的资金单据，按类型分桶
+  const newReceipts = []
+  const newVouchers = []
+  // 编码序号计数基准：从库内现有单据起步，同一批次内多张同类型单据连续递增，避免重号
+  const receiptsSoFar = (receiptsList.value || []).slice()
+  const vouchersSoFar = (vouchersList.value || []).slice()
   for (const g of (groups || [])) {
     const src = g.kind === 'receivable' ? salesList.value : purchasesList.value
     const orderIds = (g.orderIds || [])
@@ -604,8 +617,18 @@ async function onBatchApplied(groups) {
       order: working[id], kind: g.kind, outstanding: netOf(working[id], g.kind)
     }))
     const { allocations, leftover } = distributePayment(items, g.amount)
+    // 本次单据编码：记一笔/合并收付款 对应一张资金单据
+    const isRecv = g.kind === 'receivable'
+    const code = genVoucherCode(isRecv ? 'SK' : 'FK', g.date, isRecv ? receiptsSoFar : vouchersSoFar)
+    const allocAmount = {}   // orderId → 本次分摊金额
+    const settleDisc = {}    // orderId → 本次抹零优惠
     for (const a of allocations) {
-      working[a.order.id] = appendPayment(a.order, a.kind, { date: g.date, amount: a.amount, remark: g.remark || (g.kind === 'receivable' ? '合并收款' : '合并付款') })
+      const updated = appendPayment(a.order, a.kind, { date: g.date, amount: a.amount, remark: g.remark || (isRecv ? '合并收款' : '合并付款') })
+      // 给末笔流水补单据编码（克隆数组，可安全就地补）
+      const pmts = updated.payments
+      if (pmts && pmts.length) pmts[pmts.length - 1].voucher = code
+      working[a.order.id] = updated
+      allocAmount[a.order.id] = round2((allocAmount[a.order.id] || 0) + a.amount)
     }
     // 结清标记：差额自动计入优惠（抹零结清），保证净额归零
     const settleIds = (g.settleIds || []).filter(id => working[id])
@@ -615,12 +638,33 @@ async function onBatchApplied(groups) {
       if (net > 0.005) {
         o.discount = round2(Number(o.discount || 0) + net)
         working[id] = syncPayments(o, g.kind)
+        settleDisc[id] = round2((settleDisc[id] || 0) + net)
       }
     }
+    // 组装资金单据条目（orderId / 类型 / 本次金额 / 本次优惠 / 是否结清）
+    const voucherItems = orderIds.filter(id => working[id]).map(id => ({
+      orderId: id,
+      orderType: isRecv ? 'sale' : 'purchase',
+      amount: round2(allocAmount[id] || 0),
+      discount: round2(settleDisc[id] || 0),
+      settle: settleIds.includes(id)
+    }))
+    const total = round2(Object.values(allocAmount).reduce((s, v) => s + v, 0))
+    const voucher = {
+      code,
+      kind: isRecv ? 'receivable' : 'payable',
+      party: g.party,
+      date: g.date,
+      remark: g.remark || '',
+      total,
+      items: voucherItems
+    }
+    if (isRecv) { newReceipts.push(voucher); receiptsSoFar.push(voucher) }
+    else { newVouchers.push(voucher); vouchersSoFar.push(voucher) }
     // 收集改动的单据
     for (const id of orderIds) {
       if (!working[id]) continue
-      if (g.kind === 'receivable') salesMap[id] = working[id]
+      if (isRecv) salesMap[id] = working[id]
       else purchasesMap[id] = working[id]
     }
     if (leftover > 0.005) depositOps.push({ kind: g.kind, name: g.party, amount: leftover })
@@ -634,18 +678,32 @@ async function onBatchApplied(groups) {
     purchasesList.value = purchasesList.value.map(o => purchasesMap[o.id] || o)
     try { await api.savePurchases(purchasesList.value) } catch (e) { ElMessage.error(`保存付款失败：${e.message || '网络异常'}`); return }
   }
+  // 写回资金单据（收款单 / 付款单），纯集合范式，不触发派生数据重算
+  if (newReceipts.length) {
+    const all = (receiptsList.value || []).concat(newReceipts)
+    receiptsList.value = all
+    try { await api.saveReceipts(all) } catch (e) { ElMessage.error(`保存收款单失败：${e.message || '网络异常'}`); return }
+  }
+  if (newVouchers.length) {
+    const all = (vouchersList.value || []).concat(newVouchers)
+    vouchersList.value = all
+    try { await api.savePaymentVouchers(all) } catch (e) { ElMessage.error(`保存付款单失败：${e.message || '网络异常'}`); return }
+  }
   // 超额转预存/预付：按 batch:<party>:<ts> 幂等标记，与单单据「超收转预存款」同一机制
   for (const op of depositOps) {
     const list2 = await applyDepositFlows(api, op.kind, op.name, `batch:${op.name}:${ts}`, op.amount, 0)
     if (list2) { if (op.kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
   }
-  const [sales, pur, cust, sup] = await Promise.all([
-    api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
+  const [sales, pur, cust, sup, rec, pv] = await Promise.all([
+    api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers(),
+    api.getReceipts(), api.getPaymentVouchers()
   ])
   salesList.value = sales || []
   purchasesList.value = pur || []
   customers.value = cust || []
   suppliers.value = sup || []
+  receiptsList.value = rec || []
+  vouchersList.value = pv || []
   clearSelection()
   ElMessage.success('已保存收付款流水')
 }
@@ -676,18 +734,23 @@ async function onRechargeSaved(payload) {
 
 onMounted(async () => {
   try {
-    const [sales, pur, cust, sup] = await Promise.all([
-      api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
+    const [sales, pur, cust, sup, rec, pv] = await Promise.all([
+      api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers(),
+      api.getReceipts(), api.getPaymentVouchers()
     ])
     salesList.value = sales || []
     purchasesList.value = pur || []
     customers.value = cust || []
     suppliers.value = sup || []
+    receiptsList.value = rec || []
+    vouchersList.value = pv || []
   } catch (e) {
     salesList.value = []
     purchasesList.value = []
     customers.value = []
     suppliers.value = []
+    receiptsList.value = []
+    vouchersList.value = []
   }
 })
 </script>

@@ -14,7 +14,7 @@
       </el-form-item>
       <el-form-item label="收/付款金额" required>
         <el-input-number v-model="amount" :min="0" :max="99999999" :precision="2" :controls="false" style="width:100%" />
-        <span class="rec-hint">所选未结合计：<b class="rec-due">¥ {{ selectedDue.toFixed(2) }}</b> · 已选 <b>{{ selectedRows.length }}</b> 张<template v-if="excess > 0.005"> · 超出 ¥ {{ excess.toFixed(2) }} 转{{ type === 'receivable' ? '客户预存款' : '供应商预付款' }}</template></span>
+        <span class="rec-hint">所选未结合计（优惠后）：<b class="rec-due">¥ {{ selectedDue.toFixed(2) }}</b> · 已选 <b>{{ selectedRows.length }}</b> 张<template v-if="excess > 0.005"> · 超出 ¥ {{ excess.toFixed(2) }} 转{{ type === 'receivable' ? '客户预存款' : '供应商预付款' }}</template></span>
       </el-form-item>
       <el-form-item label="日期">
         <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" placeholder="日期" style="width:100%" />
@@ -151,7 +151,13 @@ const displayOrders = computed(() => partyOrders.value.map(o => ({ ...o, _discou
 // 优惠后未收 = 应用本单新增优惠后的净额（仅展示，保存时才落库）
 const afterDiscountNet = (row) => netOf({ ...row, discount: round2(Number(row.discount || 0) + Number(row._discount || 0)) }, type.value)
 
-const selectedDue = computed(() => round2(selectedRows.value.reduce((s, r) => s + netOf(r, type.value), 0)))
+// 所选未结合计（优惠后）：随逐单「优惠金额」「结算状态=结清」实时联动
+//   · 结清：差额将抹零，不计入需现金未收（贡献 0）
+//   · 否则按 max(0, 未收 − 本单优惠) 计入
+const selectedDue = computed(() => round2(selectedRows.value.reduce((s, r) => {
+  if (r._settle === '结清') return s
+  return s + Math.max(0, netOf(r, type.value) - Number(r._discount || 0))
+}, 0)))
 const excess = computed(() => round2(Math.max(0, (Number(amount || 0)) - selectedDue.value)))
 const hasDiscOrSettle = computed(() => selectedRows.value.some(r => Number(r._discount || 0) > 0 || r._settle === '结清'))
 const canSave = computed(() => !!name.value && selectedRows.value.length > 0 && (Number(amount || 0) > 0 || hasDiscOrSettle.value))

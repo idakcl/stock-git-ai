@@ -64,8 +64,9 @@
           :label="col.label"
           width="110"
         />
-        <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
+        <el-table-column v-if="!remarkLast" prop="remark" label="备注" width="140" show-overflow-tooltip />
         <slot name="extra" />
+        <el-table-column v-if="remarkLast" prop="remark" label="备注" width="140" show-overflow-tooltip />
         <el-table-column v-if="$slots.actions" label="操作" width="160" class-name="ops-col">
           <template #default="{ row }"><slot name="actions" :row="row" /></template>
         </el-table-column>
@@ -101,7 +102,9 @@ const props = defineProps({
   // 是否显示「供应商」列；供应商详情页整页就是同一家的商品，该列冗余，可传 false 收窄表格
   showSupplier: { type: Boolean, default: true },
   // 每页条数，0 表示不分页
-  pageSize: { type: Number, default: 0 }
+  pageSize: { type: Number, default: 0 },
+  // 备注列位置：默认在价格列之后；设为 true 时把「备注」移到 #extra 自定义列之后（置条目最后）
+  remarkLast: { type: Boolean, default: false }
 })
 
 const keyword = ref('')
