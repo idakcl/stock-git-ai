@@ -25,6 +25,12 @@
         <el-input v-model="keyword" clearable placeholder="搜索往来单位 / 单号 / 备注" class="search-input" />
       </div>
 
+      <div class="op-bar">
+        <el-button type="primary" @click="recordDialog = true">记一笔（收/付款）</el-button>
+        <el-button type="success" plain @click="rechargeDialog = true">存预存/预付</el-button>
+        <span class="op-bar-hint">合并收付款：在下方「单据明细」勾选多张单据后操作</span>
+      </div>
+
       <div class="stat-grid">
         <div class="stat-item">
           <el-statistic title="应收合计（折后）" :value="stats.recv" :precision="2" prefix="¥" />
@@ -41,6 +47,14 @@
         <div class="stat-item">
           <el-statistic title="单据总数" :value="stats.count" :precision="0" />
           <div class="stat-sub">应收 {{ stats.recvCount }} · 应付 {{ stats.payCount }}</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="预存款合计（客户侧）" :value="stats.depositCust" :precision="2" prefix="¥" value-style="color:var(--color-success)" />
+          <div class="stat-sub">客户预存款余额</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="预付款合计（供应商侧）" :value="stats.depositSup" :precision="2" prefix="¥" value-style="color:var(--el-color-primary)" />
+          <div class="stat-sub">供应商预付款余额</div>
         </div>
       </div>
 
@@ -152,6 +166,11 @@
                   <span :class="row.net > 0 ? 'amount-in' : 'amount-out'">{{ row.net > 0 ? '+' : '' }}{{ row.net.toFixed(2) }}</span>
                 </template>
               </el-table-column>
+              <el-table-column label="预存/预付余额" width="140" align="right" prop="deposit" sortable="custom">
+                <template #default="{ row }">
+                  <span :class="row.deposit > 0 ? (row.type.includes('供应商') ? 'amount-out' : 'amount-in') : 'none'">{{ row.deposit > 0 ? '¥ ' + row.deposit.toFixed(2) : '—' }}</span>
+                </template>
+              </el-table-column>
               <el-table-column label="操作" width="90" class-name="ops-col">
                 <template #default="{ row }">
                   <el-button size="small" @click="$router.push(`${row.partyPath}${row.code || ''}`)">明细</el-button>
@@ -164,8 +183,15 @@
         </el-tab-pane>
 
         <el-tab-pane label="单据明细" name="orders">
+          <div class="batch-bar">
+            <span>已选 <b>{{ selectedRows.length }}</b> 单</span>
+            <el-button type="primary" size="small" :disabled="selectedRows.length === 0" @click="batchDialog = true">合并收付款</el-button>
+            <el-button size="small" :disabled="selectedRows.length === 0" @click="clearSelection">清空选择</el-button>
+            <span class="batch-bar-hint">跨分页勾选不丢失（按往来单位分组结算）</span>
+          </div>
           <div class="table-wrap">
-            <el-table :data="orderPaged" stripe show-summary :summary-method="orderSummary">
+            <el-table ref="orderTable" :data="orderPaged" stripe show-summary :summary-method="orderSummary" row-key="id" @selection-change="onSelectionChange">
+              <el-table-column type="selection" width="46" :reserve-selection="true" />
               <el-table-column label="类型" width="90" align="center">
                 <template #default="{ row }">
                   <el-tag :type="row._kind === 'receivable' ? 'success' : 'warning'" size="small" disable-transitions>{{ row._type }}</el-tag>
@@ -210,6 +236,9 @@
     </el-card>
 
     <PaymentDialog v-model="payDialog" :order="payOrder" :kind="payOrder._kind || 'receivable'" :deposit-balance="depositBalanceOf(payOrder)" @saved="onPaySaved" />
+    <BatchPayDialog v-model="batchDialog" :orders="selectedRows" @applied="onBatchApplied" />
+    <RecordPaymentDialog v-model="recordDialog" :customers="customers" :suppliers="suppliers" :sales-list="salesList" :purchases-list="purchasesList" @applied="onBatchApplied" />
+    <DepositRechargeDialog v-model="rechargeDialog" :customers="customers" :suppliers="suppliers" @saved="onRechargeSaved" />
   </div>
 </template>
 
@@ -217,11 +246,14 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf } from '../utils/account'
+import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
+import BatchPayDialog from '../components/BatchPayDialog.vue'
+import DepositRechargeDialog from '../components/DepositRechargeDialog.vue'
+import RecordPaymentDialog from '../components/RecordPaymentDialog.vue'
 
 const PAGE_SIZE = 60
 const salesList = ref([])
@@ -264,6 +296,16 @@ function onPartySortChange({ prop, order }) {
 const payDialog = ref(false)
 const payOrder = ref({})
 
+// 多选合并收付款 / 记一笔 / 充值 相关状态
+const selectedRows = ref([]) // 单据明细已勾选（跨分页保留，reserve-selection）
+const orderTable = ref(null) // 单据明细表 ref，用于清空选择
+const batchDialog = ref(false) // 合并收付款弹窗
+const recordDialog = ref(false) // 记一笔弹窗
+const rechargeDialog = ref(false) // 存预存/预付弹窗
+
+function onSelectionChange(rows) { selectedRows.value = rows || [] }
+function clearSelection() { if (orderTable.value) orderTable.value.clearSelection(); selectedRows.value = [] }
+
 // 往来单位名 → 编码，供列表点名跳转详情
 const customerCode = computed(() => { const m = {}; (customers.value || []).forEach(c => { if (c && c.name) m[c.name] = c.code }); return m })
 const supplierCode = computed(() => { const m = {}; (suppliers.value || []).forEach(s => { if (s && s.name) m[s.name] = s.code }); return m })
@@ -296,25 +338,26 @@ watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen], () => { orderPage.val
 // 按往来单位合并：客户记应收，供应商记应付（同名同时为客户/供应商则合并为「客户/供应商」）
 const partyRows = computed(() => {
   const map = {}
-  const add = (name, type, kind, gross, paid, count, code, partyPath) => {
+  const add = (name, type, kind, gross, paid, count, code, partyPath, deposit) => {
     let g = map[name]
-    if (!g) { g = { party: name, type, code: code || '', partyPath, count: 0, recv: 0, recvPaid: 0, pay: 0, payPaid: 0 }; map[name] = g }
+    if (!g) { g = { party: name, type, code: code || '', partyPath, count: 0, recv: 0, recvPaid: 0, pay: 0, payPaid: 0, deposit: 0 }; map[name] = g }
     else { if (g.type !== type) g.type = '客户/供应商'; if (!g.code && code) g.code = code }
     g.count += count
     if (kind === 'receivable') { g.recv += gross; g.recvPaid += paid }
     else { g.pay += gross; g.payPaid += paid }
+    g.deposit = round2(g.deposit + (deposit || 0))
   }
   for (const c of (customers.value || [])) {
     const ss = (salesList.value || []).filter(s => s.customer === c.name)
     const gross = ss.reduce((s, r) => s + grossOf(r), 0)
     const net = ss.reduce((s, r) => s + netOf(r, 'receivable'), 0)
-    add(c.name, '客户', 'receivable', gross, gross - net, ss.length, c.code, '/customer/')
+    add(c.name, '客户', 'receivable', gross, gross - net, ss.length, c.code, '/customer/', depositSumOf(c.deposits))
   }
   for (const s of (suppliers.value || [])) {
     const pp = (purchasesList.value || []).filter(p => p.supplier === s.name)
     const gross = pp.reduce((s, r) => s + grossOf(r), 0)
     const net = pp.reduce((s, r) => s + netOf(r, 'payable'), 0)
-    add(s.name, '供应商', 'payable', gross, gross - net, pp.length, s.code, '/supplier/')
+    add(s.name, '供应商', 'payable', gross, gross - net, pp.length, s.code, '/supplier/', depositSumOf(s.advances))
   }
   for (const g of Object.values(map)) g.net = round2((g.recv - g.recvPaid) - (g.pay - g.payPaid))
   return Object.values(map)
@@ -346,12 +389,15 @@ const stats = computed(() => {
   const rows = partyFiltered.value
   const recvCount = (salesList.value || []).length
   const payCount = (purchasesList.value || []).length
+  const depositCust = round2((customers.value || []).reduce((s, c) => s + depositSumOf(c.deposits), 0))
+  const depositSup = round2((suppliers.value || []).reduce((s, x) => s + depositSumOf(x.advances), 0))
   return {
     recv: round2(rows.reduce((s, r) => s + r.recv, 0)),
     pay: round2(rows.reduce((s, r) => s + r.pay, 0)),
     net: round2(rows.reduce((s, r) => s + r.net, 0)),
     count: recvCount + payCount,
-    recvCount, payCount
+    recvCount, payCount,
+    depositCust, depositSup
   }
 })
 
@@ -434,7 +480,8 @@ const partyColumns = [
   { label: '实收', value: r => r.recvPaid > 0 ? r.recvPaid.toFixed(2) : '—' },
   { label: '应付(折后)', value: r => r.pay > 0 ? r.pay.toFixed(2) : '—' },
   { label: '实付', value: r => r.payPaid > 0 ? r.payPaid.toFixed(2) : '—' },
-  { label: '净额(未收−未付)', value: r => (r.net > 0 ? '+' : '') + r.net.toFixed(2) }
+  { label: '净额(未收−未付)', value: r => (r.net > 0 ? '+' : '') + r.net.toFixed(2) },
+  { label: '预存/预付余额', value: r => r.deposit > 0 ? r.deposit.toFixed(2) : '—' }
 ]
 
 const orderDueLabel = computed(() => typeFilter.value === 'payable' ? '应付' : '应收')
@@ -450,6 +497,7 @@ const partySummary = ({ columns, data }) => {
     if (c.label === '应付(折后)') return sum('pay').toFixed(2)
     if (c.label === '实付') return sum('payPaid').toFixed(2)
     if (c.label === '净额(未收−未付)') return sum('net').toFixed(2)
+    if (c.label === '预存/预付余额') return sum('deposit').toFixed(2)
     return ''
   })
 }
@@ -524,6 +572,77 @@ async function onPaySaved(updated, payload) {
   }
 }
 
+// 合并收付款 / 记一笔 统一写回：groups:[{party,kind,amount,date,remark,orderIds}]
+// 按单位分组，用 distributePayment 把每组金额按日期升序、封顶未收分摊到名下单据；
+// 超额（leftover）转存预存款/预付款（复用 applyDepositFlows 幂等逻辑，避免资金泄漏）。
+async function onBatchApplied(groups) {
+  const ts = Date.now()
+  const salesMap = {}
+  const purchasesMap = {}
+  const depositOps = []
+  for (const g of (groups || [])) {
+    const src = g.kind === 'receivable' ? salesList.value : purchasesList.value
+    const items = (g.orderIds || []).map(id => {
+      const order = (src || []).find(r => r.id === id)
+      return order ? { order, kind: g.kind, outstanding: netOf(order, g.kind) } : null
+    }).filter(Boolean)
+    const { allocations, leftover } = distributePayment(items, g.amount)
+    for (const a of allocations) {
+      const updated = appendPayment(a.order, a.kind, { date: g.date, amount: a.amount, remark: g.remark || (g.kind === 'receivable' ? '合并收款' : '合并付款') })
+      if (g.kind === 'receivable') salesMap[updated.id] = updated
+      else purchasesMap[updated.id] = updated
+    }
+    if (leftover > 0.005) depositOps.push({ kind: g.kind, name: g.party, amount: leftover })
+  }
+  // 写回收付款流水（仅改动到的单据），并同步 received/paid/settle
+  if (Object.keys(salesMap).length) {
+    salesList.value = salesList.value.map(o => salesMap[o.id] || o)
+    try { await api.saveSales(salesList.value) } catch (e) { ElMessage.error(`保存收款失败：${e.message || '网络异常'}`); return }
+  }
+  if (Object.keys(purchasesMap).length) {
+    purchasesList.value = purchasesList.value.map(o => purchasesMap[o.id] || o)
+    try { await api.savePurchases(purchasesList.value) } catch (e) { ElMessage.error(`保存付款失败：${e.message || '网络异常'}`); return }
+  }
+  // 超额转预存/预付：按 batch:<party>:<ts> 幂等标记，与单单据「超收转预存款」同一机制
+  for (const op of depositOps) {
+    const list2 = await applyDepositFlows(api, op.kind, op.name, `batch:${op.name}:${ts}`, op.amount, 0)
+    if (list2) { if (op.kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
+  }
+  const [sales, pur, cust, sup] = await Promise.all([
+    api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
+  ])
+  salesList.value = sales || []
+  purchasesList.value = pur || []
+  customers.value = cust || []
+  suppliers.value = sup || []
+  clearSelection()
+  ElMessage.success('已保存收付款流水')
+}
+
+// 存预存/预付：写 customer.deposits / supplier.advances（与详情页同结构，无 order 字段的独立余额）
+async function onRechargeSaved(payload) {
+  const { kind, name, amount, date: d, remark } = payload
+  const get = kind === 'receivable' ? api.getCustomers : api.getSuppliers
+  const save = kind === 'receivable' ? api.saveCustomers : api.saveSuppliers
+  const field = kind === 'receivable' ? 'deposits' : 'advances'
+  const list = await get()
+  const entity = list.find(x => x.name === name)
+  if (!entity) { ElMessage.error('未找到该往来单位'); return }
+  const dateStr = d || new Date().toISOString().slice(0, 10)
+  const now = new Date().toISOString()
+  entity[field] = (entity[field] || []).concat([{
+    date: dateStr,
+    amount: round2(amount),
+    remark: remark || (kind === 'receivable' ? '存入客户预存款' : '存入供应商预付款'),
+    time: now
+  }])
+  try { await save(list) } catch (e) { ElMessage.error(`保存失败：${e.message || '网络异常'}`); return }
+  const [cust, sup] = await Promise.all([api.getCustomers(), api.getSuppliers()])
+  customers.value = cust || []
+  suppliers.value = sup || []
+  ElMessage.success(`已存入${kind === 'receivable' ? '客户预存款' : '供应商预付款'} ¥${round2(amount).toFixed(2)}`)
+}
+
 onMounted(async () => {
   try {
     const [sales, pur, cust, sup] = await Promise.all([
@@ -549,6 +668,10 @@ onMounted(async () => {
 .filter-label { color: var(--text-regular); font-size: var(--fs-base); }
 .filter-sep { color: var(--text-secondary); }
 .search-input { max-width: 380px; }
+.op-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px; background: var(--bg-stat); border-radius: 8px; }
+.op-bar-hint { color: var(--text-secondary); font-size: var(--fs-sub); }
+.batch-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.batch-bar-hint { color: var(--text-secondary); font-size: var(--fs-sub); }
 .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .stat-item { padding: 12px 16px; background: var(--bg-stat); border-radius: 8px; min-width: 0; }
 .stat-item .el-statistic__head,

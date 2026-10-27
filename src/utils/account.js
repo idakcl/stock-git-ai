@@ -192,3 +192,29 @@ export function removePayment(order, kind, index) {
 export function depositSumOf(list) {
   return (list || []).reduce((s, d) => s + Number(d?.amount || 0), 0)
 }
+
+// 合并收付款 / 记一笔的分摊纯函数：把一笔金额按「日期升序、单笔封顶未收」分摊到多张单据。
+// items：[{ order, kind, outstanding }]，outstanding 应已 = netOf(order, kind)（未收/未付）；
+// amount：该次待分配总额（同一往来单位的一次收付）。
+// 分摊规则：按单据日期升序，逐单分配 min(outstanding, 剩余金额)，单笔不超过其未收（不制造负欠款）；
+// 分配后仍有剩余（超额）则回收为 leftover，交由调用方转存预存款/预付款，避免资金泄漏。
+// 纯函数：不碰 IO、不修改入参，便于单测；只产出 amount>0 的分配项，避免产生 0 元流水噪声。
+export function distributePayment(items, amount) {
+  const total = Math.max(0, round2(Number(amount) || 0))
+  const allocations = []
+  let remaining = total
+  // 按单据日期升序；日期相同按单号升序，保证结果稳定可复现（与付款顺序直觉一致）
+  const sorted = (items || []).slice().sort((a, b) => {
+    const da = String(a?.order?.date || '')
+    const db = String(b?.order?.date || '')
+    if (da !== db) return da < db ? -1 : 1
+    return String(a?.order?.id || '') < String(b?.order?.id || '') ? -1 : 1
+  })
+  for (const it of sorted) {
+    const outstanding = Math.max(0, round2(Number(it?.outstanding) || 0))
+    const give = round2(Math.min(outstanding, remaining))
+    if (give > 1e-6) allocations.push({ order: it.order, kind: it.kind, amount: give })
+    remaining = round2(remaining - give)
+  }
+  return { allocations, leftover: round2(remaining) }
+}
