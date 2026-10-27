@@ -58,7 +58,10 @@
             <div class="net-bar-track"><div class="net-bar-fill pay" :style="{ width: netBreakdown.payNetPct + '%' }"></div></div>
             <span class="net-bar-val amount-out">¥ {{ netBreakdown.payNet.toFixed(2) }} · {{ netBreakdown.payNetPct.toFixed(1) }}%</span>
           </div>
-          <div class="net-side-subtitle">金额区间分布（按净额绝对值）</div>
+          <div class="net-side-subtitle net-side-title-row">
+            <span>金额区间分布（按净额绝对值）</span>
+            <TableToolbar filename="来往账-净额区间分布" title="来往账·净额区间分布" :subtitle="bucketSubtitle" :columns="bucketColumns" :rows="bucketExportRows" />
+          </div>
           <div class="net-bar-row" v-for="b in bucketBreakdown.buckets" :key="b.key">
             <span class="net-bar-label">{{ b.label }}</span>
             <div class="net-bar-track"><div class="net-bar-fill bucket" :style="{ width: bucketPct[b.key] + '%' }"></div></div>
@@ -107,7 +110,7 @@
             :rows="partyPaged"
           />
           <div class="table-wrap">
-            <el-table :data="partyPaged" stripe show-summary :summary-method="partySummary" :default-sort="{ prop: 'net', order: 'descending' }">
+            <el-table :data="partyPaged" stripe show-summary :summary-method="partySummary" :default-sort="{ prop: 'net', order: 'descending' }" @sort-change="onPartySortChange">
               <el-table-column label="往来单位" min-width="180" show-overflow-tooltip>
                 <template #default="{ row }">
                   <router-link :to="`${row.partyPath}${row.code || ''}`" class="link">{{ row.party }}</router-link>
@@ -131,7 +134,7 @@
               <el-table-column label="实付" width="110" align="right">
                 <template #default="{ row }"><span :class="row.payPaid > 0 ? 'amount-out' : 'none'">{{ row.payPaid > 0 ? row.payPaid.toFixed(2) : '—' }}</span></template>
               </el-table-column>
-              <el-table-column label="净额(未收−未付)" width="140" align="right" prop="net" sortable>
+              <el-table-column label="净额(未收−未付)" width="140" align="right" prop="net" sortable="custom">
                 <template #default="{ row }">
                   <span :class="row.net > 0 ? 'amount-in' : 'amount-out'">{{ row.net > 0 ? '+' : '' }}{{ row.net.toFixed(2) }}</span>
                 </template>
@@ -221,6 +224,11 @@ const onlyOpen = ref(false)
 const tab = ref('byParty')
 const partyPage = ref(1)
 const orderPage = ref(1)
+const partySortOrder = ref('descending') // 净额列受控排序：descending/ascending/null（全量，跨分页一致）
+
+function onPartySortChange({ prop, order }) {
+  if (prop === 'net') partySortOrder.value = order
+}
 const payDialog = ref(false)
 const payOrder = ref({})
 
@@ -280,13 +288,19 @@ const partyRows = computed(() => {
   return Object.values(map)
 })
 
-const partyFiltered = computed(() => partyRows.value.filter(g => {
-  if (typeFilter.value === 'receivable' && g.recv <= 0 && g.type !== '客户') return false
-  if (typeFilter.value === 'payable' && g.pay <= 0 && g.type !== '供应商') return false
-  if (onlyOpen.value && Math.abs(g.net) <= 1e-6) return false
-  if (!matchText(keyword.value, g.party)) return false
-  return true
-}).sort((a, b) => b.net - a.net))
+const partyFiltered = computed(() => {
+  const rows = partyRows.value.filter(g => {
+    if (typeFilter.value === 'receivable' && g.recv <= 0 && g.type !== '客户') return false
+    if (typeFilter.value === 'payable' && g.pay <= 0 && g.type !== '供应商') return false
+    if (onlyOpen.value && Math.abs(g.net) <= 1e-6) return false
+    if (!matchText(keyword.value, g.party)) return false
+    return true
+  })
+  if (partySortOrder.value === 'ascending') rows.sort((a, b) => a.net - b.net)
+  else if (partySortOrder.value === 'descending') rows.sort((a, b) => b.net - a.net)
+  else rows.sort((a, b) => (a.party < b.party ? -1 : a.party > b.party ? 1 : 0)) // 取消排序时按单位名
+  return rows
+})
 const partyPaged = computed(() => partyFiltered.value.slice((partyPage.value - 1) * PAGE_SIZE, partyPage.value * PAGE_SIZE))
 watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen], () => { partyPage.value = 1 })
 
@@ -338,6 +352,21 @@ const bucketBreakdown = computed(() => {
   return { buckets, total, pct }
 })
 const bucketPct = computed(() => bucketBreakdown.value.pct)
+
+// 金额区间分桶导出数据：区间 / 金额合计 / 占比 / 单位数，随筛选与时间段联动
+const bucketSubtitle = computed(() => '按净额绝对值分桶（随筛选 / 时间段联动）')
+const bucketColumns = [
+  { label: '区间', prop: '区间' },
+  { label: '金额合计(¥)', prop: '金额合计' },
+  { label: '占比(%)', prop: '占比' },
+  { label: '单位数', prop: '单位数' }
+]
+const bucketExportRows = computed(() => bucketBreakdown.value.buckets.map(b => ({
+  区间: b.label,
+  金额合计: b.amount.toFixed(2),
+  占比: bucketPct.value[b.key].toFixed(1),
+  单位数: b.count
+})))
 
 // 往来排行导出数据（债权 Top + 债务 Top 合并，带类别与排名）
 const rankSubtitle = computed(() => '债权 Top 5 与债务 Top 5（随筛选 / 时间段联动）')
@@ -494,6 +523,7 @@ onMounted(async () => {
 .net-side-title { font-weight: 600; margin-bottom: 10px; color: var(--text-regular); font-size: var(--fs-base); }
 .net-side-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .net-side-title-row :deep(.export-bar) { margin-bottom: 0; }
+.net-side-subtitle.net-side-title-row { align-items: center; }
 .net-side-subtitle { font-weight: 600; margin: 14px 0 10px; color: var(--text-regular); font-size: var(--fs-sub); border-top: 1px dashed var(--el-border-color-lighter); padding-top: 10px; }
 .net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
