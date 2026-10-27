@@ -63,6 +63,10 @@
         <el-icon><FolderOpened /></el-icon>
         <span>数据备份</span>
       </el-menu-item>
+      <el-menu-item index="/clear">
+        <el-icon><Delete /></el-icon>
+        <span>清空数据</span>
+      </el-menu-item>
     </el-menu-item-group>
   </el-menu>
 </template>
@@ -71,7 +75,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened
+  Money, Wallet, CreditCard, FolderOpened, Delete
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

@@ -14,6 +14,7 @@ import CustomerDetail from './views/CustomerDetail.vue'
 import PurchaseDetail from './views/PurchaseDetail.vue'
 import SalesDetail from './views/SalesDetail.vue'
 import DataManager from './views/DataManager.vue'
+import ClearData from './views/ClearData.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -30,7 +31,8 @@ const routes = [
   { path: '/report', component: Report },
   { path: '/receivables', component: Receivables },
   { path: '/payables', component: Payables },
-  { path: '/data', component: DataManager }
+  { path: '/data', component: DataManager },
+  { path: '/clear', component: ClearData }
 ]
 
 export default createRouter({
