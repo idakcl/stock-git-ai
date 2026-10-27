@@ -46,7 +46,7 @@
         </div>
         <div class="stat-item">
           <el-statistic title="单据总数" :value="stats.count" :precision="0" />
-          <div class="stat-sub">应收 {{ stats.recvCount }} · 应付 {{ stats.payCount }}</div>
+          <div class="stat-sub">销售单 {{ stats.recvCount }} · 采购单 {{ stats.payCount }}</div>
         </div>
         <div class="stat-item">
           <el-statistic title="预存款合计（客户侧）" :value="stats.depositCust" :precision="2" prefix="¥" value-style="color:var(--color-success)" />
@@ -506,8 +506,10 @@ const orderSummary = ({ columns }) => {
   const due = rows.reduce((s, r) => s + grossOf(r), 0)
   const paid = rows.reduce((s, r) => s + paidOf(r), 0)
   const net = rows.reduce((s, r) => s + netOf(r, r._kind), 0)
+  // 合计文案放在「单号」列（宽列），避免落在第一列选择列（46px）被挤换行
+  const labelIdx = Math.max(0, columns.findIndex(c => c.label === '单号'))
   return columns.map((c, idx) => {
-    if (idx === 0) return `合计（${rows.length} 单）`
+    if (idx === labelIdx) return `合计（${rows.length} 单）`
     if (c.label === orderDueLabel.value) return due.toFixed(2)
     if (c.label === orderPaidLabel.value) return paid.toFixed(2)
     if (c.label === '未收/未付') return net.toFixed(2)
@@ -678,6 +680,7 @@ onMounted(async () => {
 .stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .stat-sub { margin-top: 4px; color: var(--text-secondary); font-size: var(--fs-sub); }
 .funds-tabs { margin-top: 12px; }
+.table-wrap :deep(.el-table__footer .cell) { white-space: nowrap; }
 .pager { margin-top: 12px; justify-content: flex-end; }
 .net-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
 .net-side { padding: 12px 16px; background: var(--bg-stat); border-radius: 8px; min-width: 0; }
