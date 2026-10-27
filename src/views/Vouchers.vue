@@ -13,15 +13,29 @@
         <el-tab-pane label="付款单" name="payment-vouchers" />
       </el-tabs>
 
+      <div class="filter-bar">
+        <el-date-picker
+          v-model="dateRange"
+          type="daterange"
+          value-format="YYYY-MM-DD"
+          range-separator="至"
+          start-placeholder="开始日期"
+          end-placeholder="结束日期"
+          unlink-panels
+        />
+        <el-button v-if="dateRange && dateRange.length" text type="primary" @click="dateRange = null">清除筛选</el-button>
+        <span class="filter-hint">按单据日期筛选</span>
+      </div>
+
       <TableToolbar
         :filename="`收付款单-${tabLabel}`"
         :title="`收付款单·${tabLabel}`"
         :subtitle="subtitle"
         :columns="listColumns"
-        :rows="currentList"
+        :rows="filteredList"
       />
       <div class="table-wrap">
-        <el-table :data="currentList" stripe @row-click="openDrawer">
+        <el-table :data="filteredList" stripe @row-click="openDrawer">
           <el-table-column prop="code" label="单据编码" width="200" show-overflow-tooltip />
           <el-table-column prop="party" label="往来单位" min-width="160" show-overflow-tooltip />
           <el-table-column prop="date" label="日期" width="130" />
@@ -36,7 +50,11 @@
           </el-table-column>
         </el-table>
       </div>
-      <el-empty v-if="!currentList.length" :description="`暂无${tabLabel}`" />
+      <el-empty v-if="!filteredList.length" :description="`暂无${tabLabel}`" />
+      <div class="sum-bar" v-if="filteredList.length">
+        合计（筛选后）：<b>¥ {{ sumTotal.toFixed(2) }}</b>
+        <span class="sum-note">· 共 {{ filteredList.length }} 张{{ tabLabel }}</span>
+      </div>
     </el-card>
 
     <!-- 明细抽屉 -->
@@ -99,6 +117,16 @@ const orderMeta = ref({})
 const tabLabel = computed(() => tab.value === 'receipts' ? '收款单' : '付款单')
 const currentList = computed(() => (tab.value === 'receipts' ? receipts.value : vouchers.value))
 
+// 时间段筛选（按单据日期）：清空后回退为全量
+const dateRange = ref(null)
+const filteredList = computed(() => {
+  const list = currentList.value
+  if (!dateRange.value || !dateRange.value.length) return list
+  const [s, e] = dateRange.value
+  return list.filter(v => v.date >= s && v.date <= e)
+})
+const sumTotal = computed(() => filteredList.value.reduce((a, v) => a + Number(v.total || 0), 0))
+
 const listColumns = [
   { label: '单据编码', prop: 'code' },
   { label: '往来单位', prop: 'party' },
@@ -106,7 +134,7 @@ const listColumns = [
   { label: '本次金额', value: r => Number(r.total || 0).toFixed(2) },
   { label: '备注', prop: 'remark' }
 ]
-const subtitle = computed(() => `共 ${currentList.value.length} 张${tabLabel.value}`)
+const subtitle = computed(() => `${tabLabel.value}共 ${filteredList.value.length} 张 · 合计 ¥${sumTotal.value.toFixed(2)}`)
 
 // 抽屉明细行：补上源单据的日期与备注（与 Vouchers 单据模型一致，remark 置末列）
 function enrichedItems(items) {
@@ -169,6 +197,11 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .header-sub { color: var(--text-secondary); font-size: var(--fs-sub); font-weight: 400; }
 .vtabs { margin-bottom: 12px; }
+.filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+.filter-hint { color: var(--text-secondary); font-size: var(--fs-sub); }
+.sum-bar { margin-top: 10px; text-align: right; color: var(--text-secondary); font-size: var(--fs-sub); }
+.sum-bar b { color: var(--color-primary); font-size: 14px; }
+.sum-note { margin-left: 8px; }
 .table-wrap { margin-bottom: 12px; }
 .vh { margin-bottom: 12px; }
 .drawer-toolbar { margin-bottom: 10px; }
