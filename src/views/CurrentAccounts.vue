@@ -44,6 +44,50 @@
         </div>
       </div>
 
+      <!-- 净额分布与排行：按净额正负拆分占比 + Top 债权/债务 -->
+      <div class="net-breakdown" v-if="netBreakdown.total > 0">
+        <div class="net-side">
+          <div class="net-side-title">净额构成（未收 − 未付）</div>
+          <div class="net-bar-row">
+            <span class="net-bar-label">应收净额（客户欠我方）</span>
+            <div class="net-bar-track"><div class="net-bar-fill recv" :style="{ width: netBreakdown.recvNetPct + '%' }"></div></div>
+            <span class="net-bar-val amount-in">¥ {{ netBreakdown.recvNet.toFixed(2) }} · {{ netBreakdown.recvNetPct.toFixed(1) }}%</span>
+          </div>
+          <div class="net-bar-row">
+            <span class="net-bar-label">应付净额（我方欠供应商）</span>
+            <div class="net-bar-track"><div class="net-bar-fill pay" :style="{ width: netBreakdown.payNetPct + '%' }"></div></div>
+            <span class="net-bar-val amount-out">¥ {{ netBreakdown.payNet.toFixed(2) }} · {{ netBreakdown.payNetPct.toFixed(1) }}%</span>
+          </div>
+        </div>
+        <div class="net-side">
+          <div class="net-side-title">往来排行（按净额）</div>
+          <div class="rank-group">
+            <div class="rank-head">债权 Top · 客户欠我方</div>
+            <div class="rank-list">
+              <div class="rank-empty" v-if="!topDebtors.length">——</div>
+              <div class="rank-item" v-for="(r, i) in topDebtors" :key="'d' + r.party">
+                <span class="rank-no">{{ i + 1 }}</span>
+                <router-link :to="`${r.partyPath}${r.code || ''}`" class="rank-name link">{{ r.party }}</router-link>
+                <span class="rank-tag recv">欠我</span>
+                <span class="rank-amt amount-in">+{{ r.net.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="rank-group">
+            <div class="rank-head">债务 Top · 我方欠供应商</div>
+            <div class="rank-list">
+              <div class="rank-empty" v-if="!topCreditors.length">——</div>
+              <div class="rank-item" v-for="(r, i) in topCreditors" :key="'c' + r.party">
+                <span class="rank-no">{{ i + 1 }}</span>
+                <router-link :to="`${r.partyPath}${r.code || ''}`" class="rank-name link">{{ r.party }}</router-link>
+                <span class="rank-tag pay">我欠</span>
+                <span class="rank-amt amount-out">{{ r.net.toFixed(2) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <el-tabs v-model="tab" class="funds-tabs">
         <el-tab-pane label="按往来单位汇总" name="byParty">
           <TableToolbar
@@ -127,6 +171,11 @@
                 </template>
               </el-table-column>
               <el-table-column prop="remark" label="备注" width="120" show-overflow-tooltip />
+              <el-table-column label="操作" width="100" class-name="ops-col">
+                <template #default="{ row }">
+                  <el-button size="small" :type="row._kind === 'receivable' ? 'success' : 'warning'" @click="openPay(row)">{{ row._kind === 'receivable' ? '收款' : '付款' }}</el-button>
+                </template>
+              </el-table-column>
             </el-table>
           </div>
           <el-pagination v-model:current-page="orderPage" :page-size="PAGE_SIZE" :total="orderFiltered.length" layout="total, prev, pager, next" background class="pager" />
@@ -134,15 +183,20 @@
         </el-tab-pane>
       </el-tabs>
     </el-card>
+
+    <PaymentDialog v-model="payDialog" :order="payOrder" :kind="payOrder._kind || 'receivable'" :deposit-balance="depositBalanceOf(payOrder)" @saved="onPaySaved" />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { grossOf, netOf, isSettledOf, round2 } from '../utils/account'
+import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf } from '../utils/account'
+import { applyDepositFlows } from '../utils/deposit'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
+import PaymentDialog from '../components/PaymentDialog.vue'
 
 const PAGE_SIZE = 60
 const salesList = ref([])
@@ -158,6 +212,8 @@ const onlyOpen = ref(false)
 const tab = ref('byParty')
 const partyPage = ref(1)
 const orderPage = ref(1)
+const payDialog = ref(false)
+const payOrder = ref({})
 
 // 往来单位名 → 编码，供列表点名跳转详情
 const customerCode = computed(() => { const m = {}; (customers.value || []).forEach(c => { if (c && c.name) m[c.name] = c.code }); return m })
@@ -238,6 +294,23 @@ const stats = computed(() => {
   }
 })
 
+// 净额分布：按净额正负拆分（应收净额 = 客户欠我方，应付净额 = 我方欠供应商），用于占比展示
+const netBreakdown = computed(() => {
+  const rows = partyFiltered.value
+  const recvNet = round2(rows.reduce((s, r) => s + (r.net > 0 ? r.net : 0), 0))
+  const payNet = round2(rows.reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0))
+  const total = recvNet + payNet
+  return {
+    recvNet, payNet, total,
+    recvNetPct: total > 0 ? round2((recvNet / total) * 100) : 0,
+    payNetPct: total > 0 ? round2((payNet / total) * 100) : 0
+  }
+})
+
+// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），随筛选/时间段联动
+const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, 5))
+const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, 5))
+
 const subtitle = computed(() => {
   const parts = [`共 ${partyFiltered.value.length} 个往来单位`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
@@ -286,6 +359,63 @@ const orderSummary = ({ columns }) => {
   })
 }
 
+// 往来单位预存款/预付款可用余额（供「用预存款支付」抵扣）
+const depositBalanceOf = (row) => {
+  const src = row && row._kind === 'receivable' ? customers.value : suppliers.value
+  const name = row && (row._kind === 'receivable' ? row.customer : row.supplier)
+  const p = (src || []).find(x => x.name === name)
+  return depositSumOf(p && (row._kind === 'receivable' ? p.deposits : p.advances))
+}
+
+function openPay(row) {
+  payOrder.value = row
+  payDialog.value = true
+}
+
+// 保存登记收/付款：写回源单据 → 持久化 → 重新拉取，并处理超额转存/抵扣的预存款流水
+async function onPaySaved(updated, payload) {
+  const kind = updated._kind === 'payable' ? 'payable' : 'receivable'
+  const src = kind === 'receivable' ? salesList.value : purchasesList.value
+  const idx = (src || []).findIndex(r => r.id === updated.id)
+  if (idx >= 0) {
+    src[idx] = {
+      ...src[idx],
+      payments: updated.payments,
+      received: updated.received,
+      paid: updated.paid,
+      discount: updated.discount
+    }
+  }
+  try {
+    await (kind === 'receivable' ? api.saveSales(salesList.value) : api.savePurchases(purchasesList.value))
+  } catch (e) {
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
+  const [sales, pur, cust, sup] = await Promise.all([
+    api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
+  ])
+  salesList.value = sales || []
+  purchasesList.value = pur || []
+  customers.value = cust || []
+  suppliers.value = sup || []
+  payDialog.value = false
+  ElMessage.success(`已保存${kind === 'receivable' ? '收款' : '付款'}流水`)
+  // 超额转存预存款/预付款、用预存款/预付款抵扣：按订单 id 幂等重建流水（资金不泄漏）
+  const addAmt = Number(payload?.add?.amount || 0)
+  const deductAmt = Number(payload?.deduct?.amount || 0)
+  if (addAmt > 0 || deductAmt > 0) {
+    const name = kind === 'receivable' ? updated.customer : updated.supplier
+    const list2 = await applyDepositFlows(api, kind, name, updated.id, addAmt, deductAmt)
+    if (list2) { if (kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
+    const parts = []
+    const depWord = kind === 'receivable' ? '客户预存款' : '供应商预付款'
+    if (addAmt > 0) parts.push(`存入${depWord} ¥${addAmt.toFixed(2)}`)
+    if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
+    if (parts.length) ElMessage.success(parts.join('；'))
+  }
+}
+
 onMounted(async () => {
   try {
     const [sales, pur, cust, sup] = await Promise.all([
@@ -318,6 +448,31 @@ onMounted(async () => {
 .stat-sub { margin-top: 4px; color: var(--text-secondary); font-size: var(--fs-sub); }
 .funds-tabs { margin-top: 12px; }
 .pager { margin-top: 12px; justify-content: flex-end; }
+.net-breakdown { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.net-side { padding: 12px 16px; background: var(--bg-stat); border-radius: 8px; min-width: 0; }
+.net-side-title { font-weight: 600; margin-bottom: 10px; color: var(--text-regular); font-size: var(--fs-base); }
+.net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+.net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
+.net-bar-track { flex: 1; min-width: 80px; height: 12px; background: var(--el-fill-color-light); border-radius: 6px; overflow: hidden; }
+.net-bar-fill { height: 100%; border-radius: 6px; transition: width .3s ease; }
+.net-bar-fill.recv { background: var(--color-success); }
+.net-bar-fill.pay { background: var(--el-color-primary); }
+.net-bar-val { font-size: var(--fs-sub); font-weight: 600; white-space: nowrap; }
+.rank-group { margin-bottom: 10px; }
+.rank-head { font-size: var(--fs-sub); color: var(--text-secondary); margin-bottom: 6px; }
+.rank-list { display: flex; flex-direction: column; gap: 4px; }
+.rank-item { display: flex; align-items: center; gap: 8px; font-size: var(--fs-base); }
+.rank-no { width: 18px; height: 18px; line-height: 18px; text-align: center; border-radius: 50%; background: var(--el-fill-color); color: var(--text-secondary); font-size: var(--fs-sub); flex-shrink: 0; }
+.rank-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rank-tag { font-size: var(--fs-sub); padding: 0 6px; border-radius: 4px; }
+.rank-tag.recv { color: var(--color-success); background: var(--el-color-success-light-9); }
+.rank-tag.pay { color: var(--el-color-primary); background: var(--el-color-primary-light-9); }
+.rank-amt { font-weight: 600; white-space: nowrap; }
+.rank-empty { color: var(--text-placeholder); font-size: var(--fs-sub); }
+@media (max-width: 720px) {
+  .net-breakdown { grid-template-columns: 1fr; }
+  .net-bar-label { width: 100%; }
+}
 .amount-in { color: var(--color-success); font-weight: 600; }
 .amount-out { color: var(--el-color-primary); font-weight: 600; }
 .debt { color: var(--color-danger); font-weight: 600; }
