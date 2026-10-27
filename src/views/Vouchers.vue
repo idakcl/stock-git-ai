@@ -8,6 +8,21 @@
         </div>
       </template>
 
+      <div class="stat-grid">
+        <div class="stat-item">
+          <el-statistic title="收款单累计" :value="receiptSum" :precision="2" prefix="¥" value-style="color:var(--color-success)" />
+          <div class="stat-sub">{{ receipts.length }} 张</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="付款单累计" :value="voucherSum" :precision="2" prefix="¥" value-style="color:var(--el-color-primary)" />
+          <div class="stat-sub">{{ vouchers.length }} 张</div>
+        </div>
+        <div class="stat-item">
+          <el-statistic title="净额（收−付）" :value="netSum" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
+          <div class="stat-sub">资金净流入</div>
+        </div>
+      </div>
+
       <el-tabs v-model="tab" class="vtabs">
         <el-tab-pane label="收款单" name="receipts" />
         <el-tab-pane label="付款单" name="payment-vouchers" />
@@ -24,7 +39,11 @@
           unlink-panels
         />
         <el-button v-if="dateRange && dateRange.length" text type="primary" @click="dateRange = null">清除筛选</el-button>
-        <span class="filter-hint">按单据日期筛选</span>
+        <span class="filter-label" style="margin-left:12px">往来单位</span>
+        <el-select v-model="partyFilter" clearable filterable placeholder="全部往来单位" style="width:220px">
+          <el-option v-for="p in partyOptions" :key="p" :label="p" :value="p" />
+        </el-select>
+        <span class="filter-hint">按单据日期 / 往来单位筛选</span>
       </div>
 
       <TableToolbar
@@ -117,15 +136,27 @@ const orderMeta = ref({})
 const tabLabel = computed(() => tab.value === 'receipts' ? '收款单' : '付款单')
 const currentList = computed(() => (tab.value === 'receipts' ? receipts.value : vouchers.value))
 
-// 时间段筛选（按单据日期）：清空后回退为全量
+// 时间段筛选（按单据日期）+ 往来单位筛选：清空后回退为全量
 const dateRange = ref(null)
+const partyFilter = ref('')
 const filteredList = computed(() => {
-  const list = currentList.value
-  if (!dateRange.value || !dateRange.value.length) return list
-  const [s, e] = dateRange.value
-  return list.filter(v => v.date >= s && v.date <= e)
+  let out = currentList.value
+  if (dateRange.value && dateRange.value.length) {
+    const [s, e] = dateRange.value
+    out = out.filter(v => v.date >= s && v.date <= e)
+  }
+  if (partyFilter.value) out = out.filter(v => v.party === partyFilter.value)
+  // 默认按单据日期倒序（最新在前），同日按单据编码倒序
+  return [...out].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.code || '').localeCompare(a.code || ''))
 })
 const sumTotal = computed(() => filteredList.value.reduce((a, v) => a + Number(v.total || 0), 0))
+// 往来单位下拉选项（收款单 + 付款单去重）
+const partyOptions = computed(() => [...new Set([...receipts.value, ...vouchers.value].map(v => v.party).filter(Boolean))])
+// 累计总览（全部，不随筛选变化）：收款单合计 / 付款单合计 / 净额
+const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+const receiptSum = computed(() => (receipts.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
+const voucherSum = computed(() => (vouchers.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
+const netSum = computed(() => round2(receiptSum.value - voucherSum.value))
 
 const listColumns = [
   { label: '单据编码', prop: 'code' },
@@ -197,6 +228,12 @@ onMounted(async () => {
 .card-header { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .header-sub { color: var(--text-secondary); font-size: var(--fs-sub); font-weight: 400; }
 .vtabs { margin-bottom: 12px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.stat-item { padding: 12px 16px; background:var(--bg-stat); border-radius: 8px; min-width: 0; }
+.stat-item .el-statistic__head,
+.stat-item .el-statistic__content { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.stat-sub { margin-top: 4px; color:var(--text-secondary); font-size:var(--fs-sub); }
+.filter-label { color:var(--text-regular); font-size:var(--fs-base); }
 .filter-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
 .filter-hint { color: var(--text-secondary); font-size: var(--fs-sub); }
 .sum-bar { margin-top: 10px; text-align: right; color: var(--text-secondary); font-size: var(--fs-sub); }

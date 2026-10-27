@@ -65,6 +65,12 @@
             </el-button>
           </template>
         </el-table-column>
+        <el-table-column label="收付款单" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="voucherCodesOf(row).length" class="voucher-codes">{{ voucherCodesOf(row).join('、') }}</span>
+            <span v-else class="none">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
         <el-table-column label="操作" width="400" class-name="ops-col">
           <template #default="{ row }"><el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button><el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button><el-button size="small" type="success" @click="openPay(row)">收款</el-button><el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button><el-button size="small" type="danger" @click="remove(row)">删除</el-button></template>
@@ -177,6 +183,8 @@ watch([keyword, dateStart, dateEnd], () => { page.value = 1 })
 const settleLabelOf = (row) => isSettledOf(receivableOf(row), row.settle) ? '结清' : '挂账'
 // 金额驱动结清（未收为 0 但库内仍挂账）：标签已按金额显示结清，禁止再手动改挂账
 const autoSettled = (row) => receivableOf(row) <= 0 && (row.settle || '挂账') !== '结清'
+// 该单各笔收款流水所属的资金单据编码（SK-）：去重后展示，便于一眼看清哪张收款单覆盖本单
+const voucherCodesOf = (row) => [...new Set((ensurePayments(row, 'received') || []).map(p => p.voucher).filter(Boolean))]
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
@@ -195,6 +203,7 @@ const exportColumns = [
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未收', value: r => receivableOf(r).toFixed(2) },
   { label: '结算', value: r => settleLabelOf(r) },
+  { label: '收付款单', value: r => voucherCodesOf(r).join('、') },
   { label: '备注', prop: 'remark' }
 ]
 
@@ -410,4 +419,5 @@ async function remove(row) {
 .paid-summary{display:flex;gap:8px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);align-items:baseline;}
 .paid-summary .hint{color:var(--text-placeholder);}
 .pay-count{color:var(--text-secondary);font-size:var(--fs-sub);margin-left:2px;}
+.voucher-codes{color:var(--text-secondary);}
 </style>

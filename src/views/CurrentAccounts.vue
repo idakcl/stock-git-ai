@@ -705,7 +705,13 @@ async function onBatchApplied(groups) {
   receiptsList.value = rec || []
   vouchersList.value = pv || []
   clearSelection()
-  ElMessage.success('已保存收付款流水')
+  // 成功提示回显本次生成的资金单据编码，便于核对（记一笔/合并收付款每组各生成一张）
+  const recvCodes = newReceipts.map(v => v.code)
+  const payCodes = newVouchers.map(v => v.code)
+  let msg = '已保存收付款流水'
+  if (recvCodes.length) msg += `；收款单 ${recvCodes.join('、')}`
+  if (payCodes.length) msg += `；付款单 ${payCodes.join('、')}`
+  ElMessage.success(msg)
 }
 
 // 存预存/预付：写 customer.deposits / supplier.advances（与详情页同结构，无 order 字段的独立余额）
