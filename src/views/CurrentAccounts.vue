@@ -44,8 +44,8 @@
         </div>
       </div>
 
-      <!-- 净额分布与排行：按净额正负拆分占比 + Top 债权/债务 -->
-      <div class="net-breakdown" v-if="netBreakdown.total > 0">
+      <!-- 净额分布与排行：按净额正负拆分占比 + Top 债权/债务（只要有往来单位就展示，避免结清时整块消失） -->
+      <div class="net-breakdown" v-if="partyFiltered.length > 0">
         <div class="net-side">
           <div class="net-side-title">净额构成（未收 − 未付）</div>
           <div class="net-bar-row">
@@ -78,6 +78,13 @@
               </el-select>
             </div>
             <TableToolbar filename="来往账-债权债务排行" title="来往账·债权债务排行" :subtitle="rankSubtitle" :columns="rankColumns" :rows="rankExportRows" />
+          </div>
+          <div class="net-side-title-row rank-type-filter">
+            <el-radio-group v-model="partyTypeFilter" size="small">
+              <el-radio-button value="all">全部</el-radio-button>
+              <el-radio-button value="customer">只看客户</el-radio-button>
+              <el-radio-button value="supplier">只看供应商</el-radio-button>
+            </el-radio-group>
           </div>
           <div class="rank-group">
             <div class="rank-head">债权 Top · 客户欠我方</div>
@@ -222,15 +229,34 @@ const purchasesList = ref([])
 const customers = ref([])
 const suppliers = ref([])
 
-const typeFilter = ref('')
+// 排序 / 筛选状态记忆到 localStorage，刷新后自动恢复
+const LS = {
+  partySort: 'ca_partySort',
+  rankTopN: 'ca_rankTopN',
+  typeFilter: 'ca_typeFilter',
+  onlyOpen: 'ca_onlyOpen',
+  partyTypeFilter: 'ca_partyTypeFilter'
+}
+const loadLS = (key, fallback) => {
+  try { const v = localStorage.getItem(key); return v == null ? fallback : JSON.parse(v) } catch { return fallback }
+}
+const typeFilter = ref(loadLS(LS.typeFilter, ''))
 const dateStart = ref('')
 const dateEnd = ref('')
 const keyword = ref('')
-const onlyOpen = ref(false)
+const onlyOpen = ref(loadLS(LS.onlyOpen, false))
 const tab = ref('byParty')
 const partyPage = ref(1)
 const orderPage = ref(1)
-const partySort = ref({ prop: 'net', order: 'descending' }) // 受控排序：任意金额列，全量跨分页一致
+const partySort = ref(loadLS(LS.partySort, { prop: 'net', order: 'descending' })) // 受控排序：任意金额列，全量跨分页一致
+const rankTopN = ref(loadLS(LS.rankTopN, 5)) // 排行 Top 数量
+const partyTypeFilter = ref(loadLS(LS.partyTypeFilter, 'all')) // 全部 / 只看客户 / 只看供应商
+
+watch(partySort, v => { try { localStorage.setItem(LS.partySort, JSON.stringify(v)) } catch {} }, { deep: true })
+watch(rankTopN, v => { try { localStorage.setItem(LS.rankTopN, JSON.stringify(v)) } catch {} })
+watch(typeFilter, v => { try { localStorage.setItem(LS.typeFilter, JSON.stringify(v)) } catch {} })
+watch(onlyOpen, v => { try { localStorage.setItem(LS.onlyOpen, JSON.stringify(v)) } catch {} })
+watch(partyTypeFilter, v => { try { localStorage.setItem(LS.partyTypeFilter, JSON.stringify(v)) } catch {} })
 
 function onPartySortChange({ prop, order }) {
   partySort.value = { prop, order }
@@ -298,6 +324,8 @@ const partyFiltered = computed(() => {
   const rows = partyRows.value.filter(g => {
     if (typeFilter.value === 'receivable' && g.recv <= 0 && g.type !== '客户') return false
     if (typeFilter.value === 'payable' && g.pay <= 0 && g.type !== '供应商') return false
+    if (partyTypeFilter.value === 'customer' && !g.type.includes('客户')) return false
+    if (partyTypeFilter.value === 'supplier' && !g.type.includes('供应商')) return false
     if (onlyOpen.value && Math.abs(g.net) <= 1e-6) return false
     if (!matchText(keyword.value, g.party)) return false
     return true
@@ -312,7 +340,7 @@ const partyFiltered = computed(() => {
   return rows
 })
 const partyPaged = computed(() => partyFiltered.value.slice((partyPage.value - 1) * PAGE_SIZE, partyPage.value * PAGE_SIZE))
-watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen], () => { partyPage.value = 1 })
+watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen, partyTypeFilter], () => { partyPage.value = 1 })
 
 const stats = computed(() => {
   const rows = partyFiltered.value
@@ -340,8 +368,7 @@ const netBreakdown = computed(() => {
   }
 })
 
-// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），数量可由 rankTopN 配置
-const rankTopN = ref(5)
+// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），数量可由 rankTopN 配置（记忆到本地）
 const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, rankTopN.value))
 const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, rankTopN.value))
 
@@ -537,6 +564,7 @@ onMounted(async () => {
 .net-side-subtitle.net-side-title-row { align-items: center; }
 .rank-topn { display: flex; align-items: center; gap: 4px; }
 .rank-topn-label { font-size: var(--fs-sub); color: var(--text-secondary); }
+.rank-type-filter { margin: 0 0 10px; }
 .net-side-subtitle { font-weight: 600; margin: 14px 0 10px; color: var(--text-regular); font-size: var(--fs-sub); border-top: 1px dashed var(--el-border-color-lighter); padding-top: 10px; }
 .net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
