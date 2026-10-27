@@ -246,7 +246,7 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
-import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment } from '../utils/account'
+import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment, syncPayments } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -574,9 +574,13 @@ async function onPaySaved(updated, payload) {
   }
 }
 
-// 合并收付款 / 记一笔 统一写回：groups:[{party,kind,amount,date,remark,orderIds}]
-// 按单位分组，用 distributePayment 把每组金额按日期升序、封顶未收分摊到名下单据；
-// 超额（leftover）转存预存款/预付款（复用 applyDepositFlows 幂等逻辑，避免资金泄漏）。
+// 合并收付款 / 记一笔 统一写回：groups:[{party,kind,amount,date,remark,orderIds,discounts,settleIds}]
+// 逐单流程（保持与单单据 PaymentDialog 全站口径一致）：
+//   1) 应用逐单新增优惠（在单据已有 discount 基础上追加）；
+//   2) 用 distributePayment 把每组金额按日期升序、封顶「优惠后未收」分摊到勾选单据；
+//   3) 标记「结清」的单据：若分摊后仍有未收，差额计入优惠（抹零结清），确保净额为 0；
+//   4) 超额（leftover）转存预存款/预付款（复用 applyDepositFlows 幂等逻辑，避免资金泄漏）。
+// BatchPayDialog 不传 discounts/settleIds，此处按缺失处理（仅分摊金额），保持兼容。
 async function onBatchApplied(groups) {
   const ts = Date.now()
   const salesMap = {}
@@ -584,15 +588,40 @@ async function onBatchApplied(groups) {
   const depositOps = []
   for (const g of (groups || [])) {
     const src = g.kind === 'receivable' ? salesList.value : purchasesList.value
-    const items = (g.orderIds || []).map(id => {
-      const order = (src || []).find(r => r.id === id)
-      return order ? { order, kind: g.kind, outstanding: netOf(order, g.kind) } : null
-    }).filter(Boolean)
+    const orderIds = (g.orderIds || [])
+    // 工作副本：先叠加逐单新增优惠（不污染源数据）
+    const working = {}
+    for (const id of orderIds) {
+      const base = (src || []).find(r => r.id === id)
+      if (!base) continue
+      const addDisc = Number((g.discounts && g.discounts[id]) || 0)
+      const o = { ...base }
+      if (addDisc > 0) o.discount = round2(Number(o.discount || 0) + addDisc)
+      working[id] = o
+    }
+    // 按「优惠后未收」分摊金额
+    const items = orderIds.filter(id => working[id]).map(id => ({
+      order: working[id], kind: g.kind, outstanding: netOf(working[id], g.kind)
+    }))
     const { allocations, leftover } = distributePayment(items, g.amount)
     for (const a of allocations) {
-      const updated = appendPayment(a.order, a.kind, { date: g.date, amount: a.amount, remark: g.remark || (g.kind === 'receivable' ? '合并收款' : '合并付款') })
-      if (g.kind === 'receivable') salesMap[updated.id] = updated
-      else purchasesMap[updated.id] = updated
+      working[a.order.id] = appendPayment(a.order, a.kind, { date: g.date, amount: a.amount, remark: g.remark || (g.kind === 'receivable' ? '合并收款' : '合并付款') })
+    }
+    // 结清标记：差额自动计入优惠（抹零结清），保证净额归零
+    const settleIds = (g.settleIds || []).filter(id => working[id])
+    for (const id of settleIds) {
+      const o = working[id]
+      const net = netOf(o, g.kind)
+      if (net > 0.005) {
+        o.discount = round2(Number(o.discount || 0) + net)
+        working[id] = syncPayments(o, g.kind)
+      }
+    }
+    // 收集改动的单据
+    for (const id of orderIds) {
+      if (!working[id]) continue
+      if (g.kind === 'receivable') salesMap[id] = working[id]
+      else purchasesMap[id] = working[id]
     }
     if (leftover > 0.005) depositOps.push({ kind: g.kind, name: g.party, amount: leftover })
   }
