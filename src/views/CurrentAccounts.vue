@@ -71,6 +71,12 @@
         <div class="net-side">
           <div class="net-side-title net-side-title-row">
             <span>往来排行（按净额）</span>
+            <div class="rank-topn">
+              <span class="rank-topn-label">Top</span>
+              <el-select v-model="rankTopN" style="width:92px">
+                <el-option v-for="n in [3, 5, 10, 20]" :key="n" :label="n" :value="n" />
+              </el-select>
+            </div>
             <TableToolbar filename="来往账-债权债务排行" title="来往账·债权债务排行" :subtitle="rankSubtitle" :columns="rankColumns" :rows="rankExportRows" />
           </div>
           <div class="rank-group">
@@ -121,17 +127,17 @@
                   <el-tag :type="row.type === '客户' ? 'success' : (row.type === '供应商' ? 'warning' : '')" size="small" disable-transitions>{{ row.type }}</el-tag>
                 </template>
               </el-table-column>
-              <el-table-column prop="count" label="单数" width="80" align="right" />
-              <el-table-column label="应收(折后)" width="120" align="right">
+              <el-table-column prop="count" label="单数" width="80" align="right" sortable="custom" />
+              <el-table-column label="应收(折后)" width="120" align="right" prop="recv" sortable="custom">
                 <template #default="{ row }"><span :class="row.recv > 0 ? 'amount-in' : 'none'">{{ row.recv > 0 ? row.recv.toFixed(2) : '—' }}</span></template>
               </el-table-column>
-              <el-table-column label="实收" width="110" align="right">
+              <el-table-column label="实收" width="110" align="right" prop="recvPaid" sortable="custom">
                 <template #default="{ row }"><span :class="row.recvPaid > 0 ? 'amount-in' : 'none'">{{ row.recvPaid > 0 ? row.recvPaid.toFixed(2) : '—' }}</span></template>
               </el-table-column>
-              <el-table-column label="应付(折后)" width="120" align="right">
+              <el-table-column label="应付(折后)" width="120" align="right" prop="pay" sortable="custom">
                 <template #default="{ row }"><span :class="row.pay > 0 ? 'amount-out' : 'none'">{{ row.pay > 0 ? row.pay.toFixed(2) : '—' }}</span></template>
               </el-table-column>
-              <el-table-column label="实付" width="110" align="right">
+              <el-table-column label="实付" width="110" align="right" prop="payPaid" sortable="custom">
                 <template #default="{ row }"><span :class="row.payPaid > 0 ? 'amount-out' : 'none'">{{ row.payPaid > 0 ? row.payPaid.toFixed(2) : '—' }}</span></template>
               </el-table-column>
               <el-table-column label="净额(未收−未付)" width="140" align="right" prop="net" sortable="custom">
@@ -224,10 +230,10 @@ const onlyOpen = ref(false)
 const tab = ref('byParty')
 const partyPage = ref(1)
 const orderPage = ref(1)
-const partySortOrder = ref('descending') // 净额列受控排序：descending/ascending/null（全量，跨分页一致）
+const partySort = ref({ prop: 'net', order: 'descending' }) // 受控排序：任意金额列，全量跨分页一致
 
 function onPartySortChange({ prop, order }) {
-  if (prop === 'net') partySortOrder.value = order
+  partySort.value = { prop, order }
 }
 const payDialog = ref(false)
 const payOrder = ref({})
@@ -296,9 +302,13 @@ const partyFiltered = computed(() => {
     if (!matchText(keyword.value, g.party)) return false
     return true
   })
-  if (partySortOrder.value === 'ascending') rows.sort((a, b) => a.net - b.net)
-  else if (partySortOrder.value === 'descending') rows.sort((a, b) => b.net - a.net)
-  else rows.sort((a, b) => (a.party < b.party ? -1 : a.party > b.party ? 1 : 0)) // 取消排序时按单位名
+  const { prop, order } = partySort.value
+  if (!order) rows.sort((a, b) => (a.party < b.party ? -1 : a.party > b.party ? 1 : 0)) // 取消排序时按单位名
+  else {
+    const dir = order === 'ascending' ? 1 : -1
+    const num = (r) => Number(r[prop] || 0)
+    rows.sort((a, b) => (num(a) - num(b)) * dir)
+  }
   return rows
 })
 const partyPaged = computed(() => partyFiltered.value.slice((partyPage.value - 1) * PAGE_SIZE, partyPage.value * PAGE_SIZE))
@@ -330,9 +340,10 @@ const netBreakdown = computed(() => {
   }
 })
 
-// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），随筛选/时间段联动
-const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, 5))
-const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, 5))
+// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），数量可由 rankTopN 配置
+const rankTopN = ref(5)
+const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, rankTopN.value))
+const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, rankTopN.value))
 
 // 金额区间分布：按净额绝对值分桶（>1万 / 1千~1万 / ≤1千），统计各桶金额合计与单位数占比
 const bucketBreakdown = computed(() => {
@@ -369,7 +380,7 @@ const bucketExportRows = computed(() => bucketBreakdown.value.buckets.map(b => (
 })))
 
 // 往来排行导出数据（债权 Top + 债务 Top 合并，带类别与排名）
-const rankSubtitle = computed(() => '债权 Top 5 与债务 Top 5（随筛选 / 时间段联动）')
+const rankSubtitle = computed(() => `债权 Top ${rankTopN.value} 与债务 Top ${rankTopN.value}（随筛选 / 时间段联动）`)
 const rankColumns = [
   { label: '排名', prop: '排名' },
   { label: '类别', prop: '类别' },
@@ -524,6 +535,8 @@ onMounted(async () => {
 .net-side-title-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .net-side-title-row :deep(.export-bar) { margin-bottom: 0; }
 .net-side-subtitle.net-side-title-row { align-items: center; }
+.rank-topn { display: flex; align-items: center; gap: 4px; }
+.rank-topn-label { font-size: var(--fs-sub); color: var(--text-secondary); }
 .net-side-subtitle { font-weight: 600; margin: 14px 0 10px; color: var(--text-regular); font-size: var(--fs-sub); border-top: 1px dashed var(--el-border-color-lighter); padding-top: 10px; }
 .net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
