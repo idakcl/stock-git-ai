@@ -12,9 +12,9 @@
           <el-option v-for="p in partyOptions" :key="p" :label="p" :value="p" />
         </el-select>
       </el-form-item>
-      <el-form-item label="收/付款金额" required>
+      <el-form-item label="收付金额" required>
         <div class="rec-amount">
-          <el-input-number v-model="amount" :min="0" :max="99999999" :precision="2" :controls="false" style="width:180px" />
+          <el-input-number v-model="amount" :min="0" :max="99999999" :precision="2" :controls="false" class="rec-amount-input" />
           <el-button size="small" :disabled="selectedDue <= 0.005" @click="fillSelected">按所选未结合计填入</el-button>
         </div>
         <!-- 三个数一条链实时联动：所选未结合计（优惠后）→ 本次优惠 → 结清张数 → 收付金额差额 -->
@@ -227,7 +227,14 @@ function confirm() {
 <style scoped>
 .rec-form { margin-top: 8px; }
 .rec-hint { display: block; margin-left: 12px; color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.7; }
-.rec-amount { display: flex; align-items: center; gap: 8px; }
+.rec-amount { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; width: 100%; min-width: 0; }
+.rec-amount-input { width: 180px; max-width: 100%; }
+.rec-amount .el-button { max-width: 100%; height: auto; padding: 6px 10px; white-space: normal; line-height: 1.5; }
+@media (max-width: 600px) {
+  .rec-amount { flex-direction: column; align-items: flex-start; }
+  .rec-amount-input { width: 100%; }
+  .rec-hint { margin-left: 0; }
+}
 .rec-disc { color: var(--color-success); }
 .rec-due { color: var(--color-danger); }
 .rec-orders { margin-top: 8px; }

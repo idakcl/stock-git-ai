@@ -56,7 +56,7 @@
         :rows="filteredList"
       />
       <div class="table-wrap">
-        <el-table :data="filteredList" stripe @row-click="openDrawer">
+        <el-table :data="pagedList" stripe @row-click="openDrawer">
           <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip>
             <template #default="{ row }"><router-link :to="{ path: '/vouchers', query: { code: row.code } }" class="link" @click.stop>{{ row.code }}</router-link></template>
           </el-table-column>
@@ -80,6 +80,17 @@
         </el-table>
       </div>
       <el-empty v-if="!filteredList.length" :description="loadError ? `资金单据读取失败：${loadError}` : `暂无${tabLabel}——收款/付款/结清、预存预付与超额转存时自动生成`" />
+      <el-pagination
+        v-if="filteredList.length"
+        v-model:current-page="page"
+        v-model:page-size="pageSize"
+        :page-sizes="[20, 50, 100]"
+        :total="filteredList.length"
+        :pager-count="5"
+        layout="total, sizes, prev, pager, next"
+        background
+        class="voucher-pagination"
+      />
       <div class="sum-bar" v-if="filteredList.length">
         合计（筛选后）：<b>¥ {{ sumTotal.toFixed(2) }}</b>
         <span class="sum-note">· 共 {{ filteredList.length }} 张{{ tabLabel }}</span>
@@ -186,6 +197,12 @@ const filteredList = computed(() => {
   if (partyFilter.value) out = out.filter(v => v.party === partyFilter.value)
   // 默认按单据日期倒序（最新在前），同日按单据编码倒序
   return [...out].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.code || '').localeCompare(a.code || ''))
+})
+const page = ref(1), pageSize = ref(20)
+const pagedList = computed(() => filteredList.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
+watch([tab, dateRange, partyFilter, pageSize], () => { page.value = 1 })
+watch(() => filteredList.value.length, count => {
+  page.value = Math.min(page.value, Math.max(1, Math.ceil(count / pageSize.value)))
 })
 const sumTotal = computed(() => filteredList.value.reduce((a, v) => a + Number(v.total || 0), 0))
 // 往来单位下拉选项（收款单 + 付款单去重）
@@ -299,6 +316,7 @@ onMounted(async () => {
 .sum-bar b { color: var(--color-primary); font-size: 14px; }
 .sum-note { margin-left: 8px; }
 .table-wrap { margin-bottom: 12px; }
+.voucher-pagination { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; }
 .vh { margin-bottom: 12px; }
 .drawer-toolbar { margin-bottom: 10px; }
 .v-items :deep(.el-table) { font-size: var(--fs-sub); }
