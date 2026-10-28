@@ -41,7 +41,7 @@ function authHeaders(extra = {}) {
 async function handle(res) {
   const data = await res.json().catch(() => ({}))
   if (res.status === 401) onUnauthorized()
-  if (!res.ok) throw new Error(data.error || res.statusText)
+  if (!res.ok) { const error = new Error(data.error || res.statusText); error.status = res.status; throw error }
   return data
 }
 
@@ -137,6 +137,12 @@ export const api = {
     const r = await request('/payment-vouchers', { method: 'POST', body: JSON.stringify({ 'payment-vouchers': vouchers }) })
     invalidate('/payment-vouchers')
     return r
+  },
+  getRefunds: () => cachedGet('/refunds'),
+  saveRefundOperation: async (operation) => {
+    const result = await request('/refunds', { method: 'POST', body: JSON.stringify(operation) })
+    for (const path of ['/refunds', '/sales', '/purchases', '/customers', '/suppliers', '/items', '/stock', '/purchase-history']) invalidate(path)
+    return result
   },
   getPurchases: () => cachedGet('/purchases'),
   savePurchases: async (purchases) => {

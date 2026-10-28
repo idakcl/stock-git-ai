@@ -103,7 +103,7 @@ const pendingDeposit = ref(null)
 let midSeq = 0
 const newMid = () => `n${Date.now().toString(36)}${(midSeq++).toString(36)}`
 
-const due = computed(() => grossOf(props.order))
+const due = computed(() => grossOf(props.order) - (props.order.settlements || []).reduce((s, p) => s + Number(p.amount || 0), 0))
 const paidSum = computed(() => rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
 const editingRow = computed(() => (editingIndex.value >= 0 ? rows.value[editingIndex.value] : null))
 // 编辑已有记录时，「未收/未付」要排除该笔原金额：草稿金额上限 = 应收 − 其他各笔合计
@@ -300,7 +300,7 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
 
 async function saveAll() {
   // 以当前行覆盖原单 payments，并同步汇总字段(received/paid)与结算状态
-  const due = round2(grossOf(props.order))
+  const due = round2(grossOf(props.order) - (props.order.settlements || []).reduce((s, p) => s + Number(p.amount || 0), 0))
   const paidSum = round2(rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
   const gap = round2(due - paidSum)
   const isPay = props.kind === 'payable'

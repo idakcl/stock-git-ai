@@ -17,11 +17,14 @@ function sortPayments(list) {
 
 // 收付款流水（兼容旧字段）：旧单无 payments 数组时，把 received/paid 转成一笔「历史收付」
 // 注意：payments 数组一旦存在（即使为空）即为权威数据，不再回退旧字段
+// 退款功能上线后旧字段可能为负（退货单 paid = -8618 表示已退款），负数同样转成一笔
+// 流水（备注「历史退款」），否则红字单据的退款在流水层面不可见。
 export function ensurePayments(order, field) {
   if (order && Array.isArray(order.payments)) return sortPayments(order.payments.map(p => ({ ...p })))
   const legacy = order ? order[field] : null
-  if (legacy != null && Number(legacy) > 0) {
-    return [{ date: (order && order.date) || '', amount: Number(legacy), remark: '历史收付', time: '' }]
+  const n = Number(legacy)
+  if (legacy != null && n !== 0 && Number.isFinite(n)) {
+    return [{ date: (order && order.date) || '', amount: n, remark: n < 0 ? '历史退款' : '历史收付', time: '' }]
   }
   return []
 }
@@ -118,18 +121,27 @@ export function settleBalance({ gross = 0, paidNow = 0, depositPay = 0, discount
 // 缺失/非法/≤0 一律按 1 处理，保证旧单据与未设折扣的单据口径不变
 // 末位 round2：total×rate 与 discount 相减会产生 1e-15 级浮点尘（如 9.55−4.55=5.000000000000001），
 // 不收敛会让未收=尘>0，统计卡误判「有未结清」、 badge 多数一笔
+// 红字单据（退货单，total<0）：返回负数毛额（=应退款），不夹 0，也不参与优惠抵减——
+// 此前 max(0,·) 会把退货单的应付夹成 0，退货只减库存、不冲欠款（T20260519120000001 事故）。
 export function grossOf(order) {
   const total = Number(order?.total || 0)
   const rate = effectiveRateOf(order)
+  if (total < 0) return round2(round2(total * rate))
   return round2(Math.max(0, round2(total * rate) - Number(order?.discount || 0)))
 }
 
+// 红字单据的未收/未付允许为负（负数=应退对方的金额）；普通单据保持 ≥0 夹取
+// （超额收付由预存款体系吸收，不产生负欠款展示）。
 export function receivableOf(sale) {
-  return Math.max(0, round2(grossOf(sale) - receivedSumOf(sale)))
+  const g = grossOf(sale)
+  const balance = round2(g - receivedSumOf(sale) - sum(sale?.settlements))
+  return g < 0 ? balance : Math.max(0, balance)
 }
 
 export function payableOf(purchase) {
-  return Math.max(0, round2(grossOf(purchase) - paidSumOf(purchase)))
+  const g = grossOf(purchase)
+  const balance = round2(g - paidSumOf(purchase) - sum(purchase?.settlements))
+  return g < 0 ? balance : Math.max(0, balance)
 }
 
 // kind: 'receivable'(销售单) | 'payable'(采购单)
@@ -144,7 +156,7 @@ export function netOf(order, kind) {
 // 正常路径下点「结清」时差额已记入抹零优惠、金额归 0，标签与金额天然一致，无需再看标签。
 // settle 参数保留仅为兼容既有调用签名，不参与判定
 export function isSettledOf(unpaid, settle) {
-  return Number(unpaid || 0) <= 1e-6
+  return Math.abs(Number(unpaid || 0)) <= 1e-6
 }
 
 // 累计收付字段名：销售单 received / 采购单 paid
@@ -162,7 +174,7 @@ export function syncPayments(order, kind) {
     ...order,
     payments,
     [field]: total,
-    settle: total >= grossOf(order) - 1e-6 ? '结清' : '挂账'
+    settle: isSettledOf(netOf({ ...order, payments, [field]: total }, kind)) ? '结清' : '挂账'
   }
 }
 
@@ -193,28 +205,18 @@ export function depositSumOf(list) {
   return (list || []).reduce((s, d) => s + Number(d?.amount || 0), 0)
 }
 
-// 合并收付款 / 记一笔的分摊纯函数：把一笔金额按「日期升序、单笔封顶未收」分摊到多张单据。
-// items：[{ order, kind, outstanding }]，outstanding 应已 = netOf(order, kind)（未收/未付）；
-// amount：该次待分配总额（同一往来单位的一次收付）。
-// 分摊规则：按单据日期升序，逐单分配 min(outstanding, 剩余金额)，单笔不超过其未收（不制造负欠款）；
-// 分配后仍有剩余（超额）则回收为 leftover，交由调用方转存预存款/预付款，避免资金泄漏。
-// 纯函数：不碰 IO、不修改入参，便于单测；只产出 amount>0 的分配项，避免产生 0 元流水噪声。
+// 普通收付款只分配正欠款；退货抵扣由退款业务的 settlements 双边核销处理，
+// 不伪造现金流水或优惠。保持现有收付款调用方的返回结构不变。
 export function distributePayment(items, amount) {
-  const total = Math.max(0, round2(Number(amount) || 0))
+  let remaining = Math.max(0, round2(Number(amount) || 0))
   const allocations = []
-  let remaining = total
-  // 按单据日期升序；日期相同按单号升序，保证结果稳定可复现（与付款顺序直觉一致）
-  const sorted = (items || []).slice().sort((a, b) => {
-    const da = String(a?.order?.date || '')
-    const db = String(b?.order?.date || '')
-    if (da !== db) return da < db ? -1 : 1
-    return String(a?.order?.id || '') < String(b?.order?.id || '') ? -1 : 1
-  })
+  const sorted = [...(items || [])].sort((a, b) =>
+    String(a.order?.date || '').localeCompare(String(b.order?.date || '')) ||
+    String(a.order?.id || '').localeCompare(String(b.order?.id || '')))
   for (const it of sorted) {
-    const outstanding = Math.max(0, round2(Number(it?.outstanding) || 0))
-    const give = round2(Math.min(outstanding, remaining))
-    if (give > 1e-6) allocations.push({ order: it.order, kind: it.kind, amount: give })
+    const give = round2(Math.min(Math.max(0, Number(it.outstanding) || 0), remaining))
+    if (give > 0) allocations.push({ order: it.order, kind: it.kind, amount: give })
     remaining = round2(remaining - give)
   }
-  return { allocations, leftover: round2(remaining) }
+  return { allocations, leftover: remaining }
 }

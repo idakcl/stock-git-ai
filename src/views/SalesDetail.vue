@@ -15,8 +15,9 @@
             <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏价格·只读）</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
-            <el-button type="primary" :disabled="!found || externalView" @click="editDialog = true">编辑</el-button>
-            <el-button type="danger" :disabled="!found || externalView" @click="removeOrder">删除</el-button>
+            <el-button type="primary" :disabled="!found || externalView || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="editDialog = true">编辑</el-button>
+            <el-button type="danger" :disabled="!found || externalView || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
+            <el-button v-if="found && !externalView" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'sale', source: isReturn(sale) ? undefined : sale.id } })">退货 / 退款</el-button>
             <el-button @click="$router.push('/sales')">返回列表</el-button>
           </div>
         </div>
@@ -44,7 +45,7 @@
           </el-tag>
           <!-- 标记结清：未收差额记为抹零优惠，未收自动归 0（与列表页、编辑弹窗同口径） -->
           <el-button link size="small" type="primary" class="settle-btn"
-            :disabled="!found || autoSettled"
+            :disabled="!found || autoSettled || isReturn(sale)"
             :title="autoSettled ? '未收金额为 0，按金额自动结清' : ''"
             @click="toggleSettle">
             {{ settleLabel === '结清' ? '改挂账' : '结清' }}
@@ -80,7 +81,7 @@
       <template #header>
         <div class="card-header">
           <b>收款记录（{{ payments.length }} 笔 · 累计 ¥ {{ receivedSum.toFixed(2) }} / 应收 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(sale.discount).toFixed(2) }}（未实际收款）</template>）</b>
-          <el-button v-if="!externalView" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
+          <el-button v-if="!externalView && !isReturn(sale)" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
         </div>
       </template>
       <div class="table-wrap">
@@ -98,6 +99,10 @@
       </div>
     </el-card>
 
+    <el-card v-if="(sale.settlements || []).length" class="pay-card">
+      <template #header>退货核销（不计现金实收或优惠）</template>
+      <el-table :data="sale.settlements"><el-table-column prop="date" label="日期" /><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号" /></el-table>
+    </el-card>
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" :deposit-balance="customerDepositBalance" @saved="onPaySaved" />
 
     <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件（客户档案用于分级售价策略） -->
@@ -122,6 +127,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
+import { isReturn } from '../utils/refunds.js'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'

@@ -19,13 +19,15 @@
         </div>
         <div class="stat-item">
           <el-statistic title="净额（收−付）" :value="netSum" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
-          <div class="stat-sub">资金净流入</div>
+          <div class="stat-sub">含供应商退款 +¥{{ refundIn.toFixed(2) }} / 客户退款 −¥{{ refundOut.toFixed(2) }}</div>
         </div>
       </div>
 
       <el-tabs v-model="tab" class="vtabs">
         <el-tab-pane label="收款单" name="receipts" />
         <el-tab-pane label="付款单" name="payment-vouchers" />
+        <el-tab-pane label="退款单 TK" name="refunds" />
+        <el-tab-pane label="退货核销 HX" name="settlements" />
       </el-tabs>
 
       <div class="filter-bar">
@@ -61,6 +63,7 @@
               <el-tag size="small" :type="categoryTagType(row.category)" disable-transitions>{{ categoryLabel(row.category) }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column v-if="tab === 'refunds' || tab === 'settlements'" label="方向" width="145"><template #default="{ row }">{{ row.direction === 'to_customer' ? '退给客户' : '收供应商退款' }}</template></el-table-column>
           <el-table-column prop="party" label="往来单位" min-width="160" show-overflow-tooltip />
           <el-table-column prop="date" label="日期" width="130" />
           <el-table-column label="本次金额" width="130" align="right">
@@ -86,7 +89,8 @@
       <template v-if="current">
         <el-descriptions :column="1" border size="small" class="vh">
           <el-descriptions-item label="资金单据编号">{{ current.code }}</el-descriptions-item>
-          <el-descriptions-item label="类型">{{ current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ current.kind === 'refund' ? (current.direction === 'to_customer' ? '退给客户' : '收供应商退款') : current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
+          <el-descriptions-item v-if="current.kind === 'refund'" label="核销金额">{{ Number(current.settlementTotal || 0).toFixed(2) }}（非现金核销不计入资金净额）</el-descriptions-item>
           <el-descriptions-item label="类别">{{ categoryLabel(current.category) }}</el-descriptions-item>
           <el-descriptions-item label="往来单位">{{ current.party }}</el-descriptions-item>
           <el-descriptions-item label="日期">{{ current.date }}</el-descriptions-item>
@@ -117,7 +121,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.remark || '—' }}</template>
+            <template #default="{ row }">{{ row.remark || (row.role === 'offset-target' ? '被抵扣欠款' : row.role === 'return' ? '退货结算' : '—') }}</template>
           </el-table-column>
         </el-table>
       </template>
@@ -137,6 +141,7 @@ const loading = ref(true)
 const tab = ref('receipts')
 const receipts = ref([])
 const vouchers = ref([])
+const refunds = ref([])
 // 集合读取失败标记：以前失败会被静默吞掉，页面只显示「暂无收款单」，
 // 让人以为「一张单据都没生成」，实际是数据仓里还没有 receipts.json（GET 直接 500）
 const loadError = ref('')
@@ -145,8 +150,8 @@ const current = ref(null)
 // 源单据日期/备注：用于抽屉明细展示（单号链接 + 日期 + 备注，避免单据内重复存冗余）
 const orderMeta = ref({})
 
-const tabLabel = computed(() => tab.value === 'receipts' ? '收款单' : '付款单')
-const currentList = computed(() => (tab.value === 'receipts' ? receipts.value : vouchers.value))
+const tabLabel = computed(() => ({ receipts: '收款单', 'payment-vouchers': '付款单', refunds: '退款单', settlements: '退货核销单' })[tab.value])
+const currentList = computed(() => tab.value === 'receipts' ? receipts.value : tab.value === 'payment-vouchers' ? vouchers.value : refunds.value.filter(v => tab.value === 'refunds' ? v.category === 'refund' : v.category !== 'refund'))
 
 // 时间段筛选（按单据日期）+ 往来单位筛选：清空后回退为全量
 const dateRange = ref(null)
@@ -163,12 +168,14 @@ const filteredList = computed(() => {
 })
 const sumTotal = computed(() => filteredList.value.reduce((a, v) => a + Number(v.total || 0), 0))
 // 往来单位下拉选项（收款单 + 付款单去重）
-const partyOptions = computed(() => [...new Set([...receipts.value, ...vouchers.value].map(v => v.party).filter(Boolean))])
+const partyOptions = computed(() => [...new Set([...receipts.value, ...vouchers.value, ...refunds.value].map(v => v.party).filter(Boolean))])
 // 累计总览（全部，不随筛选变化）：收款单合计 / 付款单合计 / 净额
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
 const receiptSum = computed(() => (receipts.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
 const voucherSum = computed(() => (vouchers.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
-const netSum = computed(() => round2(receiptSum.value - voucherSum.value))
+const refundIn = computed(() => refunds.value.filter(v => v.category === 'refund' && v.direction === 'from_supplier').reduce((s, v) => s + v.total, 0))
+const refundOut = computed(() => refunds.value.filter(v => v.category === 'refund' && v.direction === 'to_customer').reduce((s, v) => s + v.total, 0))
+const netSum = computed(() => round2(receiptSum.value - voucherSum.value + refundIn.value - refundOut.value))
 
 const listColumns = [
   { label: '资金单据编号', prop: 'code' },
@@ -196,7 +203,7 @@ function openDrawer(row) {
 
 // 资金单据类别展示（普通收付款 / 预存预付充值 / 超额转存 / 预存款抵扣）
 function categoryLabel(cat) {
-  return VOUCHER_CATEGORY[cat] || '收付款'
+  return ({ refund: '现金退款', 'return-offset': '退货抵欠款', 'return-deposit': '退货转余额' })[cat] || VOUCHER_CATEGORY[cat] || '收付款'
 }
 function categoryTagType(cat) {
   if (cat === 'deposit-recharge') return 'warning'
@@ -216,14 +223,7 @@ const voucherColumns = [
 ]
 function exportVoucher() {
   if (!current.value) return ElMessage.warning('请先打开一张单据')
-  const rows = enrichedItems(current.value.items).map(it => ({
-    单号: it.orderId,
-    日期: it.date,
-    本次金额: Number(it.amount || 0).toFixed(2),
-    本次优惠: Number(it.discount || 0) > 0 ? Number(it.discount).toFixed(2) : '',
-    结算: it.settle ? '结清' : '挂账',
-    备注: it.remark || ''
-  }))
+  const rows = enrichedItems(current.value.items)
   downloadCSV(`${current.value.code}.csv`, voucherColumns, rows)
   ElMessage.success('已导出本单明细')
 }
@@ -231,9 +231,10 @@ function exportVoucher() {
 onMounted(async () => {
   // 资金单据集合是本页的主体：读失败一定要报出来，不能装作「暂无单据」
   try {
-    const [rec, pv] = await Promise.all([api.getReceipts(), api.getPaymentVouchers()])
+    const [rec, pv, rf] = await Promise.all([api.getReceipts(), api.getPaymentVouchers(), api.getRefunds()])
     receipts.value = rec || []
     vouchers.value = pv || []
+    refunds.value = rf || []
     loadError.value = ''
   } catch (e) {
     receipts.value = []

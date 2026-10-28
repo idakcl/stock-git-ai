@@ -72,6 +72,36 @@ export async function writeJSON(env, file, data, message) {
         && existing.content && b64d(existing.content) === payload) {
         return { skipped: true, sha: existing.sha }
       }
+      if (existing && ['purchases.json', 'sales.json', 'customers.json', 'suppliers.json'].includes(file)) {
+        let current = existing
+        if (!current.content && current.size > 0) current = await gh(`/git/blobs/${current.sha}`, env)
+        if (!current.content) throw new Error('资金保护校验无法读取原数据，已中止')
+        const before = JSON.parse(b64d(current.content))
+        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+        if (file === 'purchases.json' || file === 'sales.json') {
+          const parentIds = new Set(before.filter(o => o.sourceOrderId).map(o => o.sourceOrderId))
+          for (const old of before) {
+            const next = data.find(o => o.id === old.id)
+            const returnLocked = Number(old.total) < 0 || String(old.type || '').endsWith('-return')
+            if (returnLocked) {
+              const financial = o => { const { photos, remark, ...rest } = o; return rest }
+              if (!next || !same(financial(old), financial(next))) throw new Error(`退货单 ${old.id} 只允许在退货退款页面操作，请刷新`)
+            }
+            if (parentIds.has(old.id)) {
+              if (!next || ['items', 'total', 'discount', 'discountRate', 'discountRates', 'customer', 'supplier'].some(k => !same(old[k], next[k]))) throw new Error(`原单 ${old.id} 已有关联退货，不允许修改货款或删除`)
+            }
+            if ((old.settlements || []).length && (!next || !same(old.settlements, next.settlements))) throw new Error(`单据 ${old.id} 核销已更新，请刷新后重试`)
+          }
+        } else {
+          const field = file === 'customers.json' ? 'deposits' : 'advances'
+          for (const old of before) {
+            const protectedRows = (old[field] || []).filter(p => p.voucher?.startsWith('HX-'))
+            if (!protectedRows.length) continue
+            const next = data.find(p => p.code === old.code)
+            if (!next || protectedRows.some(p => !(next[field] || []).some(n => same(n, p)))) throw new Error('退货转余额记录已更新，请刷新后重试')
+          }
+        }
+      }
       return await gh(`/contents/${file}`, env, 'PUT', body)
     } catch (e) {
       const msg = String(e && e.message || e)

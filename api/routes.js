@@ -1,4 +1,5 @@
 import { readJSON, writeJSON } from './github.js'
+import { refundTransaction } from './refunds.js'
 import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 
@@ -152,9 +153,12 @@ export function derive(items, suppliers, purchases, sales, customers) {
       ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
         id: p.id,
         date: p.date, supplier: sCode, supplierName: supName,
-        qty: num(l.qty), price: money2(l.price), total: money2(l.total)
+        qty: num(l.qty), price: money2(l.price), total: money2(l.total),
+        return: num(l.qty) < 0 || undefined
       })
-      if (l.price != null && Number.isFinite(Number(l.price))) it.cost = money2(l.price)
+      // 退货行（红字）不更新商品档案进价：退货价可能与原单进价不一致（如原单促销价、退货按原价），
+      // 用它覆盖 it.cost 会污染成本档案；同理历史价里带 return:true 标记，商品页默认过滤。
+      if (l.price != null && Number.isFinite(Number(l.price)) && num(l.qty) >= 0) it.cost = money2(l.price)
     }
   }
   for (const s of orderedSales) {
@@ -167,9 +171,11 @@ export function derive(items, suppliers, purchases, sales, customers) {
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
         id: s.id,
         date: s.date, customer: s.customer || '',
-        qty: num(l.qty), price: money2(l.price), total: money2(l.total)
+        qty: num(l.qty), price: money2(l.price), total: money2(l.total),
+        return: num(l.qty) < 0 || undefined
       })
-      if (l.price != null && Number.isFinite(Number(l.price))) it.price = money2(l.price)
+      // 退货行（红字）不更新商品档案售价：退货价≠原单成交价时会污染售价档案
+      if (l.price != null && Number.isFinite(Number(l.price)) && num(l.qty) >= 0) it.price = money2(l.price)
     }
   }
   // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）
@@ -215,7 +221,7 @@ export function rebuildStock(purchases, sales, items) {
       if (!code) continue
       stock[code] = stock[code] || { qty: 0, cost: 0 }
       stock[code].qty += num2(l.qty)
-      if (l.price != null && Number.isFinite(Number(l.price))) costByCode[code] = Number(l.price)
+      if (num2(l.qty) >= 0 && l.price != null && Number.isFinite(Number(l.price))) costByCode[code] = Number(l.price)
     }
   }
   for (const s of (sales || [])) {
@@ -240,11 +246,13 @@ export function rebuildStock(purchases, sales, items) {
 // 注意：正常删光付款记录时 payments=[] 且旧字段为 0，不满足转换条件，不会被误造流水
 export function normalizeOrderPayments(order, legacyField) {
   if (!order || typeof order !== 'object') return order
-  if (Array.isArray(order.payments) && order.payments.length === 0 && Number(order[legacyField] || 0) > 0) {
-    const amount = Math.round(Number(order[legacyField]) * 100) / 100
+  // 负数旧字段（退货单 paid = -8618 表示已退款）同样要转成正式流水，备注「历史退款」
+  const legacy = Number(order[legacyField] || 0)
+  if (Array.isArray(order.payments) && order.payments.length === 0 && legacy !== 0 && Number.isFinite(legacy)) {
+    const amount = Math.round(legacy * 100) / 100
     return {
       ...order,
-      payments: [{ date: order.date || '', amount, remark: '历史实付', time: '' }]
+      payments: [{ date: order.date || '', amount, remark: amount < 0 ? '历史退款' : '历史实付', time: '' }]
     }
   }
   // 前端的一次性流水定位标记（mid，以及旧版遗留的 _new）：只用于「本次收付款 → 资金单据编号」
@@ -345,6 +353,7 @@ export async function handleApi(req, url, env) {
     if (path === '/sales' && method === 'GET') return json(req, env, await readJSON(env, 'sales.json'))
     if (path === '/receipts' && method === 'GET') return json(req, env, await readOptionalArray(env, 'receipts.json'))
     if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readOptionalArray(env, 'payment-vouchers.json'))
+    if (path === '/refunds' && method === 'GET') return json(req, env, await readOptionalArray(env, 'refunds.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
 
@@ -414,6 +423,10 @@ export async function handleApi(req, url, env) {
       if (path === '/payment-vouchers') {
         await writeJSON(env, 'payment-vouchers.json', body['payment-vouchers'] || [], 'update payment-vouchers')
         return json(req, env, { ok: true })
+      }
+      // 退款业务只接收操作指令，不允许整表覆盖退款凭证。
+      if (path === '/refunds') {
+        return json(req, env, await refundTransaction(env, body, derive, rebuildStock))
       }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
@@ -585,6 +598,6 @@ export async function handleApi(req, url, env) {
 
     return json(req, env, { error: 'Not Found' }, 404)
   } catch (e) {
-    return json(req, env, { error: e.message || String(e) }, 500)
+    return json(req, env, { error: e.message || String(e) }, e.status === 400 ? 400 : /GitHub (409|422)/.test(e.message || '') ? 409 : 500)
   }
 }

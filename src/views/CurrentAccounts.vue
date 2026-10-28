@@ -27,6 +27,7 @@
 
       <div class="op-bar">
         <el-button type="primary" @click="recordDialog = true">记一笔（收/付款）</el-button>
+        <el-button type="warning" @click="$router.push('/returns')">退货 / 退款 / 抵扣</el-button>
         <el-button type="success" plain @click="rechargeDialog = true">存预存/预付</el-button>
         <span class="op-bar-hint">合并收付款：在下方「单据明细」勾选多张单据后操作</span>
       </div>
@@ -148,6 +149,8 @@
                   <el-tag :type="row.type === '客户' ? 'success' : (row.type === '供应商' ? 'warning' : '')" size="small" disable-transitions>{{ row.type }}</el-tag>
                 </template>
               </el-table-column>
+              <el-table-column label="待退客户" width="120" align="right"><template #default="{ row }">{{ row.refundDue.toFixed(2) }}</template></el-table-column>
+              <el-table-column label="待收供应商退款" width="145" align="right"><template #default="{ row }">{{ row.refundReceive.toFixed(2) }}</template></el-table-column>
               <el-table-column prop="count" label="单数" width="80" align="right" sortable="custom" />
               <el-table-column label="应收(折后)" width="120" align="right" prop="recv" sortable="custom">
                 <template #default="{ row }"><span :class="row.recv > 0 ? 'amount-in' : 'none'">{{ row.recv > 0 ? row.recv.toFixed(2) : '—' }}</span></template>
@@ -330,7 +333,7 @@ const ordersAll = computed(() => {
   return [...sales, ...pur]
 })
 
-const paidOf = (o) => round2(grossOf(o) - netOf(o, o._kind))
+const paidOf = (o) => round2(ensurePayments(o, o._kind === 'payable' ? 'paid' : 'received').reduce((s, p) => s + Number(p.amount || 0), 0))
 
 const orderFiltered = computed(() => (ordersAll.value || []).filter(o => {
   if (dateStart.value && (o.date || '') < dateStart.value) return false
@@ -367,7 +370,15 @@ const partyRows = computed(() => {
     const net = pp.reduce((s, r) => s + netOf(r, 'payable'), 0)
     add(s.name, '供应商', 'payable', gross, gross - net, pp.length, s.code, '/supplier/', depositSumOf(s.advances))
   }
-  for (const g of Object.values(map)) g.net = round2((g.recv - g.recvPaid) - (g.pay - g.payPaid))
+  for (const g of Object.values(map)) {
+    g.net = round2((g.recv - g.recvPaid) - (g.pay - g.payPaid))
+    const sales = salesList.value.filter(o => o.customer === g.party)
+    const purchases = purchasesList.value.filter(o => o.supplier === g.party)
+    g.recvPaid = round2(sales.reduce((s, o) => s + ensurePayments(o, 'received').reduce((n, p) => n + Number(p.amount || 0), 0), 0))
+    g.payPaid = round2(purchases.reduce((s, o) => s + ensurePayments(o, 'paid').reduce((n, p) => n + Number(p.amount || 0), 0), 0))
+    g.refundDue = round2(sales.reduce((s, o) => s + Math.max(0, -netOf(o, 'receivable')), 0))
+    g.refundReceive = round2(purchases.reduce((s, o) => s + Math.max(0, -netOf(o, 'payable')), 0))
+  }
   return Object.values(map)
 })
 
@@ -534,6 +545,7 @@ const depositBalanceOf = (row) => {
 }
 
 function openPay(row) {
+  if (Number(row.total) < 0) { ElMessage.warning('退货单请使用上方「退货 / 退款 / 抵扣」入口'); return }
   payOrder.value = row
   payDialog.value = true
 }

@@ -60,6 +60,7 @@
         <el-icon><Postcard /></el-icon>
         <span>来往账</span>
       </el-menu-item>
+      <el-menu-item index="/returns"><el-icon><Tickets /></el-icon><span>退货 / 退款</span></el-menu-item>
       <el-menu-item index="/vouchers">
         <el-icon><Tickets /></el-icon>
         <span>收付款单</span>

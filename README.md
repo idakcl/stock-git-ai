@@ -1,5 +1,7 @@
 # 进销存系统（GitHub 数据仓 + Cloudflare 部署）
 
+> **退款功能新增契约**：见 [退货与退款](docs/refunds.md)。默认退现金；`GET /api/refunds` 读凭证，`POST /api/refunds` 接收操作指令（不是整表覆盖）。退货核销使用 `settlements`，不计入优惠或现金；本文旧的普通收付款公式不适用于退货核销。
+
 单 Worker 同时托管：
 - 前端静态资源（Vite 构建产物 `dist/`，通过 `assets` 绑定 `ASSETS`）
 - 后端 API（`/api/*`，读写 GitHub 数据仓 JSON）
