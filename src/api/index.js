@@ -138,6 +138,18 @@ export const api = {
   },
   getStock: () => cachedGet('/stock'),
   getLogs: () => request('/logs'),
+  // 数据整理：后端重跑全量派生，修复历史单据乱码编码并重建历史价/库存/供应商链接。
+  // 全部衍生数据已重写，统一失效缓存，避免 15 秒窗口内看到旧编码
+  normalizeData: async () => {
+    const r = await request('/normalize', { method: 'POST', body: JSON.stringify({}) })
+    invalidate('/items')
+    invalidate('/suppliers')
+    invalidate('/customers')
+    invalidate('/purchases')
+    invalidate('/sales')
+    invalidate('/stock')
+    return r
+  },
   // 分类合并导入：与库内现有数据按主键比对去重后追加（不覆盖）。
   // 前端会先用同一份 dedupe 逻辑做预览，这里传预览判定为「新增」的记录，
   // 服务端仍会重新比对一次（预览到确认之间数据可能变化），以服务端结果为准。

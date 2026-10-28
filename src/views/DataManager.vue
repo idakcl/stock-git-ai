@@ -13,6 +13,13 @@
         <b>分类导入导出</b>：按数据类型单独导出、导入；导入时与库内现有数据<b>按编码/单号比对去重</b>，已存在的自动跳过，只追加新记录，不覆盖已有数据。
       </el-alert>
 
+      <!-- 数据整理：一键修复历史乱码编码 -->
+      <el-card shadow="never" class="panel">
+        <template #header><b>数据整理（修复乱码编码）</b></template>
+        <p class="desc">重跑一次全量派生，把历史单据里残留的商品「乱码编码」（<code>N</code> 开头）改回正式商品编码，并重建商品历史价、库存、供应商链接。等价于把每张单据重新保存一次，但一键完成。<b>不会改动你的金额、数量等历史数据。</b></p>
+        <el-button type="warning" :loading="normalizing" @click="doNormalize">一键修复乱码编码</el-button>
+      </el-card>
+
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导出备份</b></template>
@@ -167,6 +174,7 @@ import { diffImport, extractRecords } from '../utils/dedupe'
 
 const exporting = ref(false)
 const importing = ref(false)
+const normalizing = ref(false)
 const fileList = ref([])
 const pending = ref(null)   // 校验通过的备份：{ data, counts, exportedAt, sizeText }
 const parseError = ref('')
@@ -361,6 +369,31 @@ function resultTagType(result) {
   return 'info'
 }
 
+// 数据整理：确认后调用后端 /normalize 重跑全量派生，修复历史单据乱码编码，完成后刷新页面
+async function doNormalize() {
+  try {
+    await ElMessageBox.confirm(
+      '将重跑全量派生数据，修复历史单据中的商品乱码编码（N 开头），并重建历史价、库存与供应商链接。\n\n此操作不会改动金额、数量等历史数据。是否继续？',
+      '数据整理确认',
+      { type: 'warning', confirmButtonText: '开始修复', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  normalizing.value = true
+  try {
+    const r = await api.normalizeData()
+    if (r && r.ok) {
+      ElMessage.success('修复完成，页面即将刷新')
+      setTimeout(() => window.location.reload(), 800)
+    } else {
+      ElMessage.error('修复未返回成功状态')
+    }
+  } catch (e) {
+    ElMessage.error(`修复失败：${e.message || '网络异常'}。本次未改动任何数据`)
+  } finally {
+    normalizing.value = false
+  }
+}
+
 // 拉全站数据打包成 JSON 并触发浏览器下载
 async function doExport() {
   exporting.value = true
@@ -485,6 +518,7 @@ async function doImport() {
 .panel { margin-bottom: 16px; background: var(--bg-card, #fff); }
 .panel:last-child { margin-bottom: 0; }
 .desc { color: var(--text-regular); font-size: var(--fs-base); margin: 0 0 12px; line-height: 1.7; }
+.desc code { background: var(--bg-active, #f0f2f5); padding: 1px 6px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--color-danger, #f56c6c); }
 .danger-text { color: var(--color-danger); }
 .ok-text { color: var(--el-color-success); }
 .backup-upload { width: 100%; }

@@ -388,6 +388,40 @@ export async function handleApi(req, url, env) {
         await syncDerived(env, { sales })
         return json(req, env, { ok: true })
       }
+      // 数据整理：重跑一次全量 derive 并写回，把历史单据里残留的乱码编码（N…）改回正式 P 编码，
+      // 同时重建商品历史价、库存、供应商链接。等价于把每张单据各保存一次，但一次请求完成。
+      // derive 仅就地修正 line.code 与重建派生字段，不增删条目、不改金额/数量，幂等安全
+      if (path === '/normalize' && method === 'POST') {
+        const [items, suppliers, customers, purchases, sales] = await Promise.all([
+          readJSON(env, 'items.json'),
+          readJSON(env, 'suppliers.json'),
+          readJSON(env, 'customers.json'),
+          readJSON(env, 'purchases.json'),
+          readJSON(env, 'sales.json')
+        ])
+        const derived = derive(items, suppliers, purchases, sales, customers)
+        // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
+        // 一旦出现，说明上游读取异常，宁可报错中止，也不能把空数组写回去覆盖真实数据
+        if (items.length && !derived.items.length) {
+          throw new Error('派生结果为空，疑似上游数据读取异常，已中止以避免覆盖商品档案')
+        }
+        const stock = rebuildStock(derived.purchases, derived.sales, derived.items)
+        try {
+          await writeJSON(env, 'items.json', derived.items, 'normalize items')
+          await writeJSON(env, 'suppliers.json', derived.suppliers, 'normalize suppliers')
+          await writeJSON(env, 'stock.json', stock, 'normalize stock')
+          // 客户：仅当销售单里出现了名单中原本没有的新客户时才写回
+          if (derived.customers.length > customers.length) {
+            await writeJSON(env, 'customers.json', derived.customers, 'normalize customers')
+          }
+          // 回写修正后的单据：存量乱码编码（N…）已改写为正式 P 编码
+          await writeJSON(env, 'purchases.json', derived.purchases, 'normalize fix purchase codes')
+          await writeJSON(env, 'sales.json', derived.sales, 'normalize fix sale codes')
+        } catch (e) {
+          throw new Error(`数据整理失败（${e.message || e}），未改动任何数据`)
+        }
+        return json(req, env, { ok: true })
+      }
       // 库存是采购/销售的派生数据（由 rebuildStock 全量重算），禁止直接覆盖，
       // 否则会与单据脱节产生漂移——需要修正请改为重新保存对应单据，由系统重建。
       if (path === '/stock') {

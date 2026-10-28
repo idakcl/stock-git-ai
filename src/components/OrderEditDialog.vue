@@ -52,15 +52,24 @@
         <!-- :key 让每次打开都重建上传区，避免上一单的照片残留 -->
         <PhotoUpload ref="photoUpload" :key="photoKey" v-model="form.photos" />
       </el-form-item>
+      <el-form-item label="快速添加">
+        <!-- 顶部快捷加商品：选已有商品或输入新名回车即加入下方明细，免去滚动到表格底部操作 -->
+        <div class="quick-add">
+          <el-select v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" style="width:300px" @change="addQuickItem">
+            <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
+          </el-select>
+          <span class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</span>
+        </div>
+      </el-form-item>
       <el-form-item label="整单优惠金额">
-        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:100%" @input="reconcile('discount')" />
+        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="reconcile('discount')" />
       </el-form-item>
       <el-form-item label="整单折扣">
         <!-- 多级折扣链：每级一个折扣率(0~1) 连乘生效，支持「打完9折再打9折、再打8折」这类逐级叠加 -->
         <div class="rate-chain">
           <div v-for="(r, i) in form.discountRates" :key="i" class="rate-row">
             <span class="rate-idx">第 {{ i + 1 }} 级</span>
-            <el-input-number v-model="form.discountRates[i]" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:120px" />
+            <el-input-number v-model="form.discountRates[i]" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:120px" v-select-on-focus />
             <el-button link type="danger" size="small" @click="removeRate(i)">删除</el-button>
           </div>
           <el-button size="small" type="primary" plain @click="addRate">+ 添加一级折扣</el-button>
@@ -74,7 +83,7 @@
       <el-form-item :label="`实${payWord}金额`">
         <template v-if="editingId">
           <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
             <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
           </div>
           <div v-if="Number(form.depositPay) > 0" class="pay-now-row" style="margin-top:6px">
@@ -87,11 +96,12 @@
         </template>
         <template v-else>
           <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
+            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
             <span class="pay-now-hint">现金{{ payWord }}款</span>
           </div>
           <div class="pay-now-row" style="margin-top:6px">
-            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
+            <span class="field-label">{{ depositLabel }}抵扣</span>
+            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
             <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
             <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
           </div>
@@ -129,13 +139,13 @@
           </template>
         </el-table-column>
         <el-table-column label="数量" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" /></template>
+          <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" v-select-on-focus /></template>
         </el-table-column>
         <el-table-column label="单价" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" /></template>
+          <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus /></template>
         </el-table-column>
         <el-table-column label="折扣" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" /></template>
+          <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" v-select-on-focus /></template>
         </el-table-column>
         <el-table-column label="小计" width="100" align="right">
           <template #default="{ row }">
@@ -214,6 +224,8 @@ const visible = computed({
 })
 
 const photoUpload = ref(null)
+// 顶部快速添加：当前选中的商品（编码或新输名称），回车/选择即加入明细
+const quickItem = ref('')
 // 每次打开自增：强制重建上传区，避免残留上一单的照片
 const photoKey = ref(0)
 const editingId = ref('')
@@ -442,6 +454,20 @@ function onPartyChange() {
   })
 }
 
+// 顶部快速添加：选择已有商品或输入新商品名后回车，直接把一行加入明细（下方表格可继续改数量/单价）。
+// 新商品（库内无同名）以 name 占位、code 留空，保存时由 resolveLine 分配正式 P 编码，不会产生乱码
+function addQuickItem(val) {
+  const code = val != null ? val : quickItem.value
+  if (!code) return
+  const found = (props.items || []).find(i => i.code === code || i.name === code)
+  const line = found
+    ? { code: found.code, name: found.name, qty: 1, price: priceFor(found), discountRate: 1 }
+    : { code: '', name: String(code), qty: 1, price: 0, discountRate: 1 }
+  form.lines.push(line)
+  quickItem.value = ''
+  ElMessage.success(`已添加：${found ? found.name : code}`)
+}
+
 async function doSave() {
   if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
   if (!form.party) return ElMessage.warning(`请填写${partyLabel.value}`)
@@ -551,6 +577,9 @@ async function save() {
 /* label 不换行：110px 下「整单优惠金额」6 字单行显示，两个字段各自独立一行 */
 :deep(.el-form-item__label){white-space:nowrap;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
+.quick-add{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+/* 预存款抵扣框左侧文案：与输入框之间留出间距，避免贴在一起看不清 */
+.field-label{color:var(--text-regular);font-size:var(--fs-base);min-width:64px;flex:none;}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
 .lines-scroll{overflow-x:auto;}
 /* 明细行输入框撑满所在列：el-input-number 默认 150px，在 100px 的列里会溢出错位 */
