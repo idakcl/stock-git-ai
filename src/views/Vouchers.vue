@@ -57,10 +57,12 @@
       />
       <div class="table-wrap">
         <el-table :data="filteredList" stripe @row-click="openDrawer">
-          <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip />
+          <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip>
+            <template #default="{ row }"><router-link :to="{ path: '/vouchers', query: { code: row.code } }" class="link" @click.stop>{{ row.code }}</router-link></template>
+          </el-table-column>
           <el-table-column label="类别" width="120">
             <template #default="{ row }">
-              <el-tag size="small" :type="categoryTagType(row.category)" disable-transitions>{{ categoryLabel(row.category) }}</el-tag>
+              <el-tag size="small" :type="categoryTagType(row.category)" disable-transitions>{{ categoryLabel(row) }}</el-tag>
             </template>
           </el-table-column>
           <el-table-column v-if="tab === 'refunds' || tab === 'settlements'" label="方向" width="145"><template #default="{ row }">{{ row.direction === 'to_customer' ? '退给客户' : '收供应商退款' }}</template></el-table-column>
@@ -84,14 +86,15 @@
       </div>
     </el-card>
 
-    <!-- 明细抽屉 -->
-    <el-drawer v-model="drawer" :title="current ? current.code : ''" size="600px" direction="rtl">
+    <el-alert v-if="!loading && route.query.code && !current && !loadError" title="未找到该资金单据，请核对编号或刷新重试" type="warning" :closable="false" />
+    <!-- 明细抽屉：URL 保存单据编号，支持直接打开、刷新和浏览器后退。 -->
+    <el-drawer v-model="drawer" :title="current ? `资金单据详情 · ${current.code}` : ''" size="min(780px, 96vw)" direction="rtl">
       <template v-if="current">
         <el-descriptions :column="1" border size="small" class="vh">
           <el-descriptions-item label="资金单据编号">{{ current.code }}</el-descriptions-item>
           <el-descriptions-item label="类型">{{ current.kind === 'refund' ? (current.direction === 'to_customer' ? '退给客户' : '收供应商退款') : current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
           <el-descriptions-item v-if="current.kind === 'refund'" label="核销金额">{{ Number(current.settlementTotal || 0).toFixed(2) }}（非现金核销不计入资金净额）</el-descriptions-item>
-          <el-descriptions-item label="类别">{{ categoryLabel(current.category) }}</el-descriptions-item>
+          <el-descriptions-item label="类别">{{ categoryLabel(current) }}</el-descriptions-item>
           <el-descriptions-item label="往来单位">{{ current.party }}</el-descriptions-item>
           <el-descriptions-item label="日期">{{ current.date }}</el-descriptions-item>
           <el-descriptions-item label="本次金额">¥ {{ Number(current.total || 0).toFixed(2) }}</el-descriptions-item>
@@ -101,10 +104,10 @@
           <el-button size="small" type="primary" @click="exportVoucher">导出本单 CSV</el-button>
         </div>
         <el-table :data="current.items || []" stripe border size="small" class="v-items">
-          <el-table-column label="单号" min-width="160" show-overflow-tooltip>
+          <el-table-column label="关联采购 / 销售单" min-width="210" show-overflow-tooltip>
             <template #default="{ row }">
-              <router-link v-if="row.orderId" :to="row.orderType === 'sale' ? `/sale/${row.orderId}` : `/purchase/${row.orderId}`" class="link">{{ row.orderId }}</router-link>
-              <span v-else class="none">{{ row.note || '—' }}</span>
+              <router-link v-if="row.orderId && ['sale', 'purchase'].includes(row.orderType)" :to="{ path: `${row.orderType === 'sale' ? '/sale/' : '/purchase/'}${encodeURIComponent(row.orderId)}` }" class="link">{{ row.orderType === 'sale' ? '销售单' : '采购单' }} · {{ row.orderId }}</router-link>
+              <span v-else class="none">{{ row.orderId || row.note || '无关联采购 / 销售单（纯资金业务）' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="date" label="日期" width="120" />
@@ -130,7 +133,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -145,8 +149,25 @@ const refunds = ref([])
 // 集合读取失败标记：以前失败会被静默吞掉，页面只显示「暂无收款单」，
 // 让人以为「一张单据都没生成」，实际是数据仓里还没有 receipts.json（GET 直接 500）
 const loadError = ref('')
-const drawer = ref(false)
-const current = ref(null)
+const route = useRoute(), router = useRouter()
+const current = computed(() => {
+  const row = [...receipts.value, ...vouchers.value, ...refunds.value].find(v => v.code === route.query.code)
+  return row ? { ...row, items: enrichedItems(row) } : null
+})
+const drawer = computed({
+  get: () => !!current.value,
+  set: open => {
+    if (!open) {
+      const { code, ...query } = route.query
+      router.replace({ path: route.path, query })
+    }
+  }
+})
+watch(current, row => {
+  if (row) tab.value = row.kind === 'refund' || /^(TK|HX)-/.test(row.code)
+    ? (row.category === 'refund' ? 'refunds' : 'settlements')
+    : (row.kind === 'receivable' || row.code.startsWith('SK-') ? 'receipts' : 'payment-vouchers')
+})
 // 源单据日期/备注：用于抽屉明细展示（单号链接 + 日期 + 备注，避免单据内重复存冗余）
 const orderMeta = ref({})
 
@@ -179,7 +200,7 @@ const netSum = computed(() => round2(receiptSum.value - voucherSum.value + refun
 
 const listColumns = [
   { label: '资金单据编号', prop: 'code' },
-  { label: '类别', value: r => categoryLabel(r.category) },
+  { label: '类别', value: r => categoryLabel(r) },
   { label: '往来单位', prop: 'party' },
   { label: '日期', prop: 'date' },
   { label: '本次金额', value: r => Number(r.total || 0).toFixed(2) },
@@ -188,22 +209,24 @@ const listColumns = [
 const subtitle = computed(() => `${tabLabel.value}共 ${filteredList.value.length} 张 · 合计 ¥${sumTotal.value.toFixed(2)}`)
 
 // 抽屉明细行：补上源单据的日期与备注（与 Vouchers 单据模型一致，remark 置末列）
-function enrichedItems(items) {
-  return (items || []).map(it => {
-    const meta = orderMeta.value[it.orderId] || {}
-    return { ...it, date: meta.date || '', remark: meta.remark || '' }
+function enrichedItems(voucher) {
+  return (voucher.items || []).map(it => {
+    const orderType = it.orderType || (voucher.kind === 'receivable' || voucher.code.startsWith('SK-') || voucher.direction === 'to_customer' ? 'sale' : 'purchase')
+    const meta = orderMeta.value[`${orderType}:${it.orderId}`] || {}
+    return { ...it, orderType, date: meta.date || it.date || '', remark: it.remark || meta.remark || '' }
   })
 }
 
 function openDrawer(row) {
   if (!row || !row.code) return
-  current.value = { ...row, items: enrichedItems(row.items) }
-  drawer.value = true
+  router.push({ path: '/vouchers', query: { ...route.query, code: row.code } })
 }
 
-// 资金单据类别展示（普通收付款 / 预存预付充值 / 超额转存 / 预存款抵扣）
-function categoryLabel(cat) {
-  return ({ refund: '现金退款', 'return-offset': '退货抵欠款', 'return-deposit': '退货转余额' })[cat] || VOUCHER_CATEGORY[cat] || '收付款'
+// 业务子类别保持独立，普通单据按收付方向分别命名。
+function categoryLabel(row) {
+  const type = row.kind === 'receivable' || row.code?.startsWith('SK-') ? '收款单' : '付款单'
+  if (!row.category || row.category === 'normal') return type
+  return ({ refund: '现金退款', 'return-offset': '退货抵欠款', 'return-deposit': '退货转余额' })[row.category] || VOUCHER_CATEGORY[row.category] || type
 }
 function categoryTagType(cat) {
   if (cat === 'deposit-recharge') return 'warning'
@@ -223,7 +246,7 @@ const voucherColumns = [
 ]
 function exportVoucher() {
   if (!current.value) return ElMessage.warning('请先打开一张单据')
-  const rows = enrichedItems(current.value.items)
+  const rows = current.value.items
   downloadCSV(`${current.value.code}.csv`, voucherColumns, rows)
   ElMessage.success('已导出本单明细')
 }
@@ -249,8 +272,8 @@ onMounted(async () => {
   try {
     const [sales, purchases] = await Promise.all([api.getSales(), api.getPurchases()])
     const meta = {}
-    ;(sales || []).forEach(s => { meta[s.id] = { date: s.date, remark: s.remark } })
-    ;(purchases || []).forEach(p => { meta[p.id] = { date: p.date, remark: p.remark } })
+    ;(sales || []).forEach(s => { meta[`sale:${s.id}`] = { date: s.date, remark: s.remark } })
+    ;(purchases || []).forEach(p => { meta[`purchase:${p.id}`] = { date: p.date, remark: p.remark } })
     orderMeta.value = meta
   } catch (e) {
     ElMessage.warning({ message: `关联单据信息读取失败（${(e && e.message) || '网络异常'}），明细里的日期/备注可能显示为空`, duration: 6000 })

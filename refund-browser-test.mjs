@@ -122,6 +122,47 @@ try {
     assert.equal(await page.getByRole('button', { name: button, exact: true }).count(), 0)
   }
   console.log('PASS 零金额退货单也禁止普通编辑、删除、收付')
+  state = fixture()
+  state.sales.push({ ...structuredClone(state.sales[0]), id: 'S2' })
+  state.receipts = [{ code: 'SK-20261028-001', kind: 'receivable', category: 'normal', party: '客户甲', date: '2026-10-28', total: 20, items: [{ orderId: 'S1', orderType: 'sale', amount: 10 }, { orderId: 'S2', orderType: 'sale', amount: 10 }] }]
+  state['payment-vouchers'] = [{ code: 'FK-20261028-001', kind: 'payable', party: '供应商甲', date: '2026-10-28', total: 20, items: [{ orderId: 'B1', amount: 20 }] }]
+  state.sales[0].payments = [{ date: '2026-10-28', amount: 10, voucher: state.receipts[0].code }]
+  state.purchases[0].payments = [{ date: '2026-10-28', amount: 20, voucher: state['payment-vouchers'][0].code }]
+  const funds = page.locator('.el-drawer:visible')
+  for (const [path, code, label, orderPath, linkName] of [
+    ['/sale/S1', 'SK-20261028-001', '收款单', '/sale/S1', '销售单 · S1'],
+    ['/purchase/B1', 'FK-20261028-001', '付款单', '/purchase/B1', '采购单 · B1'],
+    ['/sales', 'SK-20261028-001', '收款单', '/sale/S1', '销售单 · S1'],
+    ['/purchases', 'FK-20261028-001', '付款单', '/purchase/B1', '采购单 · B1']
+  ]) {
+    await page.goto(`http://127.0.0.1:5173${path}`)
+    const link = page.getByRole('link', { name: code, exact: true }).first()
+    assert.equal(await link.getAttribute('href'), `/vouchers?code=${code}`)
+    await link.click(); await funds.waitFor()
+    assert.match(await funds.innerText(), /资金单据详情/)
+    assert.equal(await funds.getByText(label, { exact: true }).count(), 1)
+    assert.equal(await funds.getByRole('link', { name: linkName, exact: true }).getAttribute('href'), orderPath)
+    if (label === '收款单') assert.equal(await funds.getByRole('link', { name: '销售单 · S2', exact: true }).count(), 1)
+    await page.reload(); await funds.waitFor()
+    await funds.getByRole('link', { name: linkName, exact: true }).click()
+    await page.waitForURL(`**${orderPath}`)
+    await page.goBack(); await funds.waitFor()
+  }
+  console.log('PASS 手机资金编号双向链接、合并单全部关联、类别区分、刷新和后退')
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:5173/vouchers')
+  await page.getByRole('link', { name: 'SK-20261028-001', exact: true }).waitFor()
+  assert.equal(await page.locator('.el-table .el-tag').filter({ hasText: /^收款单$/ }).count(), 1)
+  await page.getByRole('link', { name: 'SK-20261028-001', exact: true }).click(); await funds.waitFor()
+  await funds.locator('.el-drawer__close-btn').click(); await funds.waitFor({ state: 'hidden' })
+  assert.equal(new URL(page.url()).searchParams.has('code'), false)
+  await page.getByRole('tab', { name: '付款单', exact: true }).click()
+  assert.equal(await page.locator('.el-table .el-tag').filter({ hasText: /^付款单$/ }).count(), 1)
+  await page.getByRole('link', { name: 'FK-20261028-001', exact: true }).click(); await funds.waitFor()
+  await page.goto('http://127.0.0.1:5173/vouchers?code=NOT-FOUND')
+  await page.getByText('未找到该资金单据，请核对编号或刷新重试', { exact: true }).waitFor()
+  assert.equal(await funds.count(), 0)
+  console.log('PASS 列表编号链接、普通收付款类别、关闭清理地址及失效编号提示')
   assert.deepEqual(errors, [])
   console.log('PASS 无浏览器未捕获错误；全部请求使用隔离内存数据')
 } catch (e) {

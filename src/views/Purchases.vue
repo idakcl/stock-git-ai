@@ -72,7 +72,7 @@
         </el-table-column>
         <el-table-column label="收付款单" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="voucherCodesOf(row).length" class="voucher-codes">{{ voucherCodesOf(row).join('、') }}</span>
+            <span v-if="voucherCodesOf(row).length" class="voucher-codes"><template v-for="(code, index) in voucherCodesOf(row)" :key="code"><span v-if="index">、</span><router-link :to="{ path: '/vouchers', query: { code } }" class="link" @click.stop>{{ code }}</router-link></template></span>
             <span v-else class="none">—</span>
           </template>
         </el-table-column>

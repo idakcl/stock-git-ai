@@ -93,7 +93,7 @@
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
         <el-table-column label="资金单据编号" width="160" show-overflow-tooltip>
-          <template #default="{ row }">{{ row.voucher || '—' }}</template>
+          <template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template>
         </el-table-column>
       </el-table>
       </div>
@@ -101,7 +101,7 @@
 
     <el-card v-if="(sale.settlements || []).length" class="pay-card">
       <template #header>退货核销（不计现金实收或优惠）</template>
-      <el-table :data="sale.settlements"><el-table-column prop="date" label="日期" /><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号" /></el-table>
+      <el-table :data="sale.settlements"><el-table-column prop="date" label="日期" /><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
     </el-card>
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" :deposit-balance="customerDepositBalance" @saved="onPaySaved" />
 
