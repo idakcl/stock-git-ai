@@ -179,9 +179,9 @@ const selectedDue = computed(() => round2(selectedRows.value.reduce((s, r) => {
   if (r._settle === '结清') return s
   return s + Math.max(0, netOf(r, type.value) - Number(r._discount || 0))
 }, 0)))
-const excess = computed(() => round2(Math.max(0, (Number(amount || 0)) - selectedDue.value)))
+const excess = computed(() => round2(Math.max(0, Number(amount.value || 0) - selectedDue.value)))
 // 不足额：还差多少没收到（按日期先后分摊，摊不到的继续挂账），与「超出转预存」互为镜像
-const short = computed(() => round2(Math.max(0, selectedDue.value - (Number(amount || 0)))))
+const short = computed(() => round2(Math.max(0, selectedDue.value - Number(amount.value || 0))))
 
 // 优惠铺满本单未收 → 该行自动设为结清：避免「已全免却还挂着账」这种自相矛盾的状态
 function onDiscountChange(row) {
@@ -195,7 +195,7 @@ function fillSelected() {
   amount.value = selectedDue.value > 0 ? selectedDue.value : null
 }
 const hasDiscOrSettle = computed(() => selectedRows.value.some(r => Number(r._discount || 0) > 0 || r._settle === '结清'))
-const canSave = computed(() => !!name.value && selectedRows.value.length > 0 && (Number(amount || 0) > 0 || hasDiscOrSettle.value))
+const canSave = computed(() => !!name.value && selectedRows.value.length > 0 && (Number(amount.value || 0) > 0 || hasDiscOrSettle.value))
 
 function confirm() {
   if (!name.value) return ElMessage.warning('请选择往来单位')
@@ -206,14 +206,14 @@ function confirm() {
     if (Number(r._discount || 0) > 0) discounts[r.id] = round2(Number(r._discount))
     if (r._settle === '结清') settleIds.push(r.id)
   }
-  if (!(Number(amount || 0) > 0) && !Object.keys(discounts).length && !settleIds.length) {
+  if (!(Number(amount.value || 0) > 0) && !Object.keys(discounts).length && !settleIds.length) {
     return ElMessage.warning('请输入收/付款金额，或设置优惠 / 结清')
   }
   // 产出与 BatchPayDialog 同构的单组 payload，并附逐单优惠与结清标记，交由父组件统一写回
   emit('applied', [{
     party: name.value,
     kind: type.value,
-    amount: Number(amount || 0),
+    amount: Number(amount.value || 0),
     date: date.value || new Date().toISOString().slice(0, 10),
     remark: remark.value || '',
     orderIds: selectedRows.value.map(r => r.id),
