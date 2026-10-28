@@ -459,10 +459,14 @@ async function doSave() {
     } catch { return }
   }
   let catalog = [...(props.items || [])]
+  // 新增商品时分配正式 P 编码（P + 5 位，从当前商品库最大序号 +1 递增），避免写入乱码 N… 临时编码
+  let pMax = 0
+  for (const x of catalog) { const m = /^P(\d{5})$/.exec(x.code || ''); if (m) pMax = Math.max(pMax, parseInt(m[1], 10)) }
+  const nextCodeFn = () => { pMax += 1; return 'P' + String(pMax).padStart(5, '0') }
   const resolved = []
   form.lines.forEach((l, idx) => {
     // 采购行要带 cost（影响商品建档成本），销售行直接用成交价
-    const result = isPurchase.value ? resolveLine(catalog, { ...l, cost: l.price }, idx) : resolveLine(catalog, l, idx)
+    const result = isPurchase.value ? resolveLine(catalog, { ...l, cost: l.price }, idx, nextCodeFn) : resolveLine(catalog, l, idx, nextCodeFn)
     if (result.line) {
       catalog = result.items
       resolved.push(result.line)
@@ -526,8 +530,9 @@ async function doSave() {
   const depositDeduct = (!isEdit && round2(Number(form.depositPay || 0)) > 0)
     ? { amount: round2(Number(form.depositPay || 0)) }
     : null
-  // 只组装、不落库：交给父组件保存（失败时弹窗保持打开可重试）
-  emit('saved', { entry, isEdit, id: entry.id, depositDeduct })
+  // 只组装、不落库：交给父组件保存（失败时弹窗保持打开可重试）。
+  // items：含本次可能新增商品的完整商品库（新商品已带正式 P 编码），交由父组件落库，保证单据行 code 与主数据一致
+  emit('saved', { entry, isEdit, id: entry.id, depositDeduct, items: catalog })
 }
 
 // 保存入口：组件锁 + 父级锁双保险，双击只会执行一次

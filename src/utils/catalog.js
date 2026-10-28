@@ -57,15 +57,19 @@ export function aggregateByItem(orders, items, { withOrders = false } = {}) {
   return Object.values(agg).sort((a, b) => b.amount - a.amount)
 }
 
-export function ensureCatalogItem(items, input, index = 0) {
+// 新商品建档时分配编码：传入 nextCodeFn 则用其生成正式编码（如 P00001），
+// 否则回退到旧的临时乱码编码（保持对其他调用方的兼容）。
+export function ensureCatalogItem(items, input, index = 0, nextCodeFn = null) {
   const text = String(input.code || input.name || '').trim()
   if (!text) return { items, item: null }
   const found = items.find(i => i.code === text || i.name === text)
   if (found) return { items, item: found }
+  const code = nextCodeFn ? nextCodeFn() : ('N' + Date.now().toString(36).toUpperCase() + index)
   const item = {
-    code: 'N' + Date.now().toString(36).toUpperCase() + index,
+    code,
     name: input.name || text,
     unit: input.unit || '',
+    suppliers: [],
     cost: Number(input.cost || input.price || 0),
     price: Number(input.price || 0),
     warning: 0
@@ -90,8 +94,8 @@ export function normalizeRate(line, gross) {
   return 1
 }
 
-export function resolveLine(items, line, index = 0) {
-  const result = ensureCatalogItem(items, line, index)
+export function resolveLine(items, line, index = 0, nextCodeFn = null) {
+  const result = ensureCatalogItem(items, line, index, nextCodeFn)
   if (!result.item) return result
   const qty = Number(line.qty || 0)
   const price = Number(line.price || result.item.price || 0)

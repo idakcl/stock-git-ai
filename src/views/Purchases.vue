@@ -233,10 +233,18 @@ function openDialog(row) {
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则立即关窗报成功再后台刷新。
 // 刷新走独立容错：保存已落库，刷新失败只保留本地数据，绝不让弹窗卡在「存了却不开工」状态
 // （否则用户会重复点击，把同一单再 push 一遍生成重复单据）
-async function onOrderSaved({ entry, isEdit, depositDeduct }) {
+async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
   saving.value = true
   try {
     const snapshot = [...list.value]
+    // 本次是否新增了商品（商品库出现了新 code）：先落库商品库，再保存单据。
+    // 顺序不能反——先 saveItems 让后端 derive 按 code 命中、不重复建档，避免产生第二个 P 编码
+    const hasNewItems = items && items.some(i => !itemOptions.value.some(x => x.code === i.code))
+    if (hasNewItems) {
+      try { await api.saveItems(items) } catch (e) {
+        ElMessage.error(`商品落库失败：${e.message || '网络异常'}，新商品未保存（可在商品库手动补建）`)
+      }
+    }
     // 幂等合并：同单号已存在则替换，防止「保存成功但刷新失败→重复点击」造成重复单
     const exist = list.value.findIndex(p => p.id === entry.id)
     if (exist >= 0) list.value[exist] = entry
@@ -256,6 +264,8 @@ async function onOrderSaved({ entry, isEdit, depositDeduct }) {
     dialog.value = false
     editingOrder.value = null
     ElMessage.success(isEdit ? '已保存修改' : '采购入库成功')
+    // 本地先刷新商品库（含新商品），避免闪烁；随后后台再拉一次服务端值
+    if (hasNewItems) itemOptions.value = items
     // 商品建档、库存、供应商关系均由后端自动推导
     try {
       itemOptions.value = await api.getItems().catch(() => itemOptions.value)
