@@ -123,7 +123,7 @@ function addOne() {
     // 超额收付：本单记满未收/未付金额，超出部分转预存款/预付款（保存时写入对应档案）
     if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额，无需再记`)
     const date = draft.value.date || new Date().toISOString().slice(0, 10)
-    rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString() })
+    rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString(), _new: true })
     pendingDeposit.value = {
       date,
       amount: round2(amount - remain),
@@ -140,7 +140,8 @@ function addOne() {
     date: draft.value.date || new Date().toISOString().slice(0, 10),
     amount,
     remark: draft.value.remark || '',
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
+    _new: true
   })
   dirty.value = true
   // 默认带入剩余未收，方便连续录入
@@ -166,7 +167,8 @@ function payFromDeposit() {
     amount,
     remark: draft.value.remark || `用${depositLabel.value}抵扣`,
     time: new Date().toISOString(),
-    fromDeposit: true
+    fromDeposit: true,
+    _new: true
   })
   dirty.value = true
   draft.value.amount = null
@@ -183,7 +185,8 @@ async function settleFull() {
     date: draft.value.date || new Date().toISOString().slice(0, 10),
     amount: remain,
     remark: draft.value.remark || `结清${kindLabel.value}`,
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
+    _new: true
   })
   dirty.value = true
   draft.value.amount = null
@@ -204,7 +207,8 @@ function settleRound() {
     date: draft.value.date || new Date().toISOString().slice(0, 10),
     amount,
     remark: draft.value.remark || `抹零${kindLabel.value}`,
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
+    _new: true
   })
   dirty.value = true
   const gap = round2(due.value - paidTotal)
@@ -215,7 +219,11 @@ function settleRound() {
   draft.value.remark = ''
   const dep = pendingDeposit.value
   pendingDeposit.value = null
-  emit('saved', syncPayments(order, props.kind), dep && Number(dep.amount) > 0 ? { add: dep, deduct: null } : null)
+  emit('saved', syncPayments(order, props.kind), {
+    add: dep && Number(dep.amount) > 0 ? dep : null,
+    deduct: null,
+    newRows: collectNewRows()
+  })
 }
 
 // ---------- 编辑已有流水：把该笔载入表单，改完写回原位置（保留原 time） ----------
@@ -253,6 +261,15 @@ function saveEdit() {
 function cancelEdit() {
   editingIndex.value = -1
   draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+}
+
+// 收集本次保存会话新增的流水（标记 _new），用于父组件逐笔生成资金单据；收集后清标记
+function collectNewRows() {
+  const out = rows.value
+    .filter(r => r._new)
+    .map(r => ({ date: r.date || '', amount: Number(r.amount || 0), remark: r.remark || '', fromDeposit: !!r.fromDeposit }))
+  rows.value.forEach(r => { if (r._new) delete r._new })
+  return out
 }
 
 function removeRow(idx) {
@@ -311,7 +328,8 @@ async function saveAll() {
       amount: deductTotal,
       remark: `抵扣 ${props.order.id || ''} 货款`,
       time: new Date().toISOString()
-    } : null
+    } : null,
+    newRows: collectNewRows()
   })
 }
 

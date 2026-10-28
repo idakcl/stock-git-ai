@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <b>收付款单</b>
-          <span class="header-sub">每一笔「记一笔 / 合并收付款」自动生成一张资金单据（收款单 SK- / 付款单 FK-）</span>
+          <span class="header-sub">每一笔收付款、预存预付、超额转存、抵扣划转都自动生成一张资金单据（收款单 SK- / 付款单 FK-）</span>
         </div>
       </template>
 
@@ -55,7 +55,12 @@
       />
       <div class="table-wrap">
         <el-table :data="filteredList" stripe @row-click="openDrawer">
-          <el-table-column prop="code" label="单据编码" width="200" show-overflow-tooltip />
+          <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip />
+          <el-table-column label="类别" width="120">
+            <template #default="{ row }">
+              <el-tag size="small" :type="categoryTagType(row.category)" disable-transitions>{{ categoryLabel(row.category) }}</el-tag>
+            </template>
+          </el-table-column>
           <el-table-column prop="party" label="往来单位" min-width="160" show-overflow-tooltip />
           <el-table-column prop="date" label="日期" width="130" />
           <el-table-column label="本次金额" width="130" align="right">
@@ -80,8 +85,9 @@
     <el-drawer v-model="drawer" :title="current ? current.code : ''" size="600px" direction="rtl">
       <template v-if="current">
         <el-descriptions :column="1" border size="small" class="vh">
-          <el-descriptions-item label="单据编码">{{ current.code }}</el-descriptions-item>
+          <el-descriptions-item label="资金单据编号">{{ current.code }}</el-descriptions-item>
           <el-descriptions-item label="类型">{{ current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
+          <el-descriptions-item label="类别">{{ categoryLabel(current.category) }}</el-descriptions-item>
           <el-descriptions-item label="往来单位">{{ current.party }}</el-descriptions-item>
           <el-descriptions-item label="日期">{{ current.date }}</el-descriptions-item>
           <el-descriptions-item label="本次金额">¥ {{ Number(current.total || 0).toFixed(2) }}</el-descriptions-item>
@@ -93,7 +99,8 @@
         <el-table :data="current.items || []" stripe border size="small" class="v-items">
           <el-table-column label="单号" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
-              <router-link :to="row.orderType === 'sale' ? `/sale/${row.orderId}` : `/purchase/${row.orderId}`" class="link">{{ row.orderId }}</router-link>
+              <router-link v-if="row.orderId" :to="row.orderType === 'sale' ? `/sale/${row.orderId}` : `/purchase/${row.orderId}`" class="link">{{ row.orderId }}</router-link>
+              <span v-else class="none">{{ row.note || '—' }}</span>
             </template>
           </el-table-column>
           <el-table-column prop="date" label="日期" width="120" />
@@ -105,7 +112,8 @@
           </el-table-column>
           <el-table-column label="结算" width="80" align="center">
             <template #default="{ row }">
-              <el-tag :type="row.settle ? 'success' : 'danger'" size="small" disable-transitions>{{ row.settle ? '结清' : '挂账' }}</el-tag>
+              <el-tag v-if="row.settle != null" :type="row.settle ? 'success' : 'danger'" size="small" disable-transitions>{{ row.settle ? '结清' : '挂账' }}</el-tag>
+              <span v-else class="none">—</span>
             </template>
           </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="120" show-overflow-tooltip>
@@ -123,6 +131,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import TableToolbar from '../components/TableToolbar.vue'
 import { downloadCSV } from '../utils/export'
+import { VOUCHER_CATEGORY } from '../utils/voucherFlow'
 
 const loading = ref(true)
 const tab = ref('receipts')
@@ -159,7 +168,8 @@ const voucherSum = computed(() => (vouchers.value || []).reduce((s, v) => s + Nu
 const netSum = computed(() => round2(receiptSum.value - voucherSum.value))
 
 const listColumns = [
-  { label: '单据编码', prop: 'code' },
+  { label: '资金单据编号', prop: 'code' },
+  { label: '类别', value: r => categoryLabel(r.category) },
   { label: '往来单位', prop: 'party' },
   { label: '日期', prop: 'date' },
   { label: '本次金额', value: r => Number(r.total || 0).toFixed(2) },
@@ -179,6 +189,17 @@ function openDrawer(row) {
   if (!row || !row.code) return
   current.value = { ...row, items: enrichedItems(row.items) }
   drawer.value = true
+}
+
+// 资金单据类别展示（普通收付款 / 预存预付充值 / 超额转存 / 预存款抵扣）
+function categoryLabel(cat) {
+  return VOUCHER_CATEGORY[cat] || '收付款'
+}
+function categoryTagType(cat) {
+  if (cat === 'deposit-recharge') return 'warning'
+  if (cat === 'deposit-over') return 'info'
+  if (cat === 'deposit-deduct') return 'success'
+  return ''
 }
 
 // 导出当前查看的单据明细（单号 / 日期 / 本次金额 / 本次优惠 / 结算 / 备注）

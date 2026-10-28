@@ -166,6 +166,7 @@ import { matchText } from '../utils/search'
 import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2 } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
+import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'
 
@@ -366,6 +367,17 @@ async function onPaySaved(updated, payload) {
     if (addAmt > 0) parts.push(`存入${depWord} ¥${addAmt.toFixed(2)}`)
     if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
+  }
+  // 联动生成资金单据：每一笔新增收/付款流水各开一张（关联本单号）；抵扣流水对应划转单；超额转存对应划转单
+  const bases = buildPaymentVoucherBases({ kind: props.kind, order: updated, newRows: payload?.newRows, add: payload?.add })
+  if (bases.length) {
+    try {
+      const { created } = await appendVouchers(api, props.kind, bases)
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+    }
   }
 }
 

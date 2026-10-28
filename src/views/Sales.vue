@@ -212,7 +212,7 @@ const exportColumns = [
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未收', value: r => receivableOf(r).toFixed(2) },
   { label: '结算', value: r => settleLabelOf(r) },
-  { label: '收付款单', value: r => voucherCodesOf(r).join('、') },
+  { label: '资金单据编号', value: r => voucherCodesOf(r).join('、') },
   { label: '备注', prop: 'remark' }
 ]
 

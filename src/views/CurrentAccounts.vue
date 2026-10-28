@@ -249,6 +249,7 @@ import { api } from '../api'
 import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment, syncPayments } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { genVoucherCode } from '../utils/voucher'
+import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -576,6 +577,17 @@ async function onPaySaved(updated, payload) {
     if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
   }
+  // 联动生成资金单据：每一笔新增收/付款流水各开一张（关联本单号）；抵扣流水对应划转单；超额转存对应划转单
+  const bases = buildPaymentVoucherBases({ kind, order: updated, newRows: payload?.newRows, add: payload?.add })
+  if (bases.length) {
+    try {
+      const { created } = await appendVouchers(api, kind, bases)
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+    }
+  }
 }
 
 // 合并收付款 / 记一笔 统一写回：groups:[{party,kind,amount,date,remark,orderIds,discounts,settleIds}]
@@ -667,7 +679,7 @@ async function onBatchApplied(groups) {
       if (isRecv) salesMap[id] = working[id]
       else purchasesMap[id] = working[id]
     }
-    if (leftover > 0.005) depositOps.push({ kind: g.kind, name: g.party, amount: leftover })
+    if (leftover > 0.005) depositOps.push({ kind: g.kind, name: g.party, amount: leftover, date: g.date })
   }
   // 写回收付款流水（仅改动到的单据），并同步 received/paid/settle
   if (Object.keys(salesMap).length) {
@@ -693,6 +705,29 @@ async function onBatchApplied(groups) {
   for (const op of depositOps) {
     const list2 = await applyDepositFlows(api, op.kind, op.name, `batch:${op.name}:${ts}`, op.amount, 0)
     if (list2) { if (op.kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
+  }
+  // 每笔超额转存都是一笔资金变动 → 生成「超额转存」资金单据（无关联单号），按 kind 分桶避免跨类型重号
+  const today = new Date().toISOString().slice(0, 10)
+  const overBases = { receivable: [], payable: [] }
+  for (const op of depositOps) {
+    const note = op.kind === 'receivable' ? '超收转预存款' : '超付转预付款'
+    overBases[op.kind].push({
+      category: 'deposit-over',
+      party: op.name,
+      date: op.date || today,
+      remark: note,
+      items: [{ orderId: '', orderType: '', amount: round2(op.amount), note }]
+    })
+  }
+  for (const k of ['receivable', 'payable']) {
+    if (!overBases[k].length) continue
+    try {
+      const { created } = await appendVouchers(api, k, overBases[k])
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`超额转存资金单据：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`超额转存资金单据生成失败：${e.message || '网络异常'}`)
+    }
   }
   const [sales, pur, cust, sup, rec, pv] = await Promise.all([
     api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers(),
@@ -736,6 +771,22 @@ async function onRechargeSaved(payload) {
   customers.value = cust || []
   suppliers.value = sup || []
   ElMessage.success(`已存入${kind === 'receivable' ? '客户预存款' : '供应商预付款'} ¥${round2(amount).toFixed(2)}`)
+  // 预存/预付充值也是一笔资金变动 → 生成「预存预付充值」资金单据（无关联单号），与收付款单同页展示
+  const note = kind === 'receivable' ? '存入客户预存款' : '存入供应商预付款'
+  const bases = [{
+    category: 'deposit-recharge',
+    party: name,
+    date: dateStr,
+    remark: remark || note,
+    items: [{ orderId: '', orderType: '', amount: round2(amount), note }]
+  }]
+  try {
+    const { created } = await appendVouchers(api, kind, bases)
+    const codes = created.map(v => v.code).filter(Boolean)
+    if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
+  } catch (e) {
+    ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+  }
 }
 
 onMounted(async () => {

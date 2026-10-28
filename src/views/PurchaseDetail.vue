@@ -89,7 +89,7 @@
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
-        <el-table-column label="单据编码" width="160" show-overflow-tooltip>
+        <el-table-column label="资金单据编号" width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ row.voucher || '—' }}</template>
         </el-table-column>
       </el-table>
@@ -129,6 +129,7 @@ import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledO
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
+import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
 
 const route = useRoute()
 const router = useRouter()
@@ -333,6 +334,18 @@ async function onPaySaved(updated, payload) {
     if (addAmt > 0) parts.push(`存入供应商预付款 ¥${addAmt.toFixed(2)}`)
     if (deductAmt > 0) parts.push(`扣减供应商预付款 ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
+  }
+  // 联动生成资金单据：每一笔新增付款流水各开一张付款单（关联本采购单号）；
+  // 用预付款抵扣的流水对应「预存款抵扣划转单」；超额转存的金额对应「超额转存」资金单据。
+  const bases = buildPaymentVoucherBases({ kind: 'payable', order: updated, newRows: payload?.newRows, add: payload?.add })
+  if (bases.length) {
+    try {
+      const { created } = await appendVouchers(api, 'payable', bases)
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+    }
   }
 }
 
