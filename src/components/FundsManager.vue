@@ -219,17 +219,22 @@ const depositBalanceOf = (row) => {
   return depositSumOf(p && (isPayable.value ? p.advances : p.deposits))
 }
 
-const filtered = computed(() => (list.value || []).filter(row => {
-  if (dateStart.value && (row.date || '') < dateStart.value) return false
-  if (dateEnd.value && (row.date || '') > dateEnd.value) return false
-  if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false
-  // 仅看未结清：按展示口径过滤（与列表结算标签、统计卡 openCount 完全一致）
-  if (onlyOpen.value && isSettledOf(netOf(row), row.settle)) return false
-  // 搜索商品名时按编码解析为商品主数据当前名：单据快照名过期也能命中（改名后老单可搜）
-  if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark,
-    ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
-  return true
-}))
+const filtered = computed(() => {
+  const rows = (list.value || []).filter(row => {
+    if (dateStart.value && (row.date || '') < dateStart.value) return false
+    if (dateEnd.value && (row.date || '') > dateEnd.value) return false
+    if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false
+    // 仅看未结清：按展示口径过滤（与列表结算标签、统计卡 openCount 完全一致）
+    if (onlyOpen.value && isSettledOf(netOf(row), row.settle)) return false
+    // 搜索商品名时按编码解析为商品主数据当前名：单据快照名过期也能命中（改名后老单可搜）
+    if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark,
+      ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
+    return true
+  })
+  // 单据按日期倒序：最新日期排最前，空日期置底；同日按单号倒序保持稳定
+  return rows.slice().sort((a, b) =>
+    (b.date || '').localeCompare(a.date || '') || (b.id || '').localeCompare(a.id || ''))
+})
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
