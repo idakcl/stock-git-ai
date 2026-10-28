@@ -247,10 +247,11 @@ export function normalizeOrderPayments(order, legacyField) {
       payments: [{ date: order.date || '', amount, remark: '历史实付', time: '' }]
     }
   }
-  // 前端的一次性流水定位标记（mid）：只用于「本次收付款 → 资金单据编号」的内存内匹配，
-  // 落库前一律剥离。数据仓是 AI 直读的口径来源，不能出现只有前端代码看得懂的一次性字段。
-  if (Array.isArray(order.payments) && order.payments.some(p => p && 'mid' in p)) {
-    return { ...order, payments: order.payments.map(({ mid, ...p }) => p) }
+  // 前端的一次性流水定位标记（mid，以及旧版遗留的 _new）：只用于「本次收付款 → 资金单据编号」
+  // 的内存内匹配，落库前一律剥离。数据仓是 AI 直读的口径来源，不能出现只有前端代码看得懂的一次性字段；
+  // 浏览器里可能还挂着旧版打包产物在写 _new，所以这里两个都剥，避免脏字段沉淀进数据仓。
+  if (Array.isArray(order.payments) && order.payments.some(p => p && ('mid' in p || '_new' in p))) {
+    return { ...order, payments: order.payments.map(({ mid, _new, ...p }) => p) }
   }
   return order
 }
