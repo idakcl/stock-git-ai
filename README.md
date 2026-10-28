@@ -72,7 +72,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/purchase-history` | `{ "P00001": [{ id, date, supplier, supplierName, qty, price, total }] }` | 历史采购价，服务端现场按采购单派生，按商品编码取，组内已按日期倒序 |
 | `/suppliers` / `/customers` | 档案数组 | 客户带 `deposits`（预存款）、供应商带 `advances`（预付款）流水，元素为 `{ date, amount, remark, order, time }`：**抵扣为负数**，`order` 是该笔所属的单号标记（系统按它幂等重建，手工加/删流水时不要漏掉或乱填） |
 | `/purchases` / `/sales` | 单据**全量**数组 | 含 `payments` 收付款流水 |
-| `/receipts` / `/payment-vouchers` | 资金单据**全量**数组 | 收款单 `SK-` / 付款单 `FK-` |
+| `/receipts` / `/payment-vouchers` | 资金单据**全量**数组 | 收款单 `SK-` / 付款单 `FK-`；**文件不存在时返回 `[]`**（老数据仓里可能没有这两个文件，首次开单自动创建），其余主数据缺失仍照常报错 |
 | `/stock` | `{ "P00001": { qty, cost } }` | 派生数据，只读 |
 | `/logs` | 数组 | 最近 200 条导入/合并日志，`source` 为 `ai` 或 `merge` |
 | `/session` | `{ ok }` | 票据自检 |
@@ -300,6 +300,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | `code` / `name` | 编码、名称 |
 | `contact` / `phone` | 联系人、电话 |
 | `remark` | 备注（可选） |
+| `category` | 客户类别（如 `批发`），用于「客户类别 → 商品分级售价」取价；未定类别时留空字符串 |
 | `deposits` | **预存款流水**数组，结构同 `advances` |
 
 ### stock.json（库存）
@@ -451,6 +452,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 - **失败不静默**：`stage` 为 `orders`（单据未存，本地列表未被修改）/ `vouchers`（流水已存、凭证写入失败）时页面明确报错并给出补救入口（来往账「记一笔」补开）；`voucherNotices()` 统一把结果翻译成提示文案。
 - **一次性标记 `mid`**：弹窗用 `mid` 在内存里把「本次新增流水」与资金单据编号精确对应（`payments` 会按日期时间重排，同名同额同日的光靠金额会串位），回写完即删除，后端 `normalizeOrderPayments` 再兜一道，**绝不落库**。
 - 类别常量 `VOUCHER_CATEGORY` 只用于列表/抽屉展示区分，不参与金额计算。
+- **两个集合文件可能不存在**：`receipts.json` / `payment-vouchers.json` 是后期新增的，老数据仓里从来没有过；GitHub Contents API 对不存在的文件返回 404，`readJSON` 抛错 → `GET /api/receipts` 变 500。而「来往账」「收付款单」两页原先把这两个请求和单据请求塞在同一个 `Promise.all` 里，catch 后静默清空所有列表——表现就是**页面一条信息都没有**，而欠款其实算得出来。现在两头都修：后端 `readOptionalArray()` 对这两个文件按空集合兜底（其余主数据缺失仍必须报错，整表覆盖语义下把读失败当空数组等于删库），前端按「必要数据 / 可选数据」分开加载并明确报错，绝不再静默变白页。数据仓侧已补建两个空集合。
 
 ### 挂账 / 结清 与 应收 / 应付
 - 采购单、销售单均带 `settle` 字段：`挂账`（默认）或 `结清`；列表提供状态标签与**一键切换**。

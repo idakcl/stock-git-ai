@@ -9,6 +9,22 @@ function json(req, env, res, status = 200) {
   })
 }
 
+// 资金单据集合（receipts.json / payment-vouchers.json）是后期新增的文件，
+// 老数据仓里可能根本不存在，GitHub 对不存在的路径返回 404 并由 readJSON 抛错。
+// 若直接让它冒泡，「来往账」「收付款单」两个页面会整体读失败：页面看起来就是「没有任何信息」，
+// 欠款金额明明算得出来却显示空白。因此这两个文件按「可为空」处理，首次开单时自动创建。
+// 仅限这两个文件：单据、商品、档案等主数据缺失必须照常报错——
+// 写接口语义是整表覆盖，把读失败当成空数组，下一次写入就等于把全量数据清空。
+async function readOptionalArray(env, file) {
+  try {
+    return await readJSON(env, file)
+  } catch (e) {
+    const msg = String((e && e.message) || e)
+    if (/GitHub 404/.test(msg)) return []
+    throw e
+  }
+}
+
 function extractData(text) {
   try {
     const obj = JSON.parse(text)
@@ -326,8 +342,8 @@ export async function handleApi(req, url, env) {
     if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))
     if (path === '/purchases' && method === 'GET') return json(req, env, await readJSON(env, 'purchases.json'))
     if (path === '/sales' && method === 'GET') return json(req, env, await readJSON(env, 'sales.json'))
-    if (path === '/receipts' && method === 'GET') return json(req, env, await readJSON(env, 'receipts.json'))
-    if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readJSON(env, 'payment-vouchers.json'))
+    if (path === '/receipts' && method === 'GET') return json(req, env, await readOptionalArray(env, 'receipts.json'))
+    if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readOptionalArray(env, 'payment-vouchers.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
 

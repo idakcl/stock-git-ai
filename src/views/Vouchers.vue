@@ -74,7 +74,7 @@
           </el-table-column>
         </el-table>
       </div>
-      <el-empty v-if="!filteredList.length" :description="`暂无${tabLabel}`" />
+      <el-empty v-if="!filteredList.length" :description="loadError ? `资金单据读取失败：${loadError}` : `暂无${tabLabel}——收款/付款/结清、预存预付与超额转存时自动生成`" />
       <div class="sum-bar" v-if="filteredList.length">
         合计（筛选后）：<b>¥ {{ sumTotal.toFixed(2) }}</b>
         <span class="sum-note">· 共 {{ filteredList.length }} 张{{ tabLabel }}</span>
@@ -137,6 +137,9 @@ const loading = ref(true)
 const tab = ref('receipts')
 const receipts = ref([])
 const vouchers = ref([])
+// 集合读取失败标记：以前失败会被静默吞掉，页面只显示「暂无收款单」，
+// 让人以为「一张单据都没生成」，实际是数据仓里还没有 receipts.json（GET 直接 500）
+const loadError = ref('')
 const drawer = ref(false)
 const current = ref(null)
 // 源单据日期/备注：用于抽屉明细展示（单号链接 + 日期 + 备注，避免单据内重复存冗余）
@@ -226,19 +229,30 @@ function exportVoucher() {
 }
 
 onMounted(async () => {
+  // 资金单据集合是本页的主体：读失败一定要报出来，不能装作「暂无单据」
   try {
-    const [rec, pv, sales, purchases] = await Promise.all([
-      api.getReceipts(), api.getPaymentVouchers(), api.getSales(), api.getPurchases()
-    ])
+    const [rec, pv] = await Promise.all([api.getReceipts(), api.getPaymentVouchers()])
     receipts.value = rec || []
     vouchers.value = pv || []
+    loadError.value = ''
+  } catch (e) {
+    receipts.value = []
+    vouchers.value = []
+    loadError.value = (e && e.message) || '网络异常'
+    ElMessage.error({
+      message: `收付款单读取失败：${loadError.value}（若数据仓里还没有 receipts.json / payment-vouchers.json，请先执行一次收付款或刷新重试）`,
+      duration: 8000
+    })
+  }
+  // 源单据只用于抽屉里显示单号日期/备注：取不到不影响列表本身
+  try {
+    const [sales, purchases] = await Promise.all([api.getSales(), api.getPurchases()])
     const meta = {}
     ;(sales || []).forEach(s => { meta[s.id] = { date: s.date, remark: s.remark } })
     ;(purchases || []).forEach(p => { meta[p.id] = { date: p.date, remark: p.remark } })
     orderMeta.value = meta
   } catch (e) {
-    receipts.value = []
-    vouchers.value = []
+    ElMessage.warning({ message: `关联单据信息读取失败（${(e && e.message) || '网络异常'}），明细里的日期/备注可能显示为空`, duration: 6000 })
   } finally {
     loading.value = false
   }

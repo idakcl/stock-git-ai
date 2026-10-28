@@ -265,6 +265,9 @@ const suppliers = ref([])
 // 资金单据（收款单 / 付款单）：记一笔/合并收付款时按组生成，详情页收款记录卡据此展示「单据编码」
 const receiptsList = ref([])
 const vouchersList = ref([])
+// 资金单据集合是否加载失败：失败时禁止用「空列表 + 本次新增」去整表覆盖 receipts.json，
+// 那会把库里已有的收款单全部删掉（写接口是整表覆盖语义）
+const voucherLoadFailed = ref(false)
 
 // 排序 / 筛选状态记忆到 localStorage，刷新后自动恢复
 const LS = {
@@ -598,6 +601,23 @@ async function onPaySaved(updated, payload) {
 //   组装 items（orderId/orderType/amount/本次优惠/是否结清），写回 receipts / payment-vouchers 集合。
 // BatchPayDialog 不传 discounts/settleIds，此处按缺失处理（仅分摊金额），保持兼容。
 async function onBatchApplied(groups) {
+  // 加载资金单据集合失败过（例如数据仓里还没有这两个文件、或当时网络异常）：
+  // 先补读一次，仍失败就中止——否则 ① 取号基准为空会和库里已有单据重号，
+  // ② 更危险的是「空列表 + 本次新增」整表覆盖会把库里已有的收/付款单删掉。
+  if (voucherLoadFailed.value) {
+    try {
+      const [rec, pv] = await Promise.all([api.getReceipts(), api.getPaymentVouchers()])
+      receiptsList.value = rec || []
+      vouchersList.value = pv || []
+      voucherLoadFailed.value = false
+    } catch (e) {
+      ElMessage.error({
+        message: `收付款单集合读取失败（${(e && e.message) || '网络异常'}），为避免覆盖已有资金单据，本次收付款已中止：请刷新本页重试`,
+        duration: 8000
+      })
+      return
+    }
+  }
   const ts = Date.now()
   const salesMap = {}
   const purchasesMap = {}
@@ -730,16 +750,28 @@ async function onBatchApplied(groups) {
       ElMessage.error(`超额转存资金单据生成失败：${e.message || '网络异常'}`)
     }
   }
-  const [sales, pur, cust, sup, rec, pv] = await Promise.all([
-    api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers(),
-    api.getReceipts(), api.getPaymentVouchers()
-  ])
-  salesList.value = sales || []
-  purchasesList.value = pur || []
-  customers.value = cust || []
-  suppliers.value = sup || []
-  receiptsList.value = rec || []
-  vouchersList.value = pv || []
+  // 回读最新全量（写成功后刷新页面数据）：这里失败不能连累已完成的收付款，
+  // 明确提示并打标记，下一次批量操作会先补读、补不上就中止
+  try {
+    const [sales, pur, cust, sup] = await Promise.all([
+      api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
+    ])
+    salesList.value = sales || []
+    purchasesList.value = pur || []
+    customers.value = cust || []
+    suppliers.value = sup || []
+  } catch (e) {
+    ElMessage.warning({ message: `往来数据回读失败（${(e && e.message) || '网络异常'}），收付款已保存，刷新本页可见最新结果`, duration: 6000 })
+  }
+  try {
+    const [rec, pv] = await Promise.all([api.getReceipts(), api.getPaymentVouchers()])
+    receiptsList.value = rec || []
+    vouchersList.value = pv || []
+    voucherLoadFailed.value = false
+  } catch (e) {
+    voucherLoadFailed.value = true
+    ElMessage.warning({ message: `资金单据集合回读失败（${(e && e.message) || '网络异常'}），单据已保存；刷新本页后继续`, duration: 6000 })
+  }
   clearSelection()
   // 成功提示回显本次生成的资金单据编码，便于核对（记一笔/合并收付款每组各生成一张）
   const recvCodes = newReceipts.map(v => v.code)
@@ -791,24 +823,39 @@ async function onRechargeSaved(payload) {
 }
 
 onMounted(async () => {
+  // 必要数据：单据与档案。读失败必须明确报错——以前这里把 6 个请求放一个 Promise.all，
+  // 只要 receipts.json / payment-vouchers.json 在数据仓里不存在（老仓就是如此，GET 直接 500），
+  // catch 就把所有列表清空且一声不吭，整个「来往账」看起来「没有任何信息」。
   try {
-    const [sales, pur, cust, sup, rec, pv] = await Promise.all([
-      api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers(),
-      api.getReceipts(), api.getPaymentVouchers()
+    const [sales, pur, cust, sup] = await Promise.all([
+      api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
     ])
     salesList.value = sales || []
     purchasesList.value = pur || []
     customers.value = cust || []
     suppliers.value = sup || []
+  } catch (e) {
+    voucherLoadFailed.value = true
+    ElMessage.error({
+      message: `来往账加载失败：${(e && e.message) || '网络异常'}，请刷新本页重试`,
+      duration: 8000
+    })
+    return
+  }
+  // 可选数据：资金单据集合。读不到只影响凭证编号与「按序取号」，不影响欠款计算 → 降级提示 + 打标记
+  try {
+    const [rec, pv] = await Promise.all([api.getReceipts(), api.getPaymentVouchers()])
     receiptsList.value = rec || []
     vouchersList.value = pv || []
+    voucherLoadFailed.value = false
   } catch (e) {
-    salesList.value = []
-    purchasesList.value = []
-    customers.value = []
-    suppliers.value = []
     receiptsList.value = []
     vouchersList.value = []
+    voucherLoadFailed.value = true
+    ElMessage.warning({
+      message: `收付款单集合读取失败（${(e && e.message) || '网络异常'}）：欠款金额不受影响，但本次不会开资金单据`,
+      duration: 8000
+    })
   }
 })
 </script>
