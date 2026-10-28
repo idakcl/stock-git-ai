@@ -54,16 +54,63 @@
       </el-form-item>
       <el-form-item label="快速添加">
         <!-- 顶部快捷加商品：选已有商品或输入新名回车即加入下方明细，免去滚动到表格底部操作 -->
-        <div class="quick-add">
-          <el-select v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" style="width:300px" @change="addQuickItem">
-            <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-          </el-select>
-          <span class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</span>
+        <el-select v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" class="quick-add-select" @change="addQuickItem">
+          <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
+        </el-select>
+        <div class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</div>
+      </el-form-item>
+      <!-- 商品明细表：紧跟「快速添加」下方，新增商品即可在下方明细继续改数量/单价 -->
+      <div class="lines-scroll">
+        <el-table :data="form.lines" stripe max-height="320">
+          <el-table-column label="商品" min-width="180">
+            <template #default="{ row }">
+              <el-select
+                v-model="row.code"
+                filterable
+                allow-create
+                default-first-option
+                placeholder="选择或输入商品"
+                style="width:100%"
+                @change="onItemChange(row)"
+              >
+                <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
+              </el-select>
+            </template>
+          </el-table-column>
+          <el-table-column label="数量" width="100" align="right">
+            <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" v-select-on-focus /></template>
+          </el-table-column>
+          <el-table-column label="单价" width="100" align="right">
+            <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus /></template>
+          </el-table-column>
+          <el-table-column label="折扣" width="100" align="right">
+            <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" v-select-on-focus /></template>
+          </el-table-column>
+          <el-table-column label="小计" width="100" align="right">
+            <template #default="{ row }">
+              <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="" width="60">
+            <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <div style="margin-top:8px">
+        <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1})">添加行</el-button>
+        <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单下方「整单优惠」</span>
+      </div>
+      <div style="margin-top:12px;text-align:right">
+        <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
+        <span class="calc-hint" style="margin-left:12px">{{ dueWord }} {{ dueTotal.toFixed(2) }} · 未{{ payWord }} {{ unpaidAmount.toFixed(2) }}</span>
+        <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || orderRateText" class="calc-detail">
+          <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
+          <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
+          <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
+          <span v-if="hasDiscount" class="discount discounted">折后金额 ¥{{ discountedTotal.toFixed(2) }}</span>
+          <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
         </div>
-      </el-form-item>
-      <el-form-item label="整单优惠金额">
-        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="reconcile('discount')" />
-      </el-form-item>
+      </div>
       <el-form-item label="整单折扣">
         <!-- 多级折扣链：每级一个折扣率(0~1) 连乘生效，支持「打完9折再打9折、再打8折」这类逐级叠加 -->
         <div class="rate-chain">
@@ -79,13 +126,14 @@
         </div>
         <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
       </el-form-item>
+      <el-form-item label="整单优惠金额">
+        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="reconcile('discount')" />
+      </el-form-item>
       <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：现金实收/实付可直接改（抵扣部分沿用原单，改抵扣走「付款/收款」弹窗） -->
       <el-form-item :label="`实${payWord}金额`">
         <template v-if="editingId">
-          <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
-            <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
-          </div>
+          <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
+          <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
           <div v-if="Number(form.depositPay) > 0" class="pay-now-row" style="margin-top:6px">
             <el-input-number :model-value="Number(form.depositPay)" :min="0" :precision="2" :controls="false" style="width:150px" disabled />
             <span class="pay-now-hint">已用{{ depositLabel }}抵扣 ¥{{ Number(form.depositPay).toFixed(2) }}（改抵扣请走「{{ payWord }}款」弹窗）</span>
@@ -95,24 +143,24 @@
           </div>
         </template>
         <template v-else>
-          <div class="pay-now-row">
-            <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
-            <span class="pay-now-hint">现金{{ payWord }}款</span>
-          </div>
-          <div class="pay-now-row" style="margin-top:6px">
-            <span class="field-label">{{ depositLabel }}抵扣</span>
-            <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
-            <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
-            <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
-          </div>
-          <div v-if="Number(form.depositPay) > 0" class="deposit-used" style="margin-top:4px">
-            已用{{ depositLabel }}抵扣 <b>¥{{ Number(form.depositPay).toFixed(2) }}</b>
-            <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
-          </div>
+          <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
+          <span class="pay-now-hint">现金{{ payWord }}款</span>
           <div class="calc-hint" style="margin-top:4px">
-            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；{{ depositLabel }}可全额或手动填部分抵扣（不超过本单未{{ payWord }}金额）；选「结清」时「实{{ payWord }}金额」「整单优惠金额」实时联动（你填的金额优先，其余自动补差），保存时校验未付款必须为 0。
+            填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；选「结清」时与优惠金额联动，未付款必须为 0。
           </div>
         </template>
+      </el-form-item>
+      <el-form-item v-if="!editingId" :label="`${depositLabel}抵扣`">
+        <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
+        <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
+        <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
+        <div v-if="Number(form.depositPay) > 0" class="deposit-used" style="margin-top:4px">
+          已用{{ depositLabel }}抵扣 <b>¥{{ Number(form.depositPay).toFixed(2) }}</b>
+          <el-button link type="primary" size="small" @click="form.depositPay = 0">清除</el-button>
+        </div>
+        <div class="calc-hint" style="margin-top:4px">
+          {{ depositLabel }}可全额或手动填部分抵扣（不超过本单未{{ payWord }}金额）；选「结清」时「实{{ payWord }}金额」「整单优惠金额」实时联动（你填的金额优先，其余自动补差），保存时校验未付款必须为 0。
+        </div>
       </el-form-item>
       <el-form-item label=" ">
         <div class="calc-line">
@@ -121,57 +169,6 @@
         </div>
       </el-form-item>
     </el-form>
-    <div class="lines-scroll">
-      <el-table :data="form.lines" stripe max-height="320">
-        <el-table-column label="商品" min-width="180">
-          <template #default="{ row }">
-            <el-select
-              v-model="row.code"
-              filterable
-              allow-create
-              default-first-option
-              placeholder="选择或输入商品"
-              style="width:100%"
-              @change="onItemChange(row)"
-            >
-              <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-            </el-select>
-          </template>
-        </el-table-column>
-        <el-table-column label="数量" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" v-select-on-focus /></template>
-        </el-table-column>
-        <el-table-column label="单价" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus /></template>
-        </el-table-column>
-        <el-table-column label="折扣" width="100" align="right">
-          <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" v-select-on-focus /></template>
-        </el-table-column>
-        <el-table-column label="小计" width="100" align="right">
-          <template #default="{ row }">
-            <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="" width="60">
-          <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
-        </el-table-column>
-      </el-table>
-    </div>
-    <div style="margin-top:8px">
-      <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1})">添加行</el-button>
-      <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单上方「整单优惠」</span>
-    </div>
-    <div style="margin-top:12px;text-align:right">
-      <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
-      <span class="calc-hint" style="margin-left:12px">{{ dueWord }} {{ dueTotal.toFixed(2) }} · 未{{ payWord }} {{ unpaidAmount.toFixed(2) }}</span>
-      <div v-if="lineDiscountSum > 0 || Number(form.discount) > 0 || orderRateText" class="calc-detail">
-        <span>原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
-        <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
-        <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
-        <span v-if="hasDiscount" class="discount discounted">折后金额 ¥{{ discountedTotal.toFixed(2) }}</span>
-        <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
-      </div>
-    </div>
     <template #footer>
       <span v-if="saving || emitting" class="saving-hint">保存中，请稍候…</span>
       <el-button @click="visible = false">取消</el-button>
@@ -577,7 +574,8 @@ async function save() {
 /* label 不换行：110px 下「整单优惠金额」6 字单行显示，两个字段各自独立一行 */
 :deep(.el-form-item__label){white-space:nowrap;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
-.quick-add{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+/* 快速添加选择框撑满表单内容区，避免 300px 硬宽在窄弹窗下右侧溢出 */
+.quick-add-select{width:100%;max-width:100%;}
 /* 预存款抵扣框左侧文案：与输入框之间留出间距，避免贴在一起看不清 */
 .field-label{color:var(--text-regular);font-size:var(--fs-base);min-width:64px;flex:none;}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
