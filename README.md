@@ -6,18 +6,216 @@
 
 ## 目录
 - `src/` — Vue 3 + Element Plus 前端
+- `src/api/index.js` — 前端 API 层（携带票据、15s 内存缓存、写后 20s 强刷窗口）
+- `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNN`）
+- `src/utils/voucherFlow.js` — **收付款 → 资金单据联动的唯一入口**（纯逻辑，不含 UI）
+- `src/utils/account.js` — 全站唯一账务公式（应收/未收/结清判定）
+- `src/utils/dedupe.js` — 导入去重（前端预览与后端落库共用）
 - `api/github.js` — GitHub API 读写辅助
+- `api/auth.js` — 登录票据（HMAC）与 CORS 白名单
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
-- `web/index.js` — Worker 入口（静态 + SPA 回退 + API）
+- `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
 - `wrangler.json` — Cloudflare Workers 配置
+
+> **要给另一个 AI / 外部脚本对接？直接看「AI / 脚本对接（接口契约）」一节。**
 
 ## 数据仓
 独立 GitHub 仓库 `stock-git-ai-data`，JSON 文件：
-`items.json / suppliers.json / customers.json / purchases.json / sales.json / stock.json / logs.json`
+`items.json / suppliers.json / customers.json / purchases.json / sales.json / receipts.json / payment-vouchers.json / stock.json / logs.json`
 
 数据仓由 Worker 直接读写，是系统的**唯一数据源**。
 
 历史采购价**不在数据仓里单独存文件、也不内嵌进 `items.json`**，由 `GET /api/purchase-history` 每次从 `purchases.json` 现场派生（见「自动推导」）。
+
+## AI / 脚本对接（接口契约）
+
+**唯一原则：读写一律走 HTTP API，不要直接改数据仓 JSON。** 直写会绕过三件事，而且系统不会自动帮你修：
+
+1. `derive()` —— 商品档案、供应商/客户链接、历史价的重建（直写 `purchases.json` 后库存与历史价不会更新）；
+2. `normalizeOrderPayments()` —— 「`payments:[]` + 旧 `paid`/`received`」造成的实付漏算；
+3. 资金单据编号分配 —— 手工拼 `SK-`/`FK-` 极易重号或跳号。
+
+只读数据仓是可以的，见本节末尾「只想读数据」。
+
+### 基址
+| 用途 | 地址 |
+|---|---|
+| 前端 | `https://stock-git-ai.1234.nyc.mn/` |
+| API | `https://stock-git-ai.1234.nyc.mn/api` |
+| 备用 | `https://stock-git-ai.dakcl.workers.dev/api`（`*.workers.dev` 国内常被干扰，优先自定义域名） |
+
+### 鉴权
+```bash
+# ① 取票据（唯一无需票据的接口）
+TOKEN=$(curl -s -X POST https://stock-git-ai.1234.nyc.mn/api/login \
+  -H 'Content-Type: application/json' \
+  -d '{"password":"<管理密码>","remember":true}' | jq -r .token)
+
+# ② 带票据调用任意接口
+curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/sales
+
+# ③ 票据是否仍有效
+curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/session   # → {"ok":true}
+```
+- `remember:true` 票据 30 天有效，省略或 `false` 为 12 小时；`expiresIn` 为毫秒时长。
+- 票据格式 `base64url(payload).base64url(HMAC-SHA256)`，脚本**原样存取复用**即可，不要解析或自行伪造（密钥 `SESSION_SECRET` 只存在于 Worker Secret）。
+- 管理密码是 Worker Secret `APP_PASSWORD`，不在仓库里，向系统所有者索取。
+- **401** = 票据缺失/过期 → 重新登录；**429** = 同一来源密码连错 6 次，锁定 15 分钟（响应里带剩余秒数）。
+- CORS 只约束浏览器跨域，curl / Node / Python 脚本不受影响。
+- 读接口有 **15 秒缓存**（Worker 边缘 + CDN 双层）：同一边缘节点写完会自动失效，跨节点/换会话可能读到写前的旧值。**写完要立即校验就带 `-H 'Cache-Control: no-cache'`**（前端写后 20 秒强刷窗口就是这么做的），仍不放心就等 15 秒、或改读 GitHub 数据仓原文。
+- **没有 `PUT` / `PATCH` / `DELETE`**：写只有 `POST`，「删除一条记录」＝写回去掉它的全量数组（删单据后服务端会重跑派生，自动回退库存与历史价）。用其它方法会得到 404。
+
+### 读接口（GET，均需票据）
+| 路径 | 返回 | 说明 |
+|---|---|---|
+| `/items` | 商品数组 | **不含** `purchaseHistory`（已外置） |
+| `/purchase-history` | `{ "P00001": [{ id, date, supplier, supplierName, qty, price, total }] }` | 历史采购价，服务端现场按采购单派生，按商品编码取，组内已按日期倒序 |
+| `/suppliers` / `/customers` | 档案数组 | 客户带 `deposits`（预存款）、供应商带 `advances`（预付款）流水，元素为 `{ date, amount, remark, order, time }`：**抵扣为负数**，`order` 是该笔所属的单号标记（系统按它幂等重建，手工加/删流水时不要漏掉或乱填） |
+| `/purchases` / `/sales` | 单据**全量**数组 | 含 `payments` 收付款流水 |
+| `/receipts` / `/payment-vouchers` | 资金单据**全量**数组 | 收款单 `SK-` / 付款单 `FK-` |
+| `/stock` | `{ "P00001": { qty, cost } }` | 派生数据，只读 |
+| `/logs` | 数组 | 最近 200 条导入/合并日志，`source` 为 `ai` 或 `merge` |
+| `/session` | `{ ok }` | 票据自检 |
+
+返回体是**裸数组 / 裸对象**（不包 `data` 壳）；失败统一是 `{"error":"中文原因"}` + 4xx/5xx，脚本按 `res.ok` 判断即可。
+
+### 写接口（POST，均需票据）
+| 路径 | 请求体 | 落库后的额外动作 |
+|---|---|---|
+| `/items` | `{"items":[全量数组]}` | 反向同步 `suppliers[].products` |
+| `/suppliers` | `{"suppliers":[全量数组]}` | — |
+| `/customers` | `{"customers":[全量数组]}` | — |
+| `/receipts` | `{"receipts":[全量数组]}` | 纯资金单据，不触发派生 |
+| `/payment-vouchers` | `{"payment-vouchers":[全量数组]}`（**键名带连字符**） | 纯资金单据，不触发派生 |
+| `/purchases` | `{"purchases":[全量数组]}` | 规范化流水 → `derive()` → `rebuildStock()`，回写 `items/suppliers/stock` |
+| `/sales` | `{"sales":[全量数组]}` | 同上，并为单里出现的新客户自动建档 |
+| `/normalize` | `{}` | 全量重跑派生，修复编码/历史价/库存漂移。**幂等，改完数据仓后调一次即可** |
+| `/import` | `{"text":"<整份 JSON 的字符串>"}` | 见下方「导入」 |
+| `/import-merge` | `{"key":"items","records":[...]}` | 按主键去重后**追加**，不覆盖已有数据；`key` 可取 `items / customers / suppliers / purchases / sales / receipts / payment-vouchers`，主键为编码（档案、资金单据）或单号（单据），客户/供应商另按名称查重；返回各项计数 `{ ok, added, skippedKey, skippedName, invalid, total }` |
+| `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
+| `/stock` | 任意 | **403**：库存为派生数据，禁止直写 |
+
+- **`POST` 是「整表覆盖」语义，不是 upsert。** 改一张单也必须「读全量 → 只改那一条 → 写回全量」；只传增量会把历史数据全部抹掉。读失败时**绝对不要写**（前端有 `loadFailed` 保护，脚本同理）。
+- 并发写没有跨文件事务：两个客户端同时写同一文件，后写的会拿到 `500 {"error":"GitHub 409: ... "}`，且服务端**故意不重试**（重试等于用旧全量覆盖对方）。收到 409 请重新读、重新算、再写。
+- 单据最小必填：`id`（单号 19 位，见「编码规则」）、`date`、`total`、`items:[{code,name,qty,price,total}]`；采购另需 `supplier`（名称），销售另需 `customer`（名称）。
+- `payments` 数组一旦存在（哪怕为 `[]`）就是实收/实付的权威来源，旧 `received`/`paid` 字段被忽略。要么不写 `payments`（旧格式），要么写全。
+- **写完流水必须同步汇总字段**：`received`/`paid` = Σ`payments[].amount`，`settle` = 「未收/未付 ≤ 1e-6 ? `结清` : `挂账`」。服务端不会替你算这两项（前端靠 `syncPayments()`），不同步就会出现「流水对、列表汇总错」。
+- 若目标单据**还没有** `payments` 数组但 `received`/`paid > 0`，先把旧字段转成一笔 `{ date: 单据日期, amount: 旧值, remark: '历史收付', time: '' }` 再追加新流水；直接写 `payments:[新流水]` 会把旧实付清零、凭空多出欠款（历史上真出过这种事故）。
+- 金额请自己保证 2 位小数；服务端 `derive` 会收敛浮点残留，但不会替你四舍五入 `payments[].amount`。
+- 不要写 `payments[].mid`（前端一次性定位标记，落库前会被剥掉）；写 `items[].purchaseHistory` 也会被剥掉。
+
+**导入接口 `/import`**：`text` 是**字符串**（整份 JSON 文本），识别键 `items / suppliers / customers / purchases / sales / receipts / payment-vouchers`，逐个**整表覆盖**（传哪些键覆盖哪些，未传的不动）；`stock` 键会被忽略（库存一律由单据重建）。上限：文本 1MB、单类 5000 条、记录必须是对象，否则 400 中止。非 JSON 文本走行式解析，仅识别 `商品: 编码 名称 单位`、`供应商: 编码 名称`、`客户: 编码 名称` 三种行。每次导入会往 `logs.json` 追加一条 `{time, source:"ai", results}`。
+
+### 资金单据（`SK-` / `FK-`）结构
+```json
+{
+  "code": "SK-20261028-001",
+  "kind": "receivable",
+  "category": "normal",
+  "party": "张三",
+  "date": "2026-10-28",
+  "remark": "收款",
+  "total": 300,
+  "items": [
+    { "orderId": "X202610280930000001", "orderType": "sale",
+      "amount": 300, "discount": 0, "settle": false, "note": "" }
+  ]
+}
+```
+- `kind`：`receivable`（收款单，存 `receipts.json`）/ `payable`（付款单，存 `payment-vouchers.json`）。
+- `code`：`SK-`/`FK-` + `YYYYMMDD`（凭证日期）+ 3 位序号；序号 = **当天同前缀已有最大序号 + 1**，不用全局计数器。
+- `category` 只用于列表/抽屉展示区分，不参与金额计算：`normal`（收付款）、`deposit-recharge`（预存/预付充值）、`deposit-over`（超额收付转存）、`deposit-deduct`（用预存款/预付款抵扣货款的划转）。后两类允许 `items[0].orderId` 为空串（纯资金变动，不挂单号）。
+- **一张凭证可覆盖多张单据**：`items[]` 多条，`total` = Σ`items[].amount`；反方向的对应关系靠单据流水里的 `payments[].voucher` 回写，即**一笔流水 ↔ 一张凭证**。
+- 红线：**钱只要动了就必须有凭证**；纯抹零优惠（钱没动）不生成凭证，也不占用编号。
+
+### 脚本代收款的标准顺序（与前端 `savePaymentWithVouchers()` 完全一致）
+1. `GET /sales` + `GET /receipts`（都是全量）；
+2. 按 `SK-YYYYMMDD-` 前缀算出下一个（若干）编号，直接写进这笔 `payments[].voucher`；
+3. `POST /sales`（整表，此时流水已带凭证号）；
+4. `POST /receipts`（整表 + 新凭证）。
+
+**顺序不能反**：先写凭证再写流水，要么多一次整表覆盖，要么留下「流水有凭证号、凭证却不存在」的悬挂记录。第 3 步失败就不要执行第 4 步；第 4 步失败必须显式报错并补开，不能静默。
+
+### 账务公式（脚本核算欠款必须同口径）
+```
+等效折扣率 = discountRates[] 连乘（缺失/非法按 1；兼容旧标量 discountRate）
+应收/应付  = round2(max(0, round2(total × 等效折扣率) − discount))
+实收/实付  = round2(Σ payments[].amount)          // payments 存在即为权威
+未收/未付  = max(0, 应收/应付 − 实收/实付)
+结清       = 未收/未付 ≤ 1e-6                      // settle 字段仅供展示，欠款一律按金额算
+```
+全站唯一实现是 `src/utils/account.js`（`grossOf` / `netOf` / `isSettledOf`），不要另写一套。
+
+### 只想读数据（没有写权限时）
+直读私有仓 `idakcl/stock-git-ai-data@main` 的 JSON 完全可以，但注意：
+- `stock.json`、`suppliers[].products`、`items[].saleHistory` 都是派生值，写入按 `purchases/sales.json → items → suppliers → stock` 分步提交（无跨文件事务），理论上可能与最新单据差一次提交。**对账一律以 `purchases.json` / `sales.json` 为准**，按上面的公式自己重算。
+- 历史采购价**不在** `items.json` 里。要么调 `GET /api/purchase-history`，要么自己按 `purchases.json` 的 `items[]` 聚合成 `{ 商品编码: [行] }`。
+- 若发现 `payments: []` 而 `paid`/`received > 0`，那是外部直写产生的脏数据（实付会被算成 0、虚增欠款）：请调 `POST /api/normalize` 让服务端补成流水。
+
+### Node 端最小可用示例
+```js
+const BASE = 'https://stock-git-ai.1234.nyc.mn/api'
+let token = ''
+const round2 = n => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+
+async function get(path) {
+  const res = await fetch(BASE + path, {
+    headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-cache' } })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)   // 401 → 重新登录再试
+  return data
+}
+async function post(path, body) {
+  const res = await fetch(BASE + path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify(body) })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+  return data
+}
+
+token = (await post('/login', { password: process.env.STOCK_PWD, remember: true })).token
+
+// 给销售单收款 300 元，并生成一张收款单
+const saleId = 'X202610280930000001', today = '2026-10-28', amount = 300
+const [sales, receipts] = await Promise.all([get('/sales'), get('/receipts')])
+const i = sales.findIndex(s => s.id === saleId)
+if (i < 0) throw new Error('单号不存在')
+const sale = sales[i]
+
+// ① 预分配凭证编号：当天同前缀最大序号 + 1
+const head = `SK-${today.replace(/-/g, '')}-`
+const maxNo = receipts.reduce((m, v) => (typeof v.code === 'string' && v.code.startsWith(head))
+  ? Math.max(m, Number(v.code.slice(-3)) || 0) : m, 0)
+const code = `${head}${String(maxNo + 1).padStart(3, '0')}`
+
+// ② 流水：旧单没有 payments 时，先把 received 补成「历史收付」再追加（否则旧实付被清零）
+const payments = Array.isArray(sale.payments) ? sale.payments.slice()
+  : Number(sale.received || 0) > 0
+    ? [{ date: sale.date || today, amount: Number(sale.received), remark: '历史收付', time: '' }]
+    : []
+payments.push({ date: today, amount, remark: '收款', time: new Date().toISOString(), voucher: code })
+
+// ③ 同步汇总字段（服务端不替我们算）。带折扣链的单据，应收还要乘等效折扣率
+const received = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0))
+const due = round2(Math.max(0, round2(Number(sale.total || 0) - Number(sale.discount || 0)) - received))
+sales[i] = { ...sale, payments, received, settle: due <= 1e-6 ? '结清' : '挂账' }
+
+await post('/sales', { sales })                        // 先流水（已带凭证号）
+await post('/receipts', { receipts: [...receipts, {    // 再凭证；这步失败必须报错补开，不能静默跳过
+  code, kind: 'receivable', category: 'normal', party: sales[i].customer,
+  date: today, remark: '收款', total: amount,
+  items: [{ orderId: saleId, orderType: 'sale', amount, discount: 0, settle: due <= 1e-6, note: '' }]
+}] })
+console.log('已生成收款单', code, '｜本单未收', due)
+```
+> 生产代码请优先复用 `src/utils/voucherFlow.js`（`allocVoucherCodes` / `attachPaymentVouchers` / `savePaymentWithVouchers` / `voucherNotices`）——编号预分配、`settle` 计算、失败分 `stage` 提示都已处理好，且是可单测的纯逻辑。
+
+### 对接前必读的变更
+- **2026-10-28｜`items.json` 瘦身**：不再内嵌 `purchaseHistory`，改由 `GET /api/purchase-history` 按需返回（实测 `items.json` 体积 **−62.7%**）。任何读 `items[].purchaseHistory` 的脚本必须改调接口或自行聚合。
+- **2026-10-28｜资金单据全链路联动**：收付款、结清、预存预付抵扣/充值/超额转存都会成对写入「单据流水 + 资金凭证」，`payments[].voucher` 现在稳定有值（此前常为空，脚本别把它当可选字段忽略）。
+
 
 ## 保存链路与错误处理
 
@@ -94,6 +292,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | `contact` / `phone` | 联系人、电话 |
 | `remark` | 备注（可选） |
 | `products` | **关联商品 code 数组**，由商品 `suppliers` 反推（双向链接） |
+| `advances` | **预付款流水**数组，元素 `{ date, amount, remark, order, time }`；抵扣为负数，`order` 为所属单号（幂等重建的标记） |
 
 ### customers.json（客户）
 | 字段 | 说明 |
@@ -101,6 +300,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | `code` / `name` | 编码、名称 |
 | `contact` / `phone` | 联系人、电话 |
 | `remark` | 备注（可选） |
+| `deposits` | **预存款流水**数组，结构同 `advances` |
 
 ### stock.json（库存）
 按商品 code 为键：
@@ -121,13 +321,15 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
   "discount": 0,
   "paid": 736.2,
   "settle": "结清",
-  "payments": [ { "date": "2026-10-11", "amount": 736.2, "remark": "历史收付", "time": "" } ],
+  "payments": [ { "date": "2026-10-11", "amount": 736.2, "remark": "历史收付", "time": "", "voucher": "FK-20261011-001" } ],
   "remark": "备注内容（可选）"
 }
 ```
 - 采购单用 `supplier`，销售单用 `customer`（均为名称）；两者均可带 `remark`。
 - `discount`（优惠）、`paid`/`received`（累计实付/实收）、`settle`（挂账/结清）见「账务规则」。
 - `payments` 为**收付款流水数组**（销售单=收款流水，采购单=付款流水），每笔含 `date`（日期）、`amount`（金额）、`remark`（备注）、`time`（录入时间戳），见「多次收付款」。
+- 流水另有两个可选字段：`voucher`（该笔对应的资金单据编号 `SK-`/`FK-`，见「资金单据联动」）、`fromDeposit: true`（该笔来自预存款/预付款抵扣，不是现金）。
+- **`settle` 的类型两处不同，别混用**：单据上的 `settle` 是**字符串** `挂账` / `结清`；资金单据 `items[].settle` 是**布尔值**（开凭证那一刻整单是否已结清）。
 
 ## 自动推导（核心机制）
 保存采购单 `POST /api/purchases`、销售单 `POST /api/sales`、AI 导入 `POST /api/import` 后，后端自动调用 `derive()` + `rebuildStock()`（`api/routes.js`），从单据**重建**以下数据并回写 GitHub 数据仓：
@@ -228,7 +430,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 - **旧数据零迁移**：历史单据没有 `payments` 数组时，原有 `paid`/`received` 金额自动视为一笔「历史收付」记录，首次操作该单时自动转入流水。
 
 ### 资金单据（收款单 `SK-` / 付款单 `FK-`）联动
-**红线：只要发生资金变动，就必须有一张对应的资金单据。** 单据里的 `payments` 流水是「账面记录」，资金单据是「凭证」，二者一一对应、同批落库。
+**红线：只要发生资金变动，就必须有一张对应的资金单据。** 单据里的 `payments` 流水是「账面记录」，资金单据是「凭证」，二者一一对应、同批落库。外部脚本代收款时按同一顺序（先流水带编号、后凭证），见「AI / 脚本对接（接口契约）」的「脚本代收款的标准顺序」。
 
 统一入口 `src/utils/voucherFlow.js`（纯逻辑，不引 UI 库），各页面一律通过它开单，不允许各自拼数组：
 
