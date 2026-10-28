@@ -71,6 +71,7 @@
 import { ref, computed, watch, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ensurePayments, grossOf, syncPayments } from '../utils/account'
+import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -114,7 +115,7 @@ watch(() => props.modelValue, v => {
   if (v) {
     const field = props.kind === 'payable' ? 'paid' : 'received'
     rows.value = ensurePayments(props.order, field)
-    draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+    draft.value = { date: todayCN(), amount: null, remark: '' }
     editingIndex.value = -1
     pendingDeposit.value = null
     dirty.value = false
@@ -128,7 +129,7 @@ function addOne() {
   if (amount > remain + 1e-6) {
     // 超额收付：本单记满未收/未付金额，超出部分转预存款/预付款（保存时写入对应档案）
     if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额，无需再记`)
-    const date = draft.value.date || new Date().toISOString().slice(0, 10)
+    const date = draft.value.date || todayCN()
     rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString(), _new: true, mid: newMid() })
     pendingDeposit.value = {
       date,
@@ -143,7 +144,7 @@ function addOne() {
     return
   }
   rows.value.push({
-    date: draft.value.date || new Date().toISOString().slice(0, 10),
+    date: draft.value.date || todayCN(),
     amount,
     remark: draft.value.remark || '',
     time: new Date().toISOString(),
@@ -168,7 +169,7 @@ function payFromDeposit() {
   let amount = entered > 0 ? entered : Math.min(remain, depositAvailable.value)
   amount = round2(Math.min(amount, remain, depositAvailable.value))
   if (amount <= 0) return ElMessage.warning('抵扣金额无效')
-  const date = draft.value.date || new Date().toISOString().slice(0, 10)
+  const date = draft.value.date || todayCN()
   rows.value.push({
     date,
     amount,
@@ -190,7 +191,7 @@ async function settleFull() {
   const remain = round2(unpaid.value)
   if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额`)
   rows.value.push({
-    date: draft.value.date || new Date().toISOString().slice(0, 10),
+    date: draft.value.date || todayCN(),
     amount: remain,
     remark: draft.value.remark || `结清${kindLabel.value}`,
     time: new Date().toISOString(),
@@ -213,7 +214,7 @@ function settleRound() {
     return ElMessage.warning(`金额超过${kindLabel.value === '付款' ? '应付' : '应收'}金额；如需多收请用「记一笔」，超出部分会转入预存款`)
   }
   rows.value.push({
-    date: draft.value.date || new Date().toISOString().slice(0, 10),
+    date: draft.value.date || todayCN(),
     amount,
     remark: draft.value.remark || `抹零${kindLabel.value}`,
     time: new Date().toISOString(),
@@ -242,7 +243,7 @@ function startEdit(idx) {
   if (!row) return
   editingIndex.value = idx
   draft.value = {
-    date: row.date || new Date().toISOString().slice(0, 10),
+    date: row.date || todayCN(),
     amount: Number(row.amount || 0),
     remark: row.remark || ''
   }
@@ -270,7 +271,7 @@ function saveEdit() {
 
 function cancelEdit() {
   editingIndex.value = -1
-  draft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+  draft.value = { date: todayCN(), amount: null, remark: '' }
 }
 
 // 收集本次保存会话新增的流水（标记 _new），用于父组件逐笔生成资金单据；收集后清标记
@@ -334,7 +335,7 @@ async function saveAll() {
   emit('saved', updated, {
     add: dep && Number(dep.amount) > 0 ? dep : null,
     deduct: deductTotal > 0 ? {
-      date: props.order.date || new Date().toISOString().slice(0, 10),
+      date: props.order.date || todayCN(),
       amount: deductTotal,
       remark: `抵扣 ${props.order.id || ''} 货款`,
       time: new Date().toISOString()

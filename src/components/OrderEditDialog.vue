@@ -184,6 +184,7 @@ import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
+import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -257,7 +258,7 @@ watch(() => props.modelValue, (open) => {
   } else {
     editingId.value = ''
     form.party = ''
-    form.date = new Date().toISOString().slice(0, 10)
+    form.date = todayCN()
     form.remark = ''
     form.settle = '挂账'
     form.photos = []

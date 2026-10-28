@@ -96,6 +96,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { netOf, round2 } from '../utils/account'
+import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -114,7 +115,7 @@ const visible = computed({
 const type = ref('receivable') // 'receivable'=客户收款；'payable'=供应商付款
 const name = ref('')
 const amount = ref(null)
-const date = ref(new Date().toISOString().slice(0, 10))
+const date = ref(todayCN())
 const remark = ref('')
 
 // 批量设置控件
@@ -127,7 +128,7 @@ const onOpen = () => {
   type.value = 'receivable'
   name.value = ''
   amount.value = null
-  date.value = new Date().toISOString().slice(0, 10)
+  date.value = todayCN()
   remark.value = ''
   resetBulk()
 }
@@ -214,7 +215,7 @@ function confirm() {
     party: name.value,
     kind: type.value,
     amount: Number(amount.value || 0),
-    date: date.value || new Date().toISOString().slice(0, 10),
+    date: date.value || todayCN(),
     remark: remark.value || '',
     orderIds: selectedRows.value.map(r => r.id),
     discounts,

@@ -48,6 +48,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { netOf, round2 } from '../utils/account'
+import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -61,13 +62,13 @@ const visible = computed({
   set: v => emit('update:modelValue', v)
 })
 
-const date = ref(new Date().toISOString().slice(0, 10))
+const date = ref(todayCN())
 const remark = ref('')
 // 分组金额：key = `${party}__${kind}`
 const groupAmounts = reactive({})
 
 const onOpen = () => {
-  date.value = new Date().toISOString().slice(0, 10)
+  date.value = todayCN()
   remark.value = ''
   // 重置分组金额为各组未收合计（默认填满，可改少＝部分收）
   for (const k of Object.keys(groupAmounts)) delete groupAmounts[k]
@@ -97,7 +98,7 @@ function confirm() {
       party: g.party,
       kind: g.kind,
       amount: round2(Number(groupAmounts[g.key]) || 0),
-      date: date.value || new Date().toISOString().slice(0, 10),
+      date: date.value || todayCN(),
       remark: remark.value || '',
       orderIds: g.orders.map(o => o.id)
     }))

@@ -8,6 +8,7 @@
 // 并提供一个把一次收付款保存会话翻译成资金单据 bases 的纯函数，供各入口复用。
 import { genVoucherCode } from './voucher.js'
 import { round2, netOf, isSettledOf } from './account.js'
+import { todayCN } from './time.js'
 
 // 资金单据类别（仅用于列表/抽屉展示区分，不参与金额计算）
 //   normal         普通收付款（关联销售/采购单）
@@ -58,7 +59,7 @@ export async function appendVouchers(api, kind, bases) {
       kind,
       category: base.category || 'normal',
       party: base.party || '',
-      date: base.date || new Date().toISOString().slice(0, 10),
+      date: base.date || todayCN(),
       remark: base.remark || '',
       total: round2(items.reduce((s, it) => s + Number(it.amount || 0), 0)),
       items
@@ -94,7 +95,7 @@ export function buildPaymentVoucherBases({ kind, order, newRows, add }) {
       bases.push({
         category: 'deposit-deduct',
         party,
-        date: r.date || (order && order.date) || new Date().toISOString().slice(0, 10),
+        date: r.date || (order && order.date) || todayCN(),
         remark: r.remark || '用预存款抵扣货款',
         items: [{ orderId: order && order.id, orderType, amount, note: '用预存款抵扣货款' }]
       })
@@ -102,7 +103,7 @@ export function buildPaymentVoucherBases({ kind, order, newRows, add }) {
       bases.push({
         category: 'normal',
         party,
-        date: r.date || (order && order.date) || new Date().toISOString().slice(0, 10),
+        date: r.date || (order && order.date) || todayCN(),
         remark: r.remark || (isRecv ? '收款' : '付款'),
         items: [{ orderId: order && order.id, orderType, amount, discount: 0, settle: settled }]
       })
@@ -114,7 +115,7 @@ export function buildPaymentVoucherBases({ kind, order, newRows, add }) {
     bases.push({
       category: 'deposit-over',
       party,
-      date: (add && add.date) || (order && order.date) || new Date().toISOString().slice(0, 10),
+      date: (add && add.date) || (order && order.date) || todayCN(),
       remark: (add && add.remark) || note,
       items: [{ orderId: '', orderType: '', amount: over, note }]
     })
@@ -139,7 +140,7 @@ export async function attachPaymentVouchers(api, kind, order, rows, add) {
   const isRecv = kind === 'receivable'
   const orderType = isRecv ? 'sale' : 'purchase'
   const party = isRecv ? order.customer : order.supplier
-  const fallbackDate = order.date || new Date().toISOString().slice(0, 10)
+  const fallbackDate = order.date || todayCN()
   const codes = await allocVoucherCodes(api, kind, fallbackDate, total)
   const settled = isSettledOf(netOf(order, kind), order.settle)
   // 工作副本：payments 克隆后回写编号，mid 用完即删

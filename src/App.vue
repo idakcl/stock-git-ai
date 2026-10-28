@@ -29,7 +29,13 @@
           </div>
         </div>
         <AppMenu />
-        <div class="build-info">构建 {{ buildTime }}</div>
+        <div class="aside-footer">
+          <div class="cn-clock" :title="'系统时区：北京时间（UTC+8）'">
+            <span class="cn-clock-label">北京时间</span>
+            <span class="cn-clock-time">{{ clock }}</span>
+          </div>
+          <div class="build-info">构建 {{ buildTime }}</div>
+        </div>
       </el-aside>
       <el-main class="main">
         <router-view />
@@ -44,7 +50,13 @@
         </div>
       </div>
       <AppMenu @select="drawer = false" />
-      <div class="build-info">构建 {{ buildTime }}</div>
+      <div class="aside-footer">
+        <div class="cn-clock" :title="'系统时区：北京时间（UTC+8）'">
+          <span class="cn-clock-label">北京时间</span>
+          <span class="cn-clock-time">{{ clock }}</span>
+        </div>
+        <div class="build-info">构建 {{ buildTime }}</div>
+      </div>
     </el-drawer>
   </el-container>
 </template>
@@ -57,11 +69,15 @@ import { useRouter } from 'vue-router'
 import AppMenu from './components/AppMenu.vue'
 import Login from './views/Login.vue'
 import { api, auth } from './api'
+import { cnDateTime } from './utils/time.js'
 
 const router = useRouter()
 
 const drawer = ref(false)
 const buildTime = __BUILD_TIME__
+// 侧边栏左下角时钟：固定北京时间（UTC+8），不随设备时区变化
+const clock = ref(cnDateTime())
+let clockTimer = 0
 // 有票据不等于有效：启动时调 /session 自检一次
 const authed = ref(false)
 
@@ -117,12 +133,14 @@ onMounted(() => {
   router.afterEach(() => nextTick(scheduleSync))
   observeMain()
   scheduleSync()
+  clockTimer = setInterval(() => { clock.value = cnDateTime() }, 1000)
 })
 onUnmounted(() => {
   window.removeEventListener('auth:expired', onExpired)
   window.removeEventListener('resize', scheduleSync)
   window.removeEventListener('orientationchange', scheduleSync)
   cancelAnimationFrame(rafId)
+  clearInterval(clockTimer)
   if (mo) mo.disconnect()
 })
 
@@ -275,7 +293,22 @@ body {
 .logo-title { font-size: var(--fs-title); font-weight: 700; color: var(--text-primary); }
 .logo-sub { font-size: var(--fs-mini); color: var(--text-disabled); }
 .aside .menu { flex: 1; }
+.aside-footer { flex: none; margin-top: auto; }
 .build-info { padding: 10px var(--gap-lg); color: var(--text-placeholder); font-size: var(--fs-sub); border-top: 1px solid var(--border-light); flex: none; }
+/* 北京时间时钟：菜单左下角，等宽数字避免秒数跳动时抖动 */
+.cn-clock {
+  padding: 10px var(--gap-lg) 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border-light);
+  color: var(--text-regular);
+  font-size: var(--fs-sub);
+}
+.cn-clock-label { color: var(--text-secondary); font-size: var(--fs-mini); }
+.cn-clock-time { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; letter-spacing: 0.2px; }
+.el-drawer .aside-footer { margin-top: var(--gap-lg); }
 .main { padding: var(--gap-lg); overflow-y: auto; min-width: 0; }
 .menu-btn { padding: var(--gap-sm); }
 
@@ -342,6 +375,9 @@ body {
 .el-dialog { max-width: 94vw; }
 /* 列表操作列（ops-col）：按钮收紧间距并强制单行，删除与照片同排不换行 */
 .el-table .ops-col .cell { white-space: nowrap; }
+/* 单据号列（id-col）：退货单号形如 XT-20261028-001，允许在连字符处折行会把单号拆成两行，
+   这里强制单行不折行，编号始终完整显示在一行内 */
+.el-table .id-col .cell { white-space: nowrap; word-break: keep-all; }
 .el-table .ops-col .el-button + .el-button { margin-left: 6px; }
 .el-dialog__title { font-size: var(--fs-title); font-weight: 600; }
 .el-dialog__headerbtn { top: 10px; }

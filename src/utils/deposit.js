@@ -8,6 +8,7 @@
 // 本次 payload 重建。无论保存多少次，结果都收敛到同一份流水，与订单的收付款状态严格一致。
 // 历史遗留的、没有 order 标记的流水（如手动充值、早期 S00067 预付款）一律保留，零破坏。
 import { round2 } from './account.js'
+import { todayCN } from './time.js'
 
 // kind: 'receivable' 销售单 → 客户 deposits；'payable' 采购单 → 供应商 advances
 // 返回写回后的档案数组（调用方据此刷新本地列表）；找不到对应档案时返回 null
@@ -21,7 +22,7 @@ export async function applyDepositFlows(api, kind, name, orderId, addAmount, ded
   // 重建：先清掉该订单此前标记的全部流水（无论正负），再按本次结果写入
   entity[field] = (entity[field] || []).filter(f => f.order !== orderId)
   const now = new Date().toISOString()
-  const date = now.slice(0, 10)
+  const date = todayCN()
   const add = round2(Number(addAmount) || 0)
   const deduct = round2(Number(deductAmount) || 0)
   if (add > 0) {
@@ -65,7 +66,7 @@ export async function removeDepositFlows(api, kind, name, orderId, order) {
   if (round2(used) > 0.005 && !hadTaggedDeduct) {
     const now = new Date().toISOString()
     cleaned.push({
-      date: now.slice(0, 10),
+      date: todayCN(),
       amount: round2(used),
       remark: '删除单据退回预付款',
       order: orderId,

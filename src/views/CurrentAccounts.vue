@@ -259,6 +259,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import BatchPayDialog from '../components/BatchPayDialog.vue'
 import DepositRechargeDialog from '../components/DepositRechargeDialog.vue'
 import RecordPaymentDialog from '../components/RecordPaymentDialog.vue'
+import { todayCN } from '../utils/time.js'
 
 const PAGE_SIZE = 60
 const salesList = ref([])
@@ -740,7 +741,7 @@ async function onBatchApplied(groups) {
     if (list2) { if (op.kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
   }
   // 每笔超额转存都是一笔资金变动 → 生成「超额转存」资金单据（无关联单号），按 kind 分桶避免跨类型重号
-  const today = new Date().toISOString().slice(0, 10)
+  const today = todayCN()
   const overBases = { receivable: [], payable: [] }
   for (const op of depositOps) {
     const note = op.kind === 'receivable' ? '超收转预存款' : '超付转预付款'
@@ -803,7 +804,7 @@ async function onRechargeSaved(payload) {
   const list = await get()
   const entity = list.find(x => x.name === name)
   if (!entity) { ElMessage.error('未找到该往来单位'); return }
-  const dateStr = d || new Date().toISOString().slice(0, 10)
+  const dateStr = d || todayCN()
   const now = new Date().toISOString()
   entity[field] = (entity[field] || []).concat([{
     date: dateStr,

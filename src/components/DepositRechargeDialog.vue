@@ -35,6 +35,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { depositSumOf } from '../utils/account'
+import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -51,14 +52,14 @@ const visible = computed({
 const type = ref('receivable') // 'receivable'=客户预存款 -> customer.deposits；'payable'=供应商预付款 -> supplier.advances
 const name = ref('')
 const amount = ref(null)
-const date = ref(new Date().toISOString().slice(0, 10))
+const date = ref(todayCN())
 const remark = ref('')
 
 const onOpen = () => {
   type.value = 'receivable'
   name.value = ''
   amount.value = null
-  date.value = new Date().toISOString().slice(0, 10)
+  date.value = todayCN()
   remark.value = ''
 }
 
@@ -84,7 +85,7 @@ function confirm() {
     kind: type.value,
     name: name.value,
     amount: Number(amount),
-    date: date.value || new Date().toISOString().slice(0, 10),
+    date: date.value || todayCN(),
     remark: remark.value || ''
   })
   visible.value = false

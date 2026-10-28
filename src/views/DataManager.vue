@@ -171,6 +171,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { UploadFilled } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { diffImport, extractRecords } from '../utils/dedupe'
+import { todayCN } from '../utils/time.js'
 
 const exporting = ref(false)
 const importing = ref(false)
@@ -240,7 +241,7 @@ async function exportType(row) {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${row.label}-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `${row.label}-${todayCN()}.json`
     document.body.appendChild(a)
     a.click()
     a.remove()
@@ -412,7 +413,7 @@ async function doExport() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `进销存数据备份-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `进销存数据备份-${todayCN()}.json`
     document.body.appendChild(a)
     a.click()
     a.remove()

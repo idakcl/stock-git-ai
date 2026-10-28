@@ -138,6 +138,7 @@ import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
+import { todayCN } from '../utils/time.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -214,7 +215,7 @@ async function toggleSettle() {
     }
     if (mode === 'cash') {
       const payments = ensurePayments(purchase.value, 'paid')
-      const row = { date: new Date().toISOString().slice(0, 10), amount: gap, remark: '结清付款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
+      const row = { date: todayCN(), amount: gap, remark: '结清付款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
       payments.push(row)
       const updated = syncPayments({ ...purchase.value, payments }, 'payable')
       const r = await savePaymentWithVouchers(api, 'payable', purchases.value, updated, [row], null)

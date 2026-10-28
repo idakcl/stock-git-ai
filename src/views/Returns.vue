@@ -50,6 +50,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { isReturn, returnableLines } from '../utils/refunds.js'
 import { grossOf, netOf, round2 } from '../utils/account.js'
+import { todayCN } from '../utils/time.js'
 const route = useRoute()
 const kind = ref(route.query.kind === 'purchase' ? 'purchase' : 'sale')
 const sales = ref([]), purchases = ref([]), loading = ref(false), ready = ref(false), error = ref('')
@@ -71,7 +72,7 @@ async function load() {
   finally { loading.value = false }
 }
 function resetSelection() { selected.value = []; table.value?.clearSelection() }
-function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = new Date().toISOString().slice(0, 10); remark.value = ''; reason.value = '' }
+function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '' }
 function chooseSource() { const o = orders.value.find(o => o.id === sourceId.value); lines.value = o ? returnableLines(o, orders.value).map(l => ({ ...l, returnQty: 0 })) : [] }
 function openCreate() { resetForm(); action.value = 'create'; sourceId.value = ''; lines.value = []; dialog.value = true }
 function openSettle() {

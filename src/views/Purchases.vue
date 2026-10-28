@@ -21,7 +21,7 @@
       />
       <div class="table-wrap">
       <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
-        <el-table-column label="单号" width="170">
+        <el-table-column label="单号" width="190" class-name="id-col">
           <template #default="{ row }">
             <router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link>
           </template>
@@ -124,6 +124,7 @@ import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
+import { todayCN } from '../utils/time.js'
 
 const PAGE_SIZE = 60
 
@@ -464,7 +465,7 @@ async function toggleSettle(row) {
       if (idx < 0) return
       if (mode === 'cash') {
         const payments = ensurePayments(row, 'paid')
-        const row2 = { date: new Date().toISOString().slice(0, 10), amount: unpaid, remark: '结清付款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
+        const row2 = { date: todayCN(), amount: unpaid, remark: '结清付款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
         payments.push(row2)
         const updated = syncPayments({ ...row, payments }, 'payable')
         const r = await savePaymentWithVouchers(api, 'payable', list.value, updated, [row2], null)

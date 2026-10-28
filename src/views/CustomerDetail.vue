@@ -209,6 +209,7 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
+import { todayCN } from '../utils/time.js'
 
 const route = useRoute()
 const customers = ref([])
@@ -229,7 +230,7 @@ const depSaving = ref(false)
 const depDraft = ref({ date: '', amount: null, remark: '' })
 
 function openDeposit() {
-  depDraft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+  depDraft.value = { date: todayCN(), amount: null, remark: '' }
   depositDialog.value = true
 }
 
@@ -242,7 +243,7 @@ async function saveDeposit() {
     const c = list.find(x => x.code === customer.value.code)
     if (!c) return ElMessage.error('客户档案未找到，请刷新页面重试')
     c.deposits = [...(c.deposits || []), {
-      date: depDraft.value.date || new Date().toISOString().slice(0, 10),
+      date: depDraft.value.date || todayCN(),
       amount,
       remark: depDraft.value.remark || '',
       time: new Date().toISOString()

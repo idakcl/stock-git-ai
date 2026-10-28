@@ -238,6 +238,7 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
+import { todayCN } from '../utils/time.js'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -256,7 +257,7 @@ const advSaving = ref(false)
 const advDraft = ref({ date: '', amount: null, remark: '' })
 
 function openAdvance() {
-  advDraft.value = { date: new Date().toISOString().slice(0, 10), amount: null, remark: '' }
+  advDraft.value = { date: todayCN(), amount: null, remark: '' }
   advanceDialog.value = true
 }
 
@@ -269,7 +270,7 @@ async function saveAdvance() {
     const s = list.find(x => x.code === supplier.value.code)
     if (!s) return ElMessage.error('供应商档案未找到，请刷新页面重试')
     s.advances = [...(s.advances || []), {
-      date: advDraft.value.date || new Date().toISOString().slice(0, 10),
+      date: advDraft.value.date || todayCN(),
       amount,
       remark: advDraft.value.remark || '',
       time: new Date().toISOString()
