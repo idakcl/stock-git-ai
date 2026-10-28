@@ -33,6 +33,12 @@
           </template>
         </el-table-column>
         <el-table-column prop="date" label="日期" width="120" />
+        <el-table-column label="商品编码" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="itemCodesOf(row).length" class="item-codes">{{ itemCodesOf(row).join('、') }}</span>
+            <span v-else class="none">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="应付" width="110" align="right">
           <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
         </el-table-column>
@@ -184,6 +190,8 @@ const settleLabelOf = (row) => isSettledOf(payableOf(row), row.settle) ? '结清
 const autoSettled = (row) => payableOf(row) <= 0 && (row.settle || '挂账') !== '结清'
 // 该单各笔付款流水所属的资金单据编码（FK-）：去重后展示，便于一眼看清哪张付款单覆盖本单
 const voucherCodesOf = (row) => [...new Set((ensurePayments(row, 'paid') || []).map(p => p.voucher).filter(Boolean))]
+// 该单各商品的编码（P…）：去重后展示，便于一眼看清本单涉及哪些商品
+const itemCodesOf = (row) => [...new Set((row.items || []).map(i => i.code).filter(Boolean))]
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
@@ -196,6 +204,7 @@ const exportColumns = [
   { label: '单号', prop: 'id' },
   { label: '供应商', prop: 'supplier' },
   { label: '日期', prop: 'date' },
+  { label: '商品编码', value: r => itemCodesOf(r).join('、') },
   { label: '应付', value: r => grossOf(r).toFixed(2) },
   { label: '实付', value: r => { const n = ensurePayments(r, 'paid').length; return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
@@ -461,6 +470,7 @@ async function remove(row) {
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .voucher-codes{color:var(--text-secondary);}
+.item-codes{color:var(--text-secondary);}
 .debt{color:var(--color-danger);font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}

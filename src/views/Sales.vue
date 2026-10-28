@@ -34,6 +34,12 @@
         <el-table-column label="商品数量" width="100" align="right">
           <template #default="{ row }">{{ orderKindCount(row) }}</template>
         </el-table-column>
+        <el-table-column label="商品编码" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span v-if="itemCodesOf(row).length" class="item-codes">{{ itemCodesOf(row).join('、') }}</span>
+            <span v-else class="none">—</span>
+          </template>
+        </el-table-column>
         <el-table-column label="应收" width="110" align="right">
           <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
         </el-table-column>
@@ -185,6 +191,8 @@ const settleLabelOf = (row) => isSettledOf(receivableOf(row), row.settle) ? '结
 const autoSettled = (row) => receivableOf(row) <= 0 && (row.settle || '挂账') !== '结清'
 // 该单各笔收款流水所属的资金单据编码（SK-）：去重后展示，便于一眼看清哪张收款单覆盖本单
 const voucherCodesOf = (row) => [...new Set((ensurePayments(row, 'received') || []).map(p => p.voucher).filter(Boolean))]
+// 该单各商品的编码（P…）：去重后展示，便于一眼看清本单涉及哪些商品
+const itemCodesOf = (row) => [...new Set((row.items || []).map(i => i.code).filter(Boolean))]
 
 // 导出/打印与列表当前页同步：副标题标注输出范围（第 X/Y 页）
 const subtitle = computed(() => {
@@ -198,6 +206,7 @@ const exportColumns = [
   { label: '客户', prop: 'customer' },
   { label: '日期', prop: 'date' },
   { label: '商品数量', value: r => orderKindCount(r) },
+  { label: '商品编码', value: r => itemCodesOf(r).join('、') },
   { label: '应收', value: r => grossOf(r).toFixed(2) },
   { label: '实收', value: r => { const n = ensurePayments(r, 'received').length; return receivedSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
@@ -430,4 +439,5 @@ async function remove(row) {
 .paid-summary .hint{color:var(--text-placeholder);}
 .pay-count{color:var(--text-secondary);font-size:var(--fs-sub);margin-left:2px;}
 .voucher-codes{color:var(--text-secondary);}
+.item-codes{color:var(--text-secondary);}
 </style>

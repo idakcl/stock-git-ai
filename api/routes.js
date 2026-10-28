@@ -130,6 +130,9 @@ export function derive(items, suppliers, purchases, sales, customers) {
     if (!sCode) { const s = ensureSupplier(supName); sCode = s.code; nameToCode[supName] = sCode }
     for (const l of (p.items || [])) {
       const it = ensureItem(l.code, l.name)
+      // 修正存量乱码编码（N… 等无效编码）：回写为解析到的正式 P 编码，
+      // 保证后续按 code 关联主数据、商品库改名/改单位即时联动
+      if (l.code !== it.code) l.code = it.code
       if (!it.suppliers.includes(sCode)) it.suppliers.push(sCode)
       ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
         id: p.id,
@@ -144,6 +147,8 @@ export function derive(items, suppliers, purchases, sales, customers) {
     if (custName) ensureCustomer(custName)
     for (const l of (s.items || [])) {
       const it = ensureItem(l.code, l.name)
+      // 修正存量乱码编码（N… 等无效编码）：回写为解析到的正式 P 编码
+      if (l.code !== it.code) l.code = it.code
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
         id: s.id,
         date: s.date, customer: s.customer || '',
@@ -175,7 +180,7 @@ export function derive(items, suppliers, purchases, sales, customers) {
   for (const s of suppliers) {
     s.products = items.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
   }
-  return { items, suppliers, customers }
+  return { items, suppliers, customers, purchases, sales }
 }
 
 export function rebuildStock(purchases, sales, items) {
@@ -235,7 +240,7 @@ async function syncDerived(env, { purchases, sales }) {
   ])
   const p = purchases != null ? purchases : curP
   const s = sales != null ? sales : curS
-  const { items: newItems, suppliers: newSuppliers, customers: newCustomers } = derive(items, suppliers, p, s, customers)
+  const { items: newItems, suppliers: newSuppliers, customers: newCustomers, purchases: newP, sales: newS } = derive(items, suppliers, p, s, customers)
   // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
   // 一旦出现，说明上游读取异常（例如 GitHub 对大文件返回空内容），
   // 此时宁可报错中止，也不能把空数组写回去覆盖真实数据。
@@ -254,6 +259,10 @@ async function syncDerived(env, { purchases, sales }) {
     if (newCustomers.length > customers.length) {
       await writeJSON(env, 'customers.json', newCustomers, 'derive customers')
     }
+    // 回写修正后的单据：存量乱码编码（N…）已改写为正式 P 编码。
+    // p/s 为本次全量（传入的整表或读库现值），derive 仅就地修正 line.code，不增删条目，幂等安全
+    await writeJSON(env, 'purchases.json', newP, 'derive fix purchase codes')
+    await writeJSON(env, 'sales.json', newS, 'derive fix sale codes')
   } catch (e) {
     throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
   }
