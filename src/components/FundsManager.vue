@@ -166,7 +166,7 @@ import { matchText } from '../utils/search'
 import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2 } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
-import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
+import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'
 
@@ -341,14 +341,11 @@ function openPay(row) {
 }
 
 async function onPaySaved(updated, payload) {
-  const idx = list.value.findIndex(r => r.id === updated.id)
-  if (idx >= 0) list.value[idx] = updated
-  // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
-  try {
-    const save = isPayable.value ? api.savePurchases(list.value) : api.saveSales(list.value)
-    await save
-  } catch (e) {
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+  // 收/付款流水与资金单据成对落库（编号先回写到流水上，再整表保存）
+  const r = await savePaymentWithVouchers(api, props.kind, list.value, updated, payload?.newRows, payload?.add)
+  if (r.stage === 'orders') {
+    // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
+    ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，请重试`)
     return
   }
   // 重新拉取，保证与后端一致
@@ -368,17 +365,8 @@ async function onPaySaved(updated, payload) {
     if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
   }
-  // 联动生成资金单据：每一笔新增收/付款流水各开一张（关联本单号）；抵扣流水对应划转单；超额转存对应划转单
-  const bases = buildPaymentVoucherBases({ kind: props.kind, order: updated, newRows: payload?.newRows, add: payload?.add })
-  if (bases.length) {
-    try {
-      const { created } = await appendVouchers(api, props.kind, bases)
-      const codes = created.map(v => v.code).filter(Boolean)
-      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
-    } catch (e) {
-      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
-    }
-  }
+  // 每一笔新增收/付款流水各开一张资金单据（关联本单号）；抵扣流水对应划转单；超额转存无单号
+  voucherNotices(props.kind, r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
 }
 
 onMounted(async () => {

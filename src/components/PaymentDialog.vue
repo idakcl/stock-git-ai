@@ -97,6 +97,12 @@ const editingIndex = ref(-1)
 // 超额收付时待转入预存款/预付款的流水：{ date, amount, remark, time }，保存时交由父组件写入对应档案
 const pendingDeposit = ref(null)
 
+// 本次会话新增流水的一次性定位标记：资金单据编号要靠它精确回写到对应流水上。
+// （payments 会按日期/时间重排序，用数组下标找会错位；同名同额同日的两笔更要靠它区分）
+// 只存在于内存：attachPaymentVouchers 回写完编号即删除，后端 normalize 再兜一道，绝不落库。
+let midSeq = 0
+const newMid = () => `n${Date.now().toString(36)}${(midSeq++).toString(36)}`
+
 const due = computed(() => grossOf(props.order))
 const paidSum = computed(() => rows.value.reduce((s, r) => s + Number(r.amount || 0), 0))
 const editingRow = computed(() => (editingIndex.value >= 0 ? rows.value[editingIndex.value] : null))
@@ -123,7 +129,7 @@ function addOne() {
     // 超额收付：本单记满未收/未付金额，超出部分转预存款/预付款（保存时写入对应档案）
     if (remain <= 0) return ElMessage.warning(`本单已无未${kindLabel.value === '付款' ? '付' : '收'}金额，无需再记`)
     const date = draft.value.date || new Date().toISOString().slice(0, 10)
-    rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString(), _new: true })
+    rows.value.push({ date, amount: remain, remark: draft.value.remark || '', time: new Date().toISOString(), _new: true, mid: newMid() })
     pendingDeposit.value = {
       date,
       amount: round2(amount - remain),
@@ -141,7 +147,8 @@ function addOne() {
     amount,
     remark: draft.value.remark || '',
     time: new Date().toISOString(),
-    _new: true
+    _new: true,
+    mid: newMid()
   })
   dirty.value = true
   // 默认带入剩余未收，方便连续录入
@@ -168,7 +175,8 @@ function payFromDeposit() {
     remark: draft.value.remark || `用${depositLabel.value}抵扣`,
     time: new Date().toISOString(),
     fromDeposit: true,
-    _new: true
+    _new: true,
+    mid: newMid()
   })
   dirty.value = true
   draft.value.amount = null
@@ -186,7 +194,8 @@ async function settleFull() {
     amount: remain,
     remark: draft.value.remark || `结清${kindLabel.value}`,
     time: new Date().toISOString(),
-    _new: true
+    _new: true,
+    mid: newMid()
   })
   dirty.value = true
   draft.value.amount = null
@@ -208,7 +217,8 @@ function settleRound() {
     amount,
     remark: draft.value.remark || `抹零${kindLabel.value}`,
     time: new Date().toISOString(),
-    _new: true
+    _new: true,
+    mid: newMid()
   })
   dirty.value = true
   const gap = round2(due.value - paidTotal)
@@ -267,7 +277,7 @@ function cancelEdit() {
 function collectNewRows() {
   const out = rows.value
     .filter(r => r._new)
-    .map(r => ({ date: r.date || '', amount: Number(r.amount || 0), remark: r.remark || '', fromDeposit: !!r.fromDeposit }))
+    .map(r => ({ date: r.date || '', amount: Number(r.amount || 0), remark: r.remark || '', fromDeposit: !!r.fromDeposit, mid: r.mid }))
   rows.value.forEach(r => { if (r._new) delete r._new })
   return out
 }

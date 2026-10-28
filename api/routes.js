@@ -105,7 +105,6 @@ export function derive(items, suppliers, purchases, sales, customers) {
       items.push(it)
     }
     it.suppliers = it.suppliers || []
-    it.purchaseHistory = []
     it.saleHistory = []
     if (code) itemByCode[code] = it
     if (name) itemByName[name] = it
@@ -172,15 +171,20 @@ export function derive(items, suppliers, purchases, sales, customers) {
       if (!Number(it.price) && retail) it.price = retail
       delete it.priceRetail
     }
-    it.purchaseHistory = purchaseHist[it.code] || []
     it.saleHistory = saleHist[it.code] || []
+    // 历史采购价不再内嵌进 items.json：它 100% 可由 purchases.json 重建，且只有商品行「展开历史价」才用得到。
+    // 实测 1559 个商品 / 2492 行历史 ≈ 390KB，占整个 items.json 的 41%——过去每存一张单都要整表重写这 390KB，
+    // 纯属浪费（一次存单要顺序重写 items/suppliers/stock/purchases/sales 五个文件）。
+    // 改由 GET /api/purchase-history 按需返回（派生结果随本函数一起产出，口径完全一致），存量数据在此一并清除。
+    delete it.purchaseHistory
   }
 
   // 双向链接：供应商.products 由商品.suppliers 反推
   for (const s of suppliers) {
     s.products = items.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
   }
-  return { items, suppliers, customers, purchases, sales }
+  // history：{ 商品编码: [历史采购行] }，供 GET /api/purchase-history 按需返回
+  return { items, suppliers, customers, purchases, sales, history: purchaseHist }
 }
 
 export function rebuildStock(purchases, sales, items) {
@@ -226,6 +230,11 @@ export function normalizeOrderPayments(order, legacyField) {
       ...order,
       payments: [{ date: order.date || '', amount, remark: '历史实付', time: '' }]
     }
+  }
+  // 前端的一次性流水定位标记（mid）：只用于「本次收付款 → 资金单据编号」的内存内匹配，
+  // 落库前一律剥离。数据仓是 AI 直读的口径来源，不能出现只有前端代码看得懂的一次性字段。
+  if (Array.isArray(order.payments) && order.payments.some(p => p && 'mid' in p)) {
+    return { ...order, payments: order.payments.map(({ mid, ...p }) => p) }
   }
   return order
 }
@@ -301,6 +310,18 @@ export async function handleApi(req, url, env) {
 
   try {
     if (path === '/items' && method === 'GET') return json(req, env, await readJSON(env, 'items.json'))
+    // 历史采购价：按需派生（不再内嵌 items.json，见 derive 中的说明）。
+    // 只在商品行「展开历史价」时请求一次；结果与 derive 完全同源，不存在两套口径。
+    if (path === '/purchase-history' && method === 'GET') {
+      const [items, suppliers, purchases, sales, customers] = await Promise.all([
+        readJSON(env, 'items.json'),
+        readJSON(env, 'suppliers.json'),
+        readJSON(env, 'purchases.json'),
+        readJSON(env, 'sales.json'),
+        readJSON(env, 'customers.json')
+      ])
+      return json(req, env, derive(items, suppliers, purchases, sales, customers).history)
+    }
     if (path === '/suppliers' && method === 'GET') return json(req, env, await readJSON(env, 'suppliers.json'))
     if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))
     if (path === '/purchases' && method === 'GET') return json(req, env, await readJSON(env, 'purchases.json'))
@@ -341,7 +362,9 @@ export async function handleApi(req, url, env) {
       const body = await req.json()
 
       if (path === '/items') {
-        const newItems = body.items || []
+        // 整表覆盖前先剥掉历史采购价：items.json 已不再保存该字段，
+        // 老前端/导入数据把旧数组带回来时也不该让它重新长回去（derive 会在下次存单时再清一次）
+        const newItems = (body.items || []).map(({ purchaseHistory, ...it }) => it)
         await writeJSON(env, 'items.json', newItems, 'update items')
         // 商品改了挂靠供应商后，必须同步供应商档案里的商品列表：
         // products 是派生字段，原本只在保存采购/销售单时重算，
@@ -452,7 +475,9 @@ export async function handleApi(req, url, env) {
           if (arr.some(x => !x || typeof x !== 'object' || Array.isArray(x))) {
             return json(req, env, { error: `${key} 中存在非对象记录，已中止导入` }, 400)
           }
-          await writeJSON(env, `${key}.json`, arr, `ai import ${key}`)
+          // items 导入同样剥掉历史采购价：该字段已由「按需派生」接管，不再进 items.json
+          const payload = key === 'items' ? arr.map(({ purchaseHistory, ...it }) => it) : arr
+          await writeJSON(env, `${key}.json`, payload, `ai import ${key}`)
           results.push({ key, count: arr.length })
         }
         // 库存是采购/销售的派生数据，导入时不再直接写入（与 /stock 禁止直写的策略一致），
@@ -511,7 +536,8 @@ export async function handleApi(req, url, env) {
         const finalAdded = (key === 'purchases' || key === 'sales')
           ? added.map(o => normalizeOrderPayments(o, key === 'purchases' ? 'paid' : 'received'))
           : added
-        const merged = (existing || []).concat(finalAdded)
+        const stripped = key === 'items' ? finalAdded.map(({ purchaseHistory, ...it }) => it) : finalAdded
+        const merged = (existing || []).concat(stripped)
         await writeJSON(env, `${key}.json`, merged, `merge import ${key}`)
 
         if (key === 'items') {

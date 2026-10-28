@@ -9,8 +9,10 @@
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
             <el-checkbox v-if="!externalView" v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
+            <el-checkbox v-if="!externalView" v-model="showSellPrice" class="opt-cb">显示售价</el-checkbox>
             <el-checkbox v-if="!externalView" v-model="showCostCol" class="opt-cb">显示进价</el-checkbox>
-            <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏售价·备注置底）</el-checkbox>
+            <el-checkbox v-model="showHistory" class="opt-cb">展开历史价与商品档案</el-checkbox>
+            <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏价格·只读）</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
             <el-button type="primary" :disabled="!found || externalView" @click="editDialog = true">编辑</el-button>
@@ -59,7 +61,7 @@
         </div>
         <PhotoThumbs v-if="(sale.photos || []).length" :value="sale.photos" />
       </div>
-      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :show-cost="showCostCol" :price-columns="externalView ? [] : defaultPriceColumns" :remark-last="externalView">
+      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :show-cost="showCostCol" :price-columns="priceColumns" :remark-last="true" :show-history="showHistory">
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
@@ -129,7 +131,7 @@ import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isS
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
-import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
+import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 
 const route = useRoute()
 const router = useRouter()
@@ -176,29 +178,67 @@ const settleLabel = computed(() => isSettledOf(unpaid.value, sale.value.settle) 
 // 未收金额为 0 时按金额已自动结清：无需再点「结清」（与列表页 autoSettled 同口径）
 const autoSettled = computed(() => unpaid.value <= 0 && (sale.value.settle || '挂账') !== '结清')
 
-// 点「结清」：未收差额记为抹零优惠（不产生实际收款流水，现金不增加），
-// 应收随之减少、未收自动归 0，syncPayments 按金额自动判定结清——状态与金额保持一致。
-// 与销售列表页 toggleSettle、编辑弹窗保存逻辑三处同口径
+// 点「结清」有两条真实路径，必须由用户当场选，并如实反映在资金单据上：
+//   收款结清：差额记为一笔实际收款 → 生成收款单（SK-），现金增加
+//   差额记优惠：差额记入抹零优惠（无资金变动）→ 按口径不开任何资金单据；应收随之减少、未收归 0
+// syncPayments 按金额自动判定结清，状态与金额始终一致。与销售列表页 toggleSettle 同口径。
 async function toggleSettle() {
   const willSettle = settleLabel.value !== '结清'
   if (willSettle && unpaid.value > 0) {
     const due = dueAmount.value
     const received = receivedSum.value
     const gap = unpaid.value
+    let mode = 'cash'
     try {
       await ElMessageBox.confirm(
-        `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${gap.toFixed(2)}。\n标记结清将把差额 ¥${gap.toFixed(2)} 记为抹零优惠（不产生实际收款，现金不增加），本单按 ¥${received.toFixed(2)} 结清。`,
-        '标记结清', { type: 'warning' })
-    } catch { return }
+        `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${gap.toFixed(2)}。\n` +
+        `· 「收款结清」：把 ¥${gap.toFixed(2)} 记为一笔实际收款，并生成收款单（现金增加）\n` +
+        `· 「差额记优惠」：¥${gap.toFixed(2)} 作为抹零优惠核销，钱未收到，因此不生成收款单`,
+        '标记结清', {
+          type: 'warning',
+          confirmButtonText: '收款结清',
+          cancelButtonText: '差额记优惠',
+          distinguishCancelAndClose: true
+        })
+    } catch (e) {
+      // close（点 X / ESC）= 放弃操作；cancel = 明确选择「差额记优惠」
+      if (e !== 'cancel') return
+      mode = 'discount'
+    }
+    if (mode === 'cash') {
+      const payments = ensurePayments(sale.value, 'received')
+      const row = { date: new Date().toISOString().slice(0, 10), amount: gap, remark: '结清收款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
+      payments.push(row)
+      const updated = syncPayments({ ...sale.value, payments }, 'receivable')
+      const r = await savePaymentWithVouchers(api, 'receivable', sales.value, updated, [row], null)
+      if (r.stage === 'orders') {
+        ElMessage.error(`操作失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
+        const fresh = await api.getSales().catch(() => null)
+        if (fresh) sales.value = fresh
+        return
+      }
+      sales.value = r.merged
+      ElMessage.success(`已收款结清：¥${gap.toFixed(2)} 已入账`)
+      voucherNotices('receivable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
+      return
+    }
     const updated = syncPayments({ ...sale.value, discount: round2(Number(sale.value.discount || 0) + gap) }, 'receivable')
-    const idx = sales.value.findIndex(s => s.id === updated.id)
+    const idx = sales.value.findIndex(x => x.id === updated.id)
     if (idx >= 0) sales.value[idx] = updated
-  } else {
-    // 未收已为 0：直接标记结清；或从「结清」改回「挂账」
-    const idx = sales.value.findIndex(s => s.id === sale.value.id)
-    if (idx >= 0) sales.value[idx] = { ...sales.value[idx], settle: willSettle ? '结清' : '挂账' }
+    try {
+      await api.saveSales(sales.value)
+    } catch (e) {
+      ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+      const fresh = await api.getSales().catch(() => null)
+      if (fresh) sales.value = fresh
+      return
+    }
+    ElMessage.success(`已按抹零优惠结清 ¥${gap.toFixed(2)}（无资金变动，未生成收款单）`)
+    return
   }
-  // 保存失败：明确报错并回滚为线上数据，避免页面显示已结清但线上未生效
+  // 未收已为 0：直接标记结清；或从「结清」改回「挂账」
+  const idx = sales.value.findIndex(x => x.id === sale.value.id)
+  if (idx >= 0) sales.value[idx] = { ...sales.value[idx], settle: willSettle ? '结清' : '挂账' }
   try {
     await api.saveSales(sales.value)
   } catch (e) {
@@ -223,7 +263,6 @@ const detailItems = computed(() => {
       code: line.code,
       name: lineDisplayName(line, nameMap),
       suppliers: base.suppliers || [],
-      purchaseHistory: base.purchaseHistory || [],
       saleHistory: base.saleHistory || [],
       package: base.package,
       unit: base.unit || '',
@@ -242,9 +281,15 @@ const detailItems = computed(() => {
 const hidePrice = ref(false)
 // 销售单详情默认不展示进价（成本列），需要时勾选「显示进价」查看
 const showCostCol = ref(false)
-// 对外查看（历史/对外）：隐藏售价、备注置底、隐藏写按钮，只保留财务头与本次数据
+// 对外查看（历史/对外）：隐藏价格、隐藏写按钮，只保留财务头与本次数据
 const externalView = ref(false)
 const defaultPriceColumns = [{ prop: 'price', label: '售价' }]
+// 历史销售单默认只看「本次数据」：商品档案的售价与本单成交价是两回事（本单单价已在「本次单价」列），
+// 默认隐藏售价/进价，需要对照档案价时再勾「显示售价 / 显示进价」；备注固定置底
+const showSellPrice = ref(false)
+// 历史采购价 / 历史销售价 / 商品照片属于商品档案，不是本单数据：默认收起，避免看历史单据时被无关信息干扰
+const showHistory = ref(false)
+const priceColumns = computed(() => (externalView.value || !showSellPrice.value) ? [] : defaultPriceColumns)
 const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
 const exportColumns = computed(() => {
   let cols = [
@@ -254,14 +299,15 @@ const exportColumns = computed(() => {
     { label: '供应商', value: r => (r.suppliers || []).join('、') },
     { label: '进价', value: r => (r.cost == null || r.cost === '' ? '' : Number(r.cost).toFixed(2)) },
     { label: '售价', value: r => (r.price == null || r.price === '' ? '' : Number(r.price).toFixed(2)) },
-    { label: '备注', prop: 'remark' },
     { label: '本次数量', prop: '_qty' },
     { label: '本次单价', value: r => (r._price == null || r._price === '' ? '' : Number(r._price).toFixed(2)) },
     { label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') },
-    { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) }
+    { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) },
+    { label: '备注', prop: 'remark' }
   ]
-  // 与页面表格同步：未勾选「显示进价」时，导出/打印一律不带进价列
+  // 与页面表格同步：未勾选「显示进价 / 显示售价」时，导出/打印一律不带该档案价列（本单价看「本次单价」）
   if (!showCostCol.value) cols = cols.filter(c => c.label !== '进价')
+  if (!showSellPrice.value) cols = cols.filter(c => c.label !== '售价')
   // 隐藏单价与金额 / 对外查看：剔除全部价格列（对外脱敏，优先级最高）
   if (hidePrice.value || externalView.value) cols = cols.filter(c => !PRICE_LABELS.includes(c.label))
   return cols
@@ -309,17 +355,16 @@ function doPrint() {
 }
 
 async function onPaySaved(updated, payload) {
-  const idx = sales.value.findIndex(s => s.id === updated.id)
-  if (idx >= 0) sales.value[idx] = updated
-  try {
-    await api.saveSales(sales.value)
-  } catch (e) {
+  // 收款流水与收款单（SK-）成对落库：编号先回写到流水上，详情页「资金单据编号」不再是「—」
+  const r = await savePaymentWithVouchers(api, 'receivable', sales.value, updated, payload?.newRows, payload?.add)
+  if (r.stage === 'orders') {
     // 保存失败要回滚并明确报错：否则界面显示已收款、线上其实没变，且弹窗不关可重复提交
     const fresh = await api.getSales().catch(() => null)
     if (fresh) sales.value = fresh
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚`)
+    ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚`)
     return
   }
+  sales.value = r.merged
   payDialog.value = false
   ElMessage.success('已保存收款流水')
   // 超收转预存款 / 用预存款抵扣：按订单 id 幂等重建流水，重复保存不会重复加减（资金不泄漏）
@@ -333,18 +378,8 @@ async function onPaySaved(updated, payload) {
     if (deductAmt > 0) parts.push(`扣减客户预存款 ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
   }
-  // 联动生成资金单据：每一笔新增收款流水各开一张收款单（关联本销售单号）；
-  // 用预存款抵扣的流水对应「预存款抵扣划转单」；超额转存的金额对应「超额转存」资金单据。
-  const bases = buildPaymentVoucherBases({ kind: 'receivable', order: updated, newRows: payload?.newRows, add: payload?.add })
-  if (bases.length) {
-    try {
-      const { created } = await appendVouchers(api, 'receivable', bases)
-      const codes = created.map(v => v.code).filter(Boolean)
-      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
-    } catch (e) {
-      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
-    }
-  }
+  // 每一笔新增收款流水各开一张收款单；预存款抵扣为划转单；超额转存无单号
+  voucherNotices('receivable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
 }
 
 // 保存照片：仅合并 photos 字段，单据其他信息与收款流水不动
@@ -366,19 +401,16 @@ async function onPhotosSaved(photos) {
 }
 
 // 编辑本单：弹窗组装好 entry 后在此落库，保存成功后重拉数据，页面原地刷新
-async function onOrderSaved({ entry, depositDeduct }) {
+async function onOrderSaved({ entry, depositDeduct, payRows }) {
   saving.value = true
   try {
-    const snapshot = [...sales.value]
-    const idx = sales.value.findIndex(s => s.id === entry.id)
-    if (idx >= 0) sales.value[idx] = entry
-    try {
-      await api.saveSales(sales.value)
-    } catch (e) {
-      sales.value = snapshot
-      ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    // 编辑单里的「补收」差额是真实资金变动 → 与收款单同批落库（编号回写到流水上）
+    const r = await savePaymentWithVouchers(api, 'receivable', sales.value, entry, payRows || [], null)
+    if (r.stage === 'orders') {
+      ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
       return
     }
+    sales.value = r.merged
     // 保存已成功：先关窗报成功；刷新单独容错，失败不再卡住弹窗（避免重复点击）
     editDialog.value = false
     ElMessage.success('已保存修改')
@@ -395,6 +427,7 @@ async function onOrderSaved({ entry, depositDeduct }) {
       if (cu2) customers.value = cu2
       ElMessage.success(`已从客户预收款扣减 ¥${Number(depositDeduct.amount).toFixed(2)}`)
     }
+    voucherNotices('receivable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
   } finally { saving.value = false }
 }
 

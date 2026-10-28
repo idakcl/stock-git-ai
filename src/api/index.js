@@ -104,6 +104,8 @@ export const api = {
   verify: () => request('/session'),
 
   getItems: () => cachedGet('/items'),
+  // 历史采购价（{ 商品编码: [行] }）：服务端按采购单实时派生，只在展开历史价时取一次
+  getPurchaseHistory: () => cachedGet('/purchase-history'),
   saveItems: async (items) => {
     const r = await request('/items', { method: 'POST', body: JSON.stringify({ items }) })
     invalidate('/items')

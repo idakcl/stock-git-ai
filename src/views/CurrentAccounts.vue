@@ -249,7 +249,7 @@ import { api } from '../api'
 import { grossOf, netOf, isSettledOf, round2, ensurePayments, depositSumOf, appendPayment, distributePayment, syncPayments } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { genVoucherCode } from '../utils/voucher'
-import { appendVouchers, buildPaymentVoucherBases } from '../utils/voucherFlow'
+import { appendVouchers, savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 import { matchText } from '../utils/search'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
@@ -536,25 +536,31 @@ function openPay(row) {
 }
 
 // 保存登记收/付款：写回源单据 → 持久化 → 重新拉取，并处理超额转存/抵扣的预存款流水
+// 资金单据（SK-/FK-）与收款流水成对落库：只把必要字段并回源单据，
+// 来往账列表行上的展示标记（_kind 等）绝不能带进数据仓
 async function onPaySaved(updated, payload) {
   const kind = updated._kind === 'payable' ? 'payable' : 'receivable'
   const src = kind === 'receivable' ? salesList.value : purchasesList.value
   const idx = (src || []).findIndex(r => r.id === updated.id)
-  if (idx >= 0) {
-    src[idx] = {
-      ...src[idx],
-      payments: updated.payments,
-      received: updated.received,
-      paid: updated.paid,
-      discount: updated.discount
-    }
-  }
-  try {
-    await (kind === 'receivable' ? api.saveSales(salesList.value) : api.savePurchases(purchasesList.value))
-  } catch (e) {
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+  if (idx < 0) {
+    ElMessage.error(`未找到来源单据 ${updated.id}，本次${kind === 'payable' ? '付款' : '收款'}未保存，请刷新后重试`)
     return
   }
+  const merged = {
+    ...src[idx],
+    payments: updated.payments,
+    received: updated.received,
+    paid: updated.paid,
+    discount: updated.discount,
+    settle: updated.settle
+  }
+  const r = await savePaymentWithVouchers(api, kind, src, merged, payload?.newRows, payload?.add)
+  if (r.stage === 'orders') {
+    ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，请重试`)
+    return
+  }
+  if (kind === 'receivable') salesList.value = r.merged
+  else purchasesList.value = r.merged
   const [sales, pur, cust, sup] = await Promise.all([
     api.getSales(), api.getPurchases(), api.getCustomers(), api.getSuppliers()
   ])
@@ -563,7 +569,7 @@ async function onPaySaved(updated, payload) {
   customers.value = cust || []
   suppliers.value = sup || []
   payDialog.value = false
-  ElMessage.success(`已保存${kind === 'receivable' ? '收款' : '付款'}流水`)
+  ElMessage.success(`已保存${kind === 'payable' ? '付款' : '收款'}流水`)
   // 超额转存预存款/预付款、用预存款/预付款抵扣：按订单 id 幂等重建流水（资金不泄漏）
   const addAmt = Number(payload?.add?.amount || 0)
   const deductAmt = Number(payload?.deduct?.amount || 0)
@@ -572,22 +578,13 @@ async function onPaySaved(updated, payload) {
     const list2 = await applyDepositFlows(api, kind, name, updated.id, addAmt, deductAmt)
     if (list2) { if (kind === 'receivable') customers.value = list2; else suppliers.value = list2 }
     const parts = []
-    const depWord = kind === 'receivable' ? '客户预存款' : '供应商预付款'
+    const depWord = kind === 'payable' ? '供应商预付款' : '客户预存款'
     if (addAmt > 0) parts.push(`存入${depWord} ¥${addAmt.toFixed(2)}`)
     if (deductAmt > 0) parts.push(`扣减${depWord} ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
   }
-  // 联动生成资金单据：每一笔新增收/付款流水各开一张（关联本单号）；抵扣流水对应划转单；超额转存对应划转单
-  const bases = buildPaymentVoucherBases({ kind, order: updated, newRows: payload?.newRows, add: payload?.add })
-  if (bases.length) {
-    try {
-      const { created } = await appendVouchers(api, kind, bases)
-      const codes = created.map(v => v.code).filter(Boolean)
-      if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
-    } catch (e) {
-      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
-    }
-  }
+  // 每一笔新增收/付款流水各开一张资金单据（关联本单号）；抵扣为划转单；超额转存无单号
+  voucherNotices(kind, r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
 }
 
 // 合并收付款 / 记一笔 统一写回：groups:[{party,kind,amount,date,remark,orderIds,discounts,settleIds}]
@@ -662,17 +659,21 @@ async function onBatchApplied(groups) {
       settle: settleIds.includes(id)
     }))
     const total = round2(Object.values(allocAmount).reduce((s, v) => s + v, 0))
-    const voucher = {
-      code,
-      kind: isRecv ? 'receivable' : 'payable',
-      party: g.party,
-      date: g.date,
-      remark: g.remark || '',
-      total,
-      items: voucherItems
+    // 只有真实资金变动才开资金单据：本组一分未收/付（纯优惠、纯结清）时不占用编号也不留空单据，
+    // 否则收付款单列表会出现 ¥0.00 的凭证，与「有资金变动才有单据」的口径冲突
+    if (total > 0.005) {
+      const voucher = {
+        code,
+        kind: isRecv ? 'receivable' : 'payable',
+        party: g.party,
+        date: g.date,
+        remark: g.remark || '',
+        total,
+        items: voucherItems
+      }
+      if (isRecv) { newReceipts.push(voucher); receiptsSoFar.push(voucher) }
+      else { newVouchers.push(voucher); vouchersSoFar.push(voucher) }
     }
-    if (isRecv) { newReceipts.push(voucher); receiptsSoFar.push(voucher) }
-    else { newVouchers.push(voucher); vouchersSoFar.push(voucher) }
     // 收集改动的单据
     for (const id of orderIds) {
       if (!working[id]) continue

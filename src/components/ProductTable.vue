@@ -8,12 +8,12 @@
       class="search-input"
     />
     <div class="table-wrap">
-      <el-table :data="pagedRows" stripe>
-        <el-table-column type="expand">
+      <el-table :data="pagedRows" stripe @expand-change="onExpand">
+        <el-table-column v-if="showHistory" type="expand">
           <template #default="{ row }">
             <div class="history">
               <div class="history-title">历史采购价</div>
-              <el-table :data="sortedHistory(row.purchaseHistory)" border :fit="false">
+              <el-table :data="sortedHistory(purchaseHistoryOf(row))" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="采购单" width="190" show-overflow-tooltip>
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
@@ -86,6 +86,7 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
+import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import PhotoThumbs from './PhotoThumbs.vue'
@@ -104,7 +105,11 @@ const props = defineProps({
   // 每页条数，0 表示不分页
   pageSize: { type: Number, default: 0 },
   // 备注列位置：默认在价格列之后；设为 true 时把「备注」移到 #extra 自定义列之后（置条目最后）
-  remarkLast: { type: Boolean, default: false }
+  remarkLast: { type: Boolean, default: false },
+  // 是否显示「展开行」（历史采购价 / 历史销售价 / 规格包装 / 分级售价 / 备注 / 商品照片）。
+  // 单据详情页默认只看「本次数据」：那里的售价/进价列与本次单价重复、历史价属于商品档案而非本单，
+  // 需要时由页面顶部的「展开历史价与商品档案」勾选开启，商品库/客户/供应商页保持默认展示
+  showHistory: { type: Boolean, default: true }
 })
 
 const keyword = ref('')
@@ -136,6 +141,16 @@ const byTimeDesc = (a, b) => String(b.date || '').localeCompare(String(a.date ||
 const sortedHistory = (arr) => [...(arr || [])].sort(byTimeDesc)
 // 金额显示去除浮点精度残留（如 5×1.91=9.549999...→9.55）
 const fmtMoney = (row, col, val) => (val == null || val === '' ? '—' : Math.round(Number(val) * 100) / 100)
+// 历史采购价已不再内嵌 items.json（占文件 41%、每存一张单都要整表重写），改为按需接口。
+// 首次展开任意商品行时才取一次（api 层 15 秒内存缓存 + 边缘缓存），未取到前展开区显示「加载中」。
+const purchaseHistory = ref(null)
+async function onExpand(row, expanded) {
+  if (!expanded || purchaseHistory.value) return
+  try { purchaseHistory.value = (await api.getPurchaseHistory()) || {} }
+  catch { purchaseHistory.value = {}; ElMessage.warning('历史采购价加载失败，收起再展开可重试') }
+}
+const purchaseHistoryOf = (row) => (purchaseHistory.value && purchaseHistory.value[row.code]) || []
+
 // 供应商列显示：按名称去重后再拼接（档案中存在同名不同码的重复建档），
 // 避免同一家供应商在商品行里重复出现、把列撑得过长
 // 注意：supplierMap 是 computed ref，在 script 函数中须用 .value 取值

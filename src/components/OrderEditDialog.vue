@@ -318,6 +318,10 @@ function fullDeduct() {
 // 账务规则（与 src/utils/account.js 一致）：欠款按金额计算，与结算状态无关
 //   应付/应收 = 合计 − 整单优惠 ；未付/未收 = max(0, 应付 − 累计实付[流水])
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
+// 本次会话新增流水的一次性定位标记：父组件靠它把资金单据（SK-/FK-）编号精确回写到对应流水上。
+// 仅存在于内存——attachPaymentVouchers 回写完即删除，后端 normalizeOrderPayments 再兜一道，绝不落库。
+let midSeq = 0
+const newMid = () => `o${Date.now().toString(36)}${(midSeq++).toString(36)}`
 // 行折扣率（默认1＝原价）/ 行原价（数量×单价）/ 行减免额 / 折后小计；折扣只减钱、不改单价
 const lineRate = (l) => normalizeRate(l, lineGross(l))
 const lineGross = (l) => round2((l.qty || 0) * (l.price || 0))
@@ -522,6 +526,9 @@ async function doSave() {
   // 收付款统一走 payments 流水。新增单：现金实付 + 预付款/预收款抵扣直接落成流水；
   // 编辑单：现金实收/实付由表单 paidNow 决定，抵扣部分沿用原单已用预付款（fromDeposit 流水原样保留，避免重复扣减档案余额）。
   // 结清时的「未付款=0」由录入时的实时联动（settleBalance）保证，保存前再做一次红线校验。
+  // 本次会话新增的收付款流水（新增单的全部实收/抵扣、编辑单的补收差额）：
+  // 交父组件逐笔生成资金单据，编号回写后再整表落库
+  let payRows = []
   let entry = {
     ...(origin || {}),
     [partyField.value]: form.party,
@@ -536,24 +543,38 @@ async function doSave() {
     total: amount
   }
   if (!isEdit) {
-    // 新增单：把「现金实付」与「预付款/预收款抵扣」直接落成收款/付款流水
+    // 新增单：把「现金实付」与「预付款/预收款抵扣」直接落成流水
     const payments = []
     const paidNow = round2(Number(form.paidNow || 0))
     const depositPay = round2(Number(form.depositPay || 0))
     const now = new Date().toISOString()
-    if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `现${payWord.value}`, time: now })
-    if (depositPay > 0) payments.push({ date: form.date, amount: depositPay, remark: `用${depositLabel.value}抵扣`, fromDeposit: true, time: now })
+    // mid：本次会话的一次性定位标记，父组件据此把资金单据编号精确回写到对应流水上，落库前删除
+    if (paidNow > 0) payments.push({ date: form.date, amount: paidNow, remark: `现${payWord.value}`, time: now, mid: newMid() })
+    if (depositPay > 0) payments.push({ date: form.date, amount: depositPay, remark: `用${depositLabel.value}抵扣`, fromDeposit: true, time: now, mid: newMid() })
     entry = { id: genOrderId(prefix.value, props.list, form.date), ...entry, payments, [sumField.value]: round2(paidNow + depositPay) }
+    payRows = payments.map(p => ({ ...p }))
   } else {
-    // 编辑单：实收/实付（现金部分）直接由表单 paidNow 决定；抵扣部分沿用原单已用预付款（fromDeposit 流水原样保留，避免重复扣减档案余额）
+    // 编辑单：原有收付款流水一律原样保留（现金笔 + 预存款抵扣笔）——它们已经各自对应一张资金单据，
+    // 重写成一笔会把编号对应关系抹掉，也会让「用预存款抵扣」的档案扣减失去依据（重复扣减风险）。
+    // 「实收金额」只用于算差额：调高 → 追加一笔补收（父组件据此开一张新收款单）；
+    // 调低 → 不改历史流水，请到「收款流水」弹窗逐笔修改，保证单据与凭证一一对应。
     const originPayments = ensurePayments(origin, sumField.value)
     const depositFrom = originPayments.filter(p => p.fromDeposit)
+    const cashOld = originPayments.filter(p => !p.fromDeposit)
     const depositFromTotal = round2(depositFrom.reduce((s, p) => s + Number(p.amount || 0), 0))
+    const cashOldTotal = round2(cashOld.reduce((s, p) => s + Number(p.amount || 0), 0))
     const cashNew = Math.max(0, round2(Number(form.paidNow || 0)))
-    const rebuilt = [...depositFrom]
-    if (cashNew > 0) rebuilt.push({ date: form.date, amount: cashNew, remark: `现${payWord.value}`, time: new Date().toISOString() })
+    const rebuilt = [...cashOld.map(p => ({ ...p })), ...depositFrom.map(p => ({ ...p }))]
+    const delta = round2(cashNew - cashOldTotal)
+    if (delta > 0.005) {
+      const row = { date: form.date, amount: delta, remark: `补${payWord.value}`, time: new Date().toISOString(), mid: newMid() }
+      rebuilt.push(row)
+      payRows = [{ ...row }]
+    } else if (delta < -0.005) {
+      ElMessage.warning(`实${payWord.value}金额调低 ¥${Math.abs(delta).toFixed(2)} 未生效：已收付的流水对应着已开的资金单据，请到「${payWord.value}款」弹窗逐笔修改`)
+    }
     entry.payments = rebuilt
-    entry[sumField.value] = round2(cashNew + depositFromTotal)
+    entry[sumField.value] = round2(cashOldTotal + Math.max(0, delta) + depositFromTotal)
     form.depositPay = depositFromTotal
   }
   // 红线校验①：实付/实收合计不得超过应付/应收总额（折后总价），超额保存无意义（多付部分请走「收款/付款」弹窗转预存）
@@ -574,7 +595,7 @@ async function doSave() {
     : null
   // 只组装、不落库：交给父组件保存（失败时弹窗保持打开可重试）。
   // items：含本次可能新增商品的完整商品库（新商品已带正式 P 编码），交由父组件落库，保证单据行 code 与主数据一致
-  emit('saved', { entry, isEdit, id: entry.id, depositDeduct, items: catalog })
+  emit('saved', { entry, isEdit, id: entry.id, depositDeduct, payRows, items: catalog })
 }
 
 // 保存入口：组件锁 + 父级锁双保险，双击只会执行一次

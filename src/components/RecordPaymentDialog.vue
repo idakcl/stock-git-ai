@@ -13,8 +13,23 @@
         </el-select>
       </el-form-item>
       <el-form-item label="收/付款金额" required>
-        <el-input-number v-model="amount" :min="0" :max="99999999" :precision="2" :controls="false" style="width:100%" />
-        <span class="rec-hint">所选未结合计（优惠后）：<b class="rec-due">¥ {{ selectedDue.toFixed(2) }}</b> · 已选 <b>{{ selectedRows.length }}</b> 张<template v-if="excess > 0.005"> · 超出 ¥ {{ excess.toFixed(2) }} 转{{ type === 'receivable' ? '客户预存款' : '供应商预付款' }}</template></span>
+        <div class="rec-amount">
+          <el-input-number v-model="amount" :min="0" :max="99999999" :precision="2" :controls="false" style="width:180px" />
+          <el-button size="small" :disabled="selectedDue <= 0.005" @click="fillSelected">按所选未结合计填入</el-button>
+        </div>
+        <!-- 三个数一条链实时联动：所选未结合计（优惠后）→ 本次优惠 → 结清张数 → 收付金额差额 -->
+        <span class="rec-hint">
+          所选 <b>{{ selectedRows.length }}</b> 张 ·
+          未结合计 ¥ <b class="rec-due">{{ dueBeforeDiscount.toFixed(2) }}</b> − 本单优惠 ¥ <b class="rec-disc">{{ discSum.toFixed(2) }}</b> =
+          需{{ type === 'payable' ? '付' : '收' }} ¥ <b class="rec-due">{{ selectedDue.toFixed(2) }}</b> ·
+          设为结清 <b>{{ settleCount }}</b> 张
+        </span>
+        <span class="rec-hint">
+          <template v-if="excess > 0.005">实{{ type === 'payable' ? '付' : '收' }}超出 ¥ {{ excess.toFixed(2) }}，将转入{{ type === 'receivable' ? '客户预存款' : '供应商预付款' }}；</template>
+          <template v-if="short > 0.005">还差 ¥ {{ short.toFixed(2) }}：按单据日期先后分摊，未分摊到的仍挂账（勾选「结清」的单会把差额记为优惠）；</template>
+          <template v-else-if="excess <= 0.005 && selectedRows.length">金额与需{{ type === 'payable' ? '付' : '收' }}一致，{{ type === 'payable' ? '付清' : '收清' }}后自动结清；</template>
+          成交后每{{ type === 'payable' ? '付' : '收' }}一笔都会生成一张资金单据（{{ type === 'payable' ? 'FK' : 'SK' }}-）
+        </span>
       </el-form-item>
       <el-form-item label="日期">
         <el-date-picker v-model="date" type="date" value-format="YYYY-MM-DD" placeholder="日期" style="width:100%" />
@@ -29,7 +44,7 @@
         <span>该单位单据（{{ displayOrders.length }} 张，勾选需处理）</span>
         <span class="bulk">
           批量设置：
-          优惠 ¥<el-input-number v-model="bulkDiscount" :min="0" :max="99999999" :precision="2" :controls="false" size="small" style="width:104px" />
+          优惠 ¥<el-input-number v-model="bulkDiscount" :min="0" :precision="2" :controls="false" size="small" style="width:104px" />
           <el-button size="small" @click="applyBulkDiscount">应用到所选</el-button>
           结算
           <el-select v-model="bulkSettle" size="small" style="width:104px" @change="applyBulkSettle">
@@ -50,7 +65,9 @@
         </el-table-column>
         <el-table-column label="优惠金额" width="124">
           <template #default="{ row }">
-            <el-input-number v-model="row._discount" :min="0" :max="99999999" :precision="2" :controls="false" size="small" style="width:104px" />
+            <!-- 封顶到「该单未收」：优惠超过欠款没有意义（多出来的既不是收款也不是应收）；
+                 铺满未收时自动把该行设为「结清」，三数联动不留半挂状态 -->
+            <el-input-number v-model="row._discount" :min="0" :max="netOf(row, type)" :precision="2" :controls="false" size="small" style="width:104px" @change="onDiscountChange(row)" />
           </template>
         </el-table-column>
         <el-table-column label="优惠后未收" width="110" align="right">
@@ -124,8 +141,8 @@ function applyBulkDiscount() {
   const v = Number(bulkDiscount.value || 0)
   if (!(v > 0)) return ElMessage.warning('请输入大于 0 的优惠金额')
   if (!selectedRows.value.length) return ElMessage.warning('请先勾选单据')
-  selectedRows.value.forEach(r => { r._discount = v })
-  ElMessage.success(`已为 ${selectedRows.value.length} 张单据各填入优惠 ¥${v.toFixed(2)}`)
+  selectedRows.value.forEach(r => { r._discount = Math.min(v, netOf(r, type.value)); onDiscountChange(r) })
+  ElMessage.success(`已为 ${selectedRows.value.length} 张单据填入优惠（各按本单未收封顶），铺满未收的已自动设为结清`)
 }
 function applyBulkSettle(val) {
   if (!val) return
@@ -151,6 +168,10 @@ const displayOrders = computed(() => partyOrders.value.map(o => ({ ...o, _discou
 // 优惠后未收 = 应用本单新增优惠后的净额（仅展示，保存时才落库）
 const afterDiscountNet = (row) => netOf({ ...row, discount: round2(Number(row.discount || 0) + Number(row._discount || 0)) }, type.value)
 
+// 所选未结合计（优惠前）：与「优惠合计」「优惠后需收付」构成同一条联动链，三者始终对得上
+const dueBeforeDiscount = computed(() => round2(selectedRows.value.reduce((s, r) => s + netOf(r, type.value), 0)))
+const discSum = computed(() => round2(selectedRows.value.reduce((s, r) => s + Math.min(Number(r._discount || 0), netOf(r, type.value)), 0)))
+const settleCount = computed(() => selectedRows.value.filter(r => r._settle === '结清').length)
 // 所选未结合计（优惠后）：随逐单「优惠金额」「结算状态=结清」实时联动
 //   · 结清：差额将抹零，不计入需现金未收（贡献 0）
 //   · 否则按 max(0, 未收 − 本单优惠) 计入
@@ -159,6 +180,20 @@ const selectedDue = computed(() => round2(selectedRows.value.reduce((s, r) => {
   return s + Math.max(0, netOf(r, type.value) - Number(r._discount || 0))
 }, 0)))
 const excess = computed(() => round2(Math.max(0, (Number(amount || 0)) - selectedDue.value)))
+// 不足额：还差多少没收到（按日期先后分摊，摊不到的继续挂账），与「超出转预存」互为镜像
+const short = computed(() => round2(Math.max(0, selectedDue.value - (Number(amount || 0)))))
+
+// 优惠铺满本单未收 → 该行自动设为结清：避免「已全免却还挂着账」这种自相矛盾的状态
+function onDiscountChange(row) {
+  const d = Math.min(Number(row._discount || 0), netOf(row, type.value))
+  row._discount = d
+  if (d > 0 && netOf(row, type.value) - d <= 0.005) row._settle = '结清'
+}
+
+// 一键把「优惠后需收付合计」填进金额框：结清的单据不贡献现金，填进去正好收清所选
+function fillSelected() {
+  amount.value = selectedDue.value > 0 ? selectedDue.value : null
+}
 const hasDiscOrSettle = computed(() => selectedRows.value.some(r => Number(r._discount || 0) > 0 || r._settle === '结清'))
 const canSave = computed(() => !!name.value && selectedRows.value.length > 0 && (Number(amount || 0) > 0 || hasDiscOrSettle.value))
 
@@ -191,7 +226,9 @@ function confirm() {
 
 <style scoped>
 .rec-form { margin-top: 8px; }
-.rec-hint { display: inline-block; margin-left: 12px; color: var(--text-secondary); font-size: var(--fs-sub); }
+.rec-hint { display: block; margin-left: 12px; color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.7; }
+.rec-amount { display: flex; align-items: center; gap: 8px; }
+.rec-disc { color: var(--color-success); }
 .rec-due { color: var(--color-danger); }
 .rec-orders { margin-top: 8px; }
 .rec-orders-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: var(--fs-sub); color: var(--text-secondary); margin-bottom: 6px; }

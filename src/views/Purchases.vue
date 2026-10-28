@@ -116,8 +116,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap } from '../utils/catalog'
-import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf } from '../utils/account'
+import { payableOf, paidSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf, round2 } from '../utils/account'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
+// 资金单据联动：任何一笔实际收付款都必须落到付款单（FK-），见 utils/voucherFlow.js
+import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
@@ -271,7 +273,7 @@ function openDialog(row) {
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则立即关窗报成功再后台刷新。
 // 刷新走独立容错：保存已落库，刷新失败只保留本地数据，绝不让弹窗卡在「存了却不开工」状态
 // （否则用户会重复点击，把同一单再 push 一遍生成重复单据）
-async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
+async function onOrderSaved({ entry, isEdit, depositDeduct, payRows, items }) {
   saving.value = true
   try {
     // 红线：本地不是线上全量时绝不提交整表（会覆盖掉未加载到的历史单据）
@@ -279,7 +281,6 @@ async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
       ElMessage.error('线上数据未能加载，已取消保存（避免用空列表覆盖历史单据）。请检查网络后重试。')
       return
     }
-    const snapshot = [...list.value]
     // 本次是否新增了商品（商品库出现了新 code）：先落库商品库，再保存单据。
     // 顺序不能反——先 saveItems 让后端 derive 按 code 命中、不重复建档，避免产生第二个 P 编码
     const hasNewItems = items && items.some(i => !itemOptions.value.some(x => x.code === i.code))
@@ -288,21 +289,20 @@ async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
         ElMessage.error(`商品落库失败：${e.message || '网络异常'}，新商品未保存（可在商品库手动补建）`)
       }
     }
-    // 幂等合并：同单号已存在则替换，防止「保存成功但刷新失败→重复点击」造成重复单
-    const exist = list.value.findIndex(p => p.id === entry.id)
-    if (exist >= 0) list.value[exist] = entry
-    else list.value.push(entry)
-    try {
-      await api.savePurchases(list.value)
-    } catch (e) {
-      list.value = snapshot
-      ElMessage.error(`保存失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+    // 新增单的「本次实付 / 预付款抵扣」与编辑单的「补付差额」（payRows）都是真实资金变动，
+    // 必须同步开付款单：先分配编号回写到流水，再整表保存，最后写付款单集合
+    const newRows = isEdit ? (payRows || []) : (entry.payments || [])
+    // 幂等合并（同单号已存在则替换，防重复点击生成两张同内容单）+ 资金单据联动，一次落库
+    const r = await savePaymentWithVouchers(api, 'payable', list.value, entry, newRows, null)
+    if (r.stage === 'orders') {
+      ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
       const [p, it, sup] = await loadAll().catch(() => [null, null, null])
       if (p) list.value = p
       if (it) itemOptions.value = it
       if (sup) supplierOptions.value = sup
       return
     }
+    list.value = r.merged
     // 保存已成功：先关窗 + 报成功，让用户立刻得到反馈；刷新放到后面且单独容错
     dialog.value = false
     editingOrder.value = null
@@ -320,6 +320,7 @@ async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
       if (sup2) supplierOptions.value = sup2
       ElMessage.success(`已从供应商预付款扣减 ¥${Number(depositDeduct.amount).toFixed(2)}`)
     }
+    voucherNotices('payable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
   } finally {
     saving.value = false
   }
@@ -363,15 +364,14 @@ async function onPhotosSaved(photos) {
 }
 
 async function onPaySaved(updated, payload) {
-  const idx = list.value.findIndex(p => p.id === updated.id)
-  if (idx >= 0) list.value[idx] = updated
-  // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
-  try {
-    await api.savePurchases(list.value)
-  } catch (e) {
-    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+  // 先分配付款单编号并回写到本次新增流水上，再整表落库：「流水 ↔ 付款单」在同一次保存里就绑定好
+  const r = await savePaymentWithVouchers(api, 'payable', list.value, updated, payload?.newRows, payload?.add)
+  if (r.stage === 'orders') {
+    // 保存失败时弹窗保持打开（父组件不关闭），便于直接重试
+    ElMessage.error(`保存失败：${(r.error && r.error.message) || '网络异常'}，请重试`)
     return
   }
+  list.value = r.merged
   const [p, it, sup] = await loadAll().catch(() => [null, null, null])
   if (p) list.value = p
   if (it) itemOptions.value = it
@@ -389,9 +389,10 @@ async function onPaySaved(updated, payload) {
     if (deductAmt > 0) parts.push(`扣减供应商预付款 ¥${deductAmt.toFixed(2)}`)
     if (parts.length) ElMessage.success(parts.join('；'))
   }
+  // 每一笔新增付款流水各开一张付款单（关联本采购单号）；预付款抵扣为划转单；超额转存无单号
+  voucherNotices('payable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
 }
 
-// 超付转供应商预付款
 async function addSupplierAdvance(name, dep) {
   try {
     const suppliers = await api.getSuppliers()
@@ -432,27 +433,66 @@ async function deductSupplierAdvance(name, entry) {
 }
 
 async function toggleSettle(row) {
-  // 欠款以金额为准：标记结清时，未付差额全部记为抹零优惠（不产生实际付款流水），保证状态与金额一致
-  // 分支按展示口径判定（未付为 0 即视为结清），提示与分支一一对应
+  // 结清有两条真实路径，钱动没动必须让用户当场选、并如实反映在资金单据上：
+  //   付款结清：差额按一笔实际付款入账 → 生成付款单（FK-），现金减少
+  //   优惠结清：差额记入抹零优惠（无资金变动）→ 按口径不开任何资金单据
+  // 此前只有后者，所以「点结清查不到付款单」。分支按展示口径判定（未付为 0 即视为结清）
   const willSettle = settleLabelOf(row) !== '结清'
   if (willSettle) {
     const due = grossOf(row)
     const unpaid = payableOf(row)
     if (unpaid > 0) {
       const paid = paidSumOf(row)
+      let mode = 'cash'
       try {
         await ElMessageBox.confirm(
-          `该单应付 ¥${due.toFixed(2)}，已实付 ¥${paid.toFixed(2)}，未付 ¥${unpaid.toFixed(2)}。\n标记结清将把差额 ¥${unpaid.toFixed(2)} 记为抹零优惠（不产生实际付款，现金不减少），本单按 ¥${paid.toFixed(2)} 结清。`,
-          '标记结清', { type: 'warning' })
-      } catch { return }
+          `该单应付 ¥${due.toFixed(2)}，已实付 ¥${paid.toFixed(2)}，未付 ¥${unpaid.toFixed(2)}。\n` +
+          `· 「付款结清」：把 ¥${unpaid.toFixed(2)} 记为一笔实际付款，并生成付款单（现金减少）\n` +
+          `· 「差额记优惠」：¥${unpaid.toFixed(2)} 作为抹零优惠核销，钱未付出，因此不生成付款单`,
+          '标记结清', {
+            type: 'warning',
+            confirmButtonText: '付款结清',
+            cancelButtonText: '差额记优惠',
+            distinguishCancelAndClose: true
+          })
+      } catch (e) {
+        // close（点 X / ESC）= 放弃操作；cancel = 明确选择「差额记优惠」
+        if (e !== 'cancel') return
+        mode = 'discount'
+      }
+      const idx = list.value.findIndex(p => p.id === row.id)
+      if (idx < 0) return
+      if (mode === 'cash') {
+        const payments = ensurePayments(row, 'paid')
+        const row2 = { date: new Date().toISOString().slice(0, 10), amount: unpaid, remark: '结清付款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
+        payments.push(row2)
+        const updated = syncPayments({ ...row, payments }, 'payable')
+        const r = await savePaymentWithVouchers(api, 'payable', list.value, updated, [row2], null)
+        if (r.stage === 'orders') {
+          ElMessage.error(`操作失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
+          await refreshFromServer()
+          return
+        }
+        list.value = r.merged
+        ElMessage.success(`已付款结清：¥${unpaid.toFixed(2)} 已付出`)
+        voucherNotices('payable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
+        return
+      }
       // 抹零优惠：差额计入 discount 而非付款流水；syncPayments 按金额自动判定结清
-      const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
       const updated = syncPayments({ ...row, discount: round2(Number(row.discount || 0) + unpaid) }, 'payable')
-      const idx = list.value.findIndex(p => p.id === updated.id)
-      if (idx >= 0) list.value[idx] = updated
-    } else {
-      row.settle = '结清'
+      list.value[idx] = updated
+      try {
+        await api.savePurchases(list.value)
+      } catch (e) {
+        list.value[idx] = row
+        ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
+        await refreshFromServer()
+        return
+      }
+      ElMessage.success(`已按抹零优惠结清 ¥${unpaid.toFixed(2)}（无资金变动，未生成付款单）`)
+      return
     }
+    row.settle = '结清'
   } else {
     row.settle = '挂账'
   }
