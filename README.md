@@ -27,6 +27,14 @@
 - **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
 
+## 读取性能优化（Phase 0）
+
+Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-maxage=15, stale-while-revalidate=30`，由 **Cloudflare 全局边缘缓存**接管读，把原本每次回源 GitHub（100–400ms）降到边缘 <10ms，并顺手把 GitHub 5000 次/小时共享 token 的限流压力移出热路径。
+
+- **一致性保障**：写（`POST`）成功后，Worker 用 `caches.default.delete` 尽力清除同节点缓存；更关键的是**前端 `src/api/index.js` 在写入后开启 20s「强制刷新窗口」，窗口内的 `GET` 请求携带 `Cache-Control: no-cache` 绕过 CDN 边缘缓存**，确保保存后立即刷新能读到刚写入的数据，不会出现「保存成功却看不到新单」。
+- **不涉及写路径与 AI 写入**：写永远直落 GitHub（唯一权威源），缓存只是只读副本、15s 自动回源，不产生数据分叉；AI 直读 GitHub 也不受影响。
+- 所有缓存操作均包 try/catch，缓存层不可用即静默回源，绝不影响业务正确性。
+
 ## 编码规则
 
 | 类型 | 格式 | 示例 | 生成方式 |

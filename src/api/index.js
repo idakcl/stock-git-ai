@@ -46,10 +46,12 @@ async function handle(res) {
 }
 
 async function request(path, options = {}) {
-  const res = await fetch(BASE + path, {
-    ...options,
-    headers: authHeaders({ 'Content-Type': 'application/json', ...(options.headers || {}) })
-  })
+  const method = (options.method || 'GET').toUpperCase()
+  const headers = authHeaders({ 'Content-Type': 'application/json', ...(options.headers || {}) })
+  // 刚写入后的刷新：绕过 CDN 边缘缓存，确保读到最新数据（no-cache 让 Worker 回源，已实测有效）。
+  // 不影响前端本地的 15s 内存缓存命中（命中时直接返回、不进此函数）。
+  if (needFresh() && method === 'GET') headers['Cache-Control'] = 'no-cache'
+  const res = await fetch(BASE + path, { ...options, method, headers })
   return handle(res)
 }
 
@@ -73,7 +75,19 @@ function cachedGet(path) {
   return p
 }
 
-function invalidate(path) { readCache.delete(path) }
+// Phase 0 回归修复：写入成功后，CDN 的 s-maxage 边缘缓存无法被 Worker 跨节点清除，
+// 会导致「保存后立即刷新」读到的仍是旧缓存（表现为「保存没效果」）。
+// 写入后开启一个短暂窗口（20s），窗口内发出的 GET 强制绕过 CDN 缓存（no-cache），
+// 保证立刻读到刚写入的数据；窗口外恢复正常缓存提速。前端本就有 15s 内存缓存，
+// 这里只补 CDN 层的一致性缺口（Worker 的 caches.default.delete 是 per-edge，清不掉全局 CDN）。
+let freshUntil = 0
+function markFresh() { freshUntil = Date.now() + 20000 }
+const needFresh = () => Date.now() < freshUntil
+
+function invalidate(path) {
+  readCache.delete(path)
+  markFresh()
+}
 
 // 保存采购单/销售单时，服务端会同步重算派生数据（商品档案、库存、供应商链接）。
 // 这些路径必须一并失效，否则 15 秒缓存窗口内报表/看板/库存看到的还是旧成本、旧库存、旧历史价。
