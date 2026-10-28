@@ -220,18 +220,48 @@ function loadAll() {
   return Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
 }
 
+// 线上全量数据是否可靠加载。保存走「整表覆盖」语义（提交整个 sales 数组），
+// 一旦列表因加载失败变空，保存就会用「只有这一张新单」的数组覆盖 sales.json，历史单据全被抹掉。
+// 因此加载失败必须标记出来，并在保存前强制补齐，补不齐就拒绝提交。
+const loadFailed = ref(false)
+
 onMounted(async () => {
   try {
     const [s, it, cu] = await loadAll()
     list.value = s
     itemOptions.value = it
     customerOptions.value = cu
+    loadFailed.value = false
   } catch (e) {
-    list.value = []
-    itemOptions.value = []
-    customerOptions.value = []
+    // 不清空已有列表：清空过一次保存就能把线上单据覆盖没了
+    loadFailed.value = true
+    ElMessage.error({ message: `销售数据加载失败（${e.message || '网络异常'}），请退出本页重新进入；加载成功前不会允许保存，以免覆盖线上单据`, duration: 6000 })
   }
 })
+
+// 提交整表前确保本地是线上全量：未加载成功过或列表为空时，先重新拉一次
+async function ensureLoaded() {
+  if (!loadFailed.value && list.value.length) return true
+  const r = await loadAll().catch(() => null)
+  if (!r) return false
+  const [s, it, cu] = r
+  list.value = s
+  itemOptions.value = it
+  customerOptions.value = cu
+  loadFailed.value = false
+  return true
+}
+
+// 写成功/回滚后的回读只服务于显示：失败既不抛错也不清空，保留本地数据，下次进入页面自动重拉。
+// （此前这里用未捕获的 Promise.all，回读一失败就把已落库的删除/结清显示成「没生效」，用户会反复点）
+async function refreshFromServer() {
+  try {
+    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+    list.value = s
+    itemOptions.value = it
+    customerOptions.value = cu
+  } catch { /* 保留本地数据 */ }
+}
 
 // 编辑中的单据：null 表示新增
 const editingOrder = ref(null)
@@ -247,6 +277,11 @@ function openDialog(row) {
 async function onOrderSaved({ entry, isEdit, depositDeduct, items }) {
   saving.value = true
   try {
+    // 红线：本地不是线上全量时绝不提交整表（会覆盖掉未加载到的历史单据）
+    if (!(await ensureLoaded())) {
+      ElMessage.error('线上数据未能加载，已取消保存（避免用空列表覆盖历史单据）。请检查网络后重试。')
+      return
+    }
     const snapshot = [...list.value]
     // 本次是否新增了商品（商品库出现了新 code）：先落库商品库，再保存单据。
     // 顺序不能反——先 saveItems 让后端 derive 按 code 命中、不重复建档，避免产生第二个 P 编码
@@ -387,9 +422,7 @@ async function toggleSettle(row) {
     await api.saveSales(list.value)
   } catch (e) {
     ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
-    list.value = s
-    itemOptions.value = it
+    await refreshFromServer()
     return
   }
   ElMessage.success(willSettle ? '已标记为结清' : '已改回挂账')
@@ -404,14 +437,11 @@ async function remove(row) {
     await api.saveSales(list.value)
   } catch (e) {
     ElMessage.error(`删除失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
-    const [s, it] = await Promise.all([api.getSales(), api.getItems()])
-    list.value = s
-    itemOptions.value = it
+    await refreshFromServer()
     return
   }
-  const [s, it] = await Promise.all([api.getSales(), api.getItems()])
-  list.value = s
-  itemOptions.value = it
+  // 删除已落库：回读只为显示最新值，失败也不能让已成功的删除看起来没生效
+  await refreshFromServer()
   // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水（含历史无标记抵扣的补回），避免删除后余额残留幽灵流水或预存款丢失
   const cu2 = await removeDepositFlows(api, 'receivable', row.customer, row.id, row).catch(() => null)
   if (cu2) customerOptions.value = cu2

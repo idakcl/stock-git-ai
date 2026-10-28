@@ -51,24 +51,34 @@ export async function writeJSON(env, file, data, message) {
     content: b64(payload),
     branch: env.GITHUB_BRANCH || 'main'
   }
-  // 网络异常或 GitHub 5xx 时重试一次（重试前重新拉取 sha，避免过期）；
-  // 4xx（鉴权/参数问题）重试无意义，直接抛出
+  // 网络异常或 GitHub 5xx/429 时重试一次（重试前重新拉取 sha，避免过期）；
+  // 409 不重试——它意味着 GET sha 与 PUT 之间确实有人并发写过该文件，
+  // 重试会用本端的旧全量覆盖对方刚写入的内容（丢数据），宁可报错让用户重开单据；
+  // 其余 4xx（鉴权/参数问题）重试无意义，直接抛出
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
+      let existing = null
       try {
-        const existing = await gh(`/contents/${file}`, env, 'GET')
+        existing = await gh(`/contents/${file}`, env, 'GET')
         body.sha = existing.sha
       } catch {
         // 文件不存在，不传 sha
         delete body.sha
       }
+      // 内容逐字节相同就不提交：保存一张单据要派生写回 items/suppliers/stock/purchases/sales 等
+      // 最多 6 个文件，其中 items.json 约 0.9MB、purchases.json 约 0.5MB，
+      // 重复提交同样内容只会放大 GitHub 写入压力（限流/超时概率），没有任何收益
+      if (existing && existing.encoding === 'base64' && typeof existing.content === 'string'
+        && existing.content && b64d(existing.content) === payload) {
+        return { skipped: true, sha: existing.sha }
+      }
       return await gh(`/contents/${file}`, env, 'PUT', body)
     } catch (e) {
       const msg = String(e && e.message || e)
       const status = Number((/GitHub (\d{3})/.exec(msg) || [])[1])
-      const retryable = !status || status >= 500
+      const retryable = !status || status >= 500 || status === 429
       if (attempt === 2 || !retryable) throw e
-      await new Promise(r => setTimeout(r, 600))
+      await new Promise(r => setTimeout(r, status === 429 ? 1500 : 600))
     }
   }
 }

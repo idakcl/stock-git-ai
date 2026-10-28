@@ -451,6 +451,17 @@ function onPartyChange() {
   })
 }
 
+// 明细行判定：code 与 name 都为空＝空白行。
+// 「添加行」和新增单的首行都是空白行，用户往往不会去填它，因此空白行不该拦下整单；
+// 但「填了数量/单价却没选商品」的空白行是漏填，必须指名道姓报出来，不能静默丢弃。
+const isBlankLine = (l) => !l || (!l.code && !l.name)
+const isUntouchedBlankLine = (l) => isBlankLine(l)
+  && !(Number(l?.price || 0) > 0) && !(Number(l?.qty || 0) > 1) && !(Number(l?.discountRate ?? 1) < 1)
+
+// 校验类提示统一停留 5 秒：手机端弹窗长、注意力在下半屏，3 秒自动消失的 toast
+// 会让一次被拦截的保存看起来「点了没反应」
+const warn = (message) => ElMessage.warning({ message, duration: 5000 })
+
 // 顶部快速添加：选择已有商品或输入新商品名后回车，直接把一行加入明细（下方表格可继续改数量/单价）。
 // 新商品（库内无同名）以 name 占位、code 留空，保存时由 resolveLine 分配正式 P 编码，不会产生乱码
 function addQuickItem(val) {
@@ -460,15 +471,23 @@ function addQuickItem(val) {
   const line = found
     ? { code: found.code, name: found.name, qty: 1, price: priceFor(found), discountRate: 1 }
     : { code: '', name: String(code), qty: 1, price: 0, discountRate: 1 }
-  form.lines.push(line)
+  // 优先填入第一个未触碰的空白行：直接 push 会在明细里留下一行空白，
+  // 过去这行空白会让「保存出库」静默失败（点了没反应的直接原因）
+  const blank = form.lines.findIndex(isUntouchedBlankLine)
+  if (blank >= 0) form.lines.splice(blank, 1, line)
+  else form.lines.push(line)
   quickItem.value = ''
   ElMessage.success(`已添加：${found ? found.name : code}`)
 }
 
 async function doSave() {
-  if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再保存')
-  if (!form.party) return ElMessage.warning(`请填写${partyLabel.value}`)
-  if (!form.lines.length || form.lines.some(l => !l.code && !l.name)) return ElMessage.warning(`请完整填写${bizWord.value}明细`)
+  if (photoUpload.value && photoUpload.value.isUploading()) return warn('照片正在上传中，请等待上传完成后再保存')
+  if (!form.party) return warn(`请填写${partyLabel.value}`)
+  // 空白行不再拦下整单：未触碰的空行忽略，填了数量/单价却没选商品的行明确指出第几行
+  const pending = form.lines.map((l, idx) => ({ l, idx })).filter(o => !isUntouchedBlankLine(o.l))
+  if (!pending.length) return warn(`请先添加至少一行${bizWord.value}商品`)
+  const missed = pending.find(o => isBlankLine(o.l))
+  if (missed) return warn(`第 ${missed.idx + 1} 行没选商品（已填数量/单价）：请补选商品或删除该行`)
   // 输入了名单中没有的${partyLabel}：保存后由后端自动建档，先提示用户确认，避免误建档案
   const partyList = isPurchase.value ? props.suppliers : props.customers
   const partyExists = (partyList || []).some(x => x.name === form.party)
@@ -487,7 +506,7 @@ async function doSave() {
   for (const x of catalog) { const m = /^P(\d{5})$/.exec(x.code || ''); if (m) pMax = Math.max(pMax, parseInt(m[1], 10)) }
   const nextCodeFn = () => { pMax += 1; return 'P' + String(pMax).padStart(5, '0') }
   const resolved = []
-  form.lines.forEach((l, idx) => {
+  pending.forEach(({ l, idx }) => {
     // 采购行要带 cost（影响商品建档成本），销售行直接用成交价
     const result = isPurchase.value ? resolveLine(catalog, { ...l, cost: l.price }, idx, nextCodeFn) : resolveLine(catalog, l, idx, nextCodeFn)
     if (result.line) {
@@ -495,7 +514,7 @@ async function doSave() {
       resolved.push(result.line)
     }
   })
-  if (!resolved.length) return ElMessage.warning(`请完整填写${bizWord.value}明细`)
+  if (!resolved.length) return warn(`请完整填写${bizWord.value}明细`)
   const amount = resolved.reduce((s, l) => s + l.total, 0)
   const discountVal = Number(form.discount || 0)
   const isEdit = !!editingId.value
