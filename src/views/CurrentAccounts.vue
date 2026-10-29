@@ -684,14 +684,38 @@ async function onBatchApplied(groups) {
       }
     }
     // 组装资金单据条目（orderId / 类型 / 本次金额 / 本次优惠 / 是否结清）
-    const voucherItems = orderIds.filter(id => working[id]).map(id => ({
-      orderId: id,
-      orderType: isRecv ? 'sale' : 'purchase',
-      amount: round2(allocAmount[id] || 0),
-      discount: round2(settleDisc[id] || 0),
-      settle: settleIds.includes(id)
-    }))
+    // 结清口径以「本次入账后该单最终净额」为准，不再只看手动的 settleIds：
+    // 合并收款把金额收满（或抹零结清）时也必须落成「结清」，否则凭证显示挂账、
+    // 单据流水里也找不到「结清收款」这条备注（SK-20261028-008）。
+    const voucherItems = orderIds.filter(id => working[id]).map(id => {
+      const o = working[id]
+      const amount = round2(allocAmount[id] || 0)
+      const settled = isSettledOf(netOf(o, g.kind), o.settle)
+      // 本次有实际收/付款且最终结清 → 「结清收款 / 结清付款」；
+      // 只收/付一部分仍写「合并收款 / 合并付款」；手填备注优先，不覆盖
+      const remark = g.remark || ((settled && amount > 0.005)
+        ? (isRecv ? '结清收款' : '结清付款')
+        : (isRecv ? '合并收款' : '合并付款'))
+      if (amount > 0.005 && Array.isArray(o.payments) && o.payments.length) {
+        const last = o.payments[o.payments.length - 1]
+        if (last && last.voucher === code) last.remark = remark
+      }
+      return {
+        orderId: id,
+        orderType: isRecv ? 'sale' : 'purchase',
+        amount,
+        discount: round2(settleDisc[id] || 0),
+        settle: settled,
+        remark: amount > 0.005 ? remark : ''
+      }
+    })
     const total = round2(Object.values(allocAmount).reduce((s, v) => s + v, 0))
+    // 整组全部结清且未手填备注时，资金单据本身也显示「结清收款 / 结清付款」，
+    // 列表备注列不再空白；有挂账单时保留「合并收款 / 合并付款」
+    const allSettled = voucherItems.length > 0 && voucherItems.every(it => it.settle)
+    const voucherRemark = g.remark || (allSettled
+      ? (isRecv ? '结清收款' : '结清付款')
+      : (isRecv ? '合并收款' : '合并付款'))
     // 只有真实资金变动才开资金单据：本组一分未收/付（纯优惠、纯结清）时不占用编号也不留空单据，
     // 否则收付款单列表会出现 ¥0.00 的凭证，与「有资金变动才有单据」的口径冲突
     if (total > 0.005) {
@@ -700,7 +724,7 @@ async function onBatchApplied(groups) {
         kind: isRecv ? 'receivable' : 'payable',
         party: g.party,
         date: g.date,
-        remark: g.remark || '',
+        remark: voucherRemark,
         total,
         items: voucherItems
       }
