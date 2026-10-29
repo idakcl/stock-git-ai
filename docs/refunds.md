@@ -13,7 +13,7 @@
 
 ## 数据和公式
 
-- 退货单继续存在 sales.json / purchases.json。新单 type = sale-return / purchase-return；新编号 XT-/CT-YYYYMMDD-NNN。历史 T 编号保留。
+- 退货单继续存在 sales.json / purchases.json。新单 type = sale-return / purchase-return；新编号 XT-/CT-YYYYMMDD-NNNN（4 位流水）。
 - sourceOrderId 精确关联原单 id；items[].sourceLine 关联原单行索引（同商品可以在不同原单行出现）。no 保留业务单号含义，不假定历史 no 是可解析的原单 id。
 - qty、total 为负；price 为原行正价；行 total 为分摊后的负净额，不能再乘折扣或重复减抹零。
 - 现金退款在退货单 payments 中写负 amount，凭证写正 total。direction 为 to_customer（资金出）或 from_supplier（资金入）。received/paid 仅汇总 payments。
@@ -50,7 +50,7 @@ POST /api/refunds：操作接口，不是整表覆盖！需要现有登录票据
   "action": "settle",
   "requestId": "5563edb0-0d52-4868-92f6-ae61d95793bf",
   "kind": "purchase",
-  "orderIds": ["CT-20261028-001"],
+  "orderIds": ["CT-20261028-0001"],
   "date": "2026-10-28",
   "mode": "cash",
   "amount": 100,
@@ -62,7 +62,7 @@ kind = sale / purchase；请求标识为一次操作唯一 UUID，网络重试�
 
 服务端固定一个 Git 提交快照读取，重新核算可退数量和净价，订单、退款凭证、余额、库存和日志在同一提交中发布；分支使用 force:false，冲突不覆盖、不自动重放。不能由 AI 直接拼造凭证、手填负旧汇总字段代替此接口。
 
-action=backfill 只处理 T20260519120000001/T20260519120000002。已于数据仓提交 74a3c2e 执行：TK-20260519-001 金额 8618；TK-20260519-002 金额 302；方向均 from_supplier，总额 8920。仅改 purchases.json 的 payments、refunds.json、logs.json；原金额、库存、明细、结算状态未变。重复执行不新增单据。
+action=backfill 只处理 CT-20260519-0001/CT-20260519-0002（原 T20260519120000001/T20260519120000002）。已于数据仓提交 74a3c2e 执行：TK-20260519-001 金额 8618；TK-20260519-002 金额 302；方向均 from_supplier，总额 8920。仅改 purchases.json 的 payments、refunds.json、logs.json；原金额、库存、明细、结算状态未变。重复执行不新增单据。
 
 ## 与初版方案的修正与边界
 

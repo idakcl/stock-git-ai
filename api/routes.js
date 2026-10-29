@@ -252,7 +252,7 @@ export function rebuildStock(purchases, sales, items) {
 // 规范化单据收付款字段，杜绝「实付漏算」缺陷：
 // ensurePayments 规定 payments 数组一旦存在（即使为空）即为权威数据、不再回退旧字段，
 // 因此「payments 是空数组 + 实付躺在旧 paid/received 字段」会让实收被算成 0，
-// 产生幽灵欠款（B202610251227400005：实付 1830.25 被漏算，未付合计虚增 1830.25）。
+// 产生幽灵欠款（C202610251227400005：实付 1830.25 被漏算，未付合计虚增 1830.25）。
 // 这种结构多来自外部导入或旧版本数据；写入前统一转成一笔正式流水，任何途径都不能再产生。
 // 注意：正常删光付款记录时 payments=[] 且旧字段为 0，不满足转换条件，不会被误造流水
 export function normalizeOrderPayments(order, legacyField) {

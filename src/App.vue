@@ -375,7 +375,7 @@ body {
 .el-dialog { max-width: 94vw; }
 /* 列表操作列（ops-col）：按钮收紧间距并强制单行，删除与照片同排不换行 */
 .el-table .ops-col .cell { white-space: nowrap; }
-/* 单据号列（id-col）：退货单号形如 XT-20261028-001，允许在连字符处折行会把单号拆成两行，
+/* 单据号列（id-col）：退货单号形如 XT-20261028-0001，允许在连字符处折行会把单号拆成两行，
    这里强制单行不折行，编号始终完整显示在一行内 */
 .el-table .id-col .cell { white-space: nowrap; word-break: keep-all; }
 .el-table .ops-col .el-button + .el-button { margin-left: 6px; }

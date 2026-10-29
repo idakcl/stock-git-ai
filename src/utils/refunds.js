@@ -60,7 +60,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
         qty: -qty, price: Number(row.price), total: -value }
     })
     const total = round2(lines.reduce((s, l) => s + l.total, 0))
-    const id = genVoucherCode(input.kind === 'sale' ? 'XT' : 'CT', input.date, orders.map(o => ({ code: o.id })))
+    const id = genVoucherCode(input.kind === 'sale' ? 'XT' : 'CT', input.date, orders.map(o => ({ code: o.id })), 4)
     const entry = { id, type: `${input.kind}-return`, sourceOrderId: source.id, no: source.no || '',
       [partyKey]: source[partyKey], date: input.date, items: lines, total, discount: 0,
       returnReason: String(input.reason).trim(), refundMode: mode, remark: String(input.remark || ''),
@@ -127,7 +127,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
 export function backfillHistoricalRefunds(snapshot) {
   const state = structuredClone(snapshot)
   const codes = []
-  for (const id of ['T20260519120000001', 'T20260519120000002']) {
+  for (const id of ['CT-20260519-0001', 'CT-20260519-0002']) {
     const order = state.purchases.find(o => o.id === id)
     if (!order || Number(order.paid) >= 0) fail(`历史退货单 ${id} 缺失或金额异常`)
     const payments = ensurePayments(order, 'paid')

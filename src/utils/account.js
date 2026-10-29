@@ -122,7 +122,7 @@ export function settleBalance({ gross = 0, paidNow = 0, depositPay = 0, discount
 // 末位 round2：total×rate 与 discount 相减会产生 1e-15 级浮点尘（如 9.55−4.55=5.000000000000001），
 // 不收敛会让未收=尘>0，统计卡误判「有未结清」、 badge 多数一笔
 // 红字单据（退货单，total<0）：返回负数毛额（=应退款），不夹 0，也不参与优惠抵减——
-// 此前 max(0,·) 会把退货单的应付夹成 0，退货只减库存、不冲欠款（T20260519120000001 事故）。
+// 此前 max(0,·) 会把退货单的应付夹成 0，退货只减库存、不冲欠款（CT-20260519-0001 事故）。
 export function grossOf(order) {
   const total = Number(order?.total || 0)
   const rate = effectiveRateOf(order)
@@ -151,7 +151,7 @@ export function netOf(order, kind) {
 
 // 展示层结清判定：以金额为准——未收/未付 ≤ 1e-6（浮点尘容忍，与 syncPayments 口径一致）即结清。
 // 不再让库内 settle 标签短路判定：脏数据（标了结清但钱没收回）必须暴露为挂账，
-// 否则会出现「未付合计 > 0 却显示 0 单未结清」的自相矛盾（B202610251227400005 事故：
+// 否则会出现「未付合计 > 0 却显示 0 单未结清」的自相矛盾（C202610251227400005 事故：
 // 该单 payments 空数组 + 旧 paid 字段导致实收漏算，settle 短路把 1830.25 幽灵欠款藏成了结清）。
 // 正常路径下点「结清」时差额已记入抹零优惠、金额归 0，标签与金额天然一致，无需再看标签。
 // settle 参数保留仅为兼容既有调用签名，不参与判定

@@ -15,10 +15,11 @@ export function ymd8(date) {
 }
 
 // 生成下一个单据编码
-//   prefix: 'SK' | 'FK'
+//   prefix: 'SK' | 'FK' | 'XT' | 'CT'
 //   date:   本次单据日期（YYYY-MM-DD 或任意可解析日期）
 //   list:   已有的同类型单据数组（取其中 code 字段比对）
-export function genVoucherCode(prefix, date, list) {
+//   digits: 流水位数，资金单据 3 位；退货单 4 位（XT-/CT-YYYYMMDD-NNNN）
+export function genVoucherCode(prefix, date, list, digits = 3) {
   const head = `${prefix}-${ymd8(date)}-`
   let max = 0
   for (const v of (list || [])) {
@@ -28,5 +29,5 @@ export function genVoucherCode(prefix, date, list) {
       if (m) max = Math.max(max, parseInt(m[1], 10) || 0)
     }
   }
-  return `${head}${String(max + 1).padStart(3, '0')}`
+  return `${head}${String(max + 1).padStart(digits, '0')}`
 }
