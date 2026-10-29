@@ -9,19 +9,21 @@
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
             <el-checkbox v-if="!externalView" v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
-            <el-checkbox v-if="!externalView" v-model="showSellPrice" class="opt-cb">显示售价</el-checkbox>
-            <el-checkbox v-if="!externalView" v-model="showCostCol" class="opt-cb">显示进价</el-checkbox>
-            <el-checkbox v-model="showHistory" class="opt-cb">展开历史价与商品档案</el-checkbox>
+            <el-checkbox v-if="!priceHidden" v-model="showSellPrice" class="opt-cb">显示售价</el-checkbox>
+            <el-checkbox v-if="!priceHidden" v-model="showCostCol" class="opt-cb">显示进价</el-checkbox>
+            <el-checkbox v-if="!priceHidden" v-model="showHistory" class="opt-cb">展开历史价与商品档案</el-checkbox>
             <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏价格·只读）</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
-            <el-button type="primary" :disabled="!found || externalView || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="editDialog = true">编辑</el-button>
-            <el-button type="danger" :disabled="!found || externalView || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
+            <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="editDialog = true">编辑</el-button>
+            <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
             <el-button v-if="found && !externalView" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'sale', source: isReturn(sale) ? undefined : sale.id } })">退货 / 退款</el-button>
             <el-button @click="$router.push('/sales')">返回列表</el-button>
           </div>
         </div>
       </template>
+      <el-alert v-if="externalView" class="external-banner" type="info" :closable="false" show-icon
+        title="对外查看模式：价格与金额已隐藏，页面只读" />
       <div class="info">
         <span>客户：
           <router-link v-if="customerCodeMap[sale.customer]" :to="`/customer/${customerCodeMap[sale.customer]}`" class="link">{{ sale.customer }}</router-link>
@@ -33,23 +35,26 @@
           <router-link v-if="sale.sourceOrderId" :to="`/sale/${sale.sourceOrderId}`" class="link">{{ sale.sourceOrderId }}</router-link>
           <span v-else>—</span>
         </span>
-        <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
-        <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
-        <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
-        <span v-if="hasDiscount">折后金额：¥ {{ discountedTotal.toFixed(2) }}</span>
-        <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0">（抹零优惠，未实际收款）</template></span>
-        <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
-        <span>实收：¥ {{ receivedSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
-        <span>
-          未收：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b>
-        </span>
+        <template v-if="!priceHidden">
+          <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
+          <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
+          <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
+          <span v-if="hasDiscount">折后金额：¥ {{ discountedTotal.toFixed(2) }}</span>
+          <span>优惠：¥ {{ Number(sale.discount || 0).toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0">（抹零优惠，未实际收款）</template></span>
+          <span>应收：¥ {{ dueAmount.toFixed(2) }}</span>
+          <span>实收：¥ {{ receivedSum.toFixed(2) }}<template v-if="payments.length">（{{ payments.length }} 笔）</template></span>
+          <span>
+            未收：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b>
+          </span>
+        </template>
+        <span v-else class="price-hidden-note">（价格与金额已隐藏）</span>
         <span class="settle-cell">
           结算状态：
           <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
             {{ settleLabel }}
           </el-tag>
           <!-- 结清：未收差额记实收或记抹零；改挂账：撤销抹零优惠、恢复未收（未收 0 且无优惠时不显示） -->
-          <el-button v-if="!isReturn(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
+          <el-button v-if="!externalView && !isReturn(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
             :disabled="!found"
             @click="toggleSettle">
             {{ settleAction === 'settle' ? '结清' : '改挂账' }}
@@ -66,26 +71,27 @@
         </div>
         <PhotoThumbs v-if="(sale.photos || []).length" :value="sale.photos" />
       </div>
-      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :show-cost="showCostCol" :price-columns="priceColumns" :remark-last="true" :show-history="showHistory">
+      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :show-cost="showCostCol && !priceHidden" :price-columns="priceColumns" :remark-last="true" :show-history="showHistory && !priceHidden">
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
-          <el-table-column prop="_price" label="本次单价" width="100"  align="right"/>
-          <el-table-column label="本次折扣" width="100" align="right">
+          <el-table-column v-if="!priceHidden" prop="_price" label="本次单价" width="100"  align="right"/>
+          <el-table-column v-if="!priceHidden" label="本次折扣" width="100" align="right">
             <template #default="{ row }">
               <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`${row._discountRate != null && row._discountRate < 1 ? `折扣率 ${row._discountRate} · ` : ''}原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
-          <el-table-column prop="_total" label="本次金额" width="100"  align="right"/>
+          <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100"  align="right"/>
         </template>
       </ProductTable>
     </el-card>
 
-    <el-card class="pay-card">
+    <el-card v-if="!externalView" class="pay-card">
       <template #header>
         <div class="card-header">
-          <b>收款记录（{{ payments.length }} 笔 · 累计 ¥ {{ receivedSum.toFixed(2) }} / 应收 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(sale.discount).toFixed(2) }}（未实际收款）</template>）</b>
-          <el-button v-if="!externalView && !isReturn(sale)" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
+          <b v-if="priceHidden">收款记录（{{ payments.length }} 笔 · 金额已隐藏）</b>
+          <b v-else>收款记录（{{ payments.length }} 笔 · 累计 ¥ {{ receivedSum.toFixed(2) }} / 应收 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(sale.discount).toFixed(2) }}（未实际收款）</template>）</b>
+          <el-button v-if="!isReturn(sale)" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
         </div>
       </template>
       <div class="table-wrap">
@@ -94,7 +100,7 @@
         <el-table-column label="时间" width="170">
           <template #default="{ row }">{{ fmtCNTime(row.time) || orderTimeOf(sale) }}</template>
         </el-table-column>
-        <el-table-column label="金额" width="130" align="right">
+        <el-table-column v-if="!priceHidden" label="金额" width="130" align="right">
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="160" show-overflow-tooltip />
@@ -105,9 +111,9 @@
       </div>
     </el-card>
 
-    <el-card v-if="(sale.settlements || []).length" class="pay-card">
+    <el-card v-if="!externalView && (sale.settlements || []).length" class="pay-card">
       <template #header>退货核销（不计现金实收或优惠）</template>
-      <el-table :data="sale.settlements"><el-table-column label="时间" width="170"><template #default="{ row }">{{ fmtCNTime(row.time) || row.date }}</template></el-table-column><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
+      <el-table :data="sale.settlements"><el-table-column label="时间" width="170"><template #default="{ row }">{{ fmtCNTime(row.time) || row.date }}</template></el-table-column><el-table-column v-if="!priceHidden" prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
     </el-card>
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" :deposit-balance="customerDepositBalance" @saved="onPaySaved" />
 
@@ -305,15 +311,18 @@ const detailItems = computed(() => {
 const hidePrice = ref(false)
 // 销售单详情默认不展示进价（成本列），需要时勾选「显示进价」查看
 const showCostCol = ref(false)
-// 对外查看（历史/对外）：隐藏价格、隐藏写按钮，只保留财务头与本次数据
+// 对外查看：隐藏全部价格与金额、隐藏写操作（编辑/删除/退货/收付款/照片），只保留客户、时间、结算状态等非金额信息
 const externalView = ref(false)
+// 价格脱敏：两个入口共用同一口径——手动勾选「隐藏单价与金额」或开启「对外查看」时，
+// 页面上的单价/折扣/金额列、单头金额、收款金额同步隐藏（导出与打印沿用同一规则）
+const priceHidden = computed(() => hidePrice.value || externalView.value)
 const defaultPriceColumns = [{ prop: 'price', label: '售价' }]
 // 历史销售单默认只看「本次数据」：商品档案的售价与本单成交价是两回事（本单单价已在「本次单价」列），
 // 默认隐藏售价/进价，需要对照档案价时再勾「显示售价 / 显示进价」；备注固定置底
 const showSellPrice = ref(false)
 // 历史采购价 / 历史销售价 / 商品照片属于商品档案，不是本单数据：默认收起，避免看历史单据时被无关信息干扰
 const showHistory = ref(false)
-const priceColumns = computed(() => (externalView.value || !showSellPrice.value) ? [] : defaultPriceColumns)
+const priceColumns = computed(() => (priceHidden.value || !showSellPrice.value) ? [] : defaultPriceColumns)
 const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
 const exportColumns = computed(() => {
   let cols = [
@@ -371,7 +380,7 @@ const docHeaderFields = computed(() => {
 function doExport() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
   downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
-  ElMessage.success(`已导出 ${detailItems.value.length} 行${hidePrice.value ? '（已隐藏单价与金额）' : ''}`)
+  ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
 function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
@@ -500,6 +509,8 @@ onMounted(async () => {
 .opt-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .hide-price-cb :deep(.el-checkbox__label) { font-size: var(--fs-sub); color: var(--text-regular); }
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
+.external-banner { margin-bottom: 12px; }
+.price-hidden-note { color: var(--text-secondary); }
 .settle-cell { display: inline-flex; align-items: center; gap: 4px; }
 .settle-btn { margin-left: 2px; }
 .photos-block { margin-bottom: 12px; }
