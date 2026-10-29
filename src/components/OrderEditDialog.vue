@@ -127,12 +127,12 @@
         <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
       </el-form-item>
       <el-form-item label="整单优惠金额">
-        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="reconcile('discount')" />
+        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="markAnchor('discount')" />
       </el-form-item>
       <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只能持平或调高（下限＝已记现金流水，调高即补一笔），要减少走「记录付款/收款」弹窗逐笔改 -->
       <el-form-item :label="`实${payWord}金额`">
         <template v-if="editingId">
-          <el-input-number v-model="form.paidNow" :min="cashFloor" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
+          <el-input-number v-model="form.paidNow" :min="cashFloor" :max="cashCeil" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="markAnchor('paid')" />
           <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
           <div v-if="Number(form.depositPay) > 0" class="pay-now-row" style="margin-top:6px">
             <el-input-number :model-value="Number(form.depositPay)" :min="0" :precision="2" :controls="false" style="width:150px" disabled />
@@ -145,7 +145,7 @@
           </div>
         </template>
         <template v-else>
-          <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`本次实${payWord}金额（现金）`" @input="reconcile('paid')" />
+          <el-input-number v-model="form.paidNow" :min="0" :max="cashCeil" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`本次实${payWord}金额（现金）`" @input="markAnchor('paid')" />
           <span class="pay-now-hint">现金{{ payWord }}款</span>
           <div class="calc-hint" style="margin-top:4px">
             填「实{{ payWord }}金额」保存即记一笔{{ payWord }}款；选「结清」时与优惠金额联动，未付款必须为 0。
@@ -153,7 +153,7 @@
         </template>
       </el-form-item>
       <el-form-item v-if="!editingId" :label="`${depositLabel}抵扣`">
-        <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`${depositLabel}抵扣金额`" @input="reconcile('deposit')" />
+        <el-input-number v-model="form.depositPay" :min="0" :max="deductMax" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`${depositLabel}抵扣金额`" @input="markAnchor('deposit')" />
         <el-button type="info" plain size="small" :disabled="deductMax <= 0" @click="fullDeduct">全额抵扣</el-button>
         <span class="deposit-avail">可用 {{ depositLabel }} ¥{{ depositAvailable.toFixed(2) }}</span>
         <div v-if="Number(form.depositPay) > 0" class="deposit-used" style="margin-top:4px">
@@ -405,6 +405,23 @@ watch(() => form.depositPay, (v) => {
 // 锚点 anchor：'paid'（实收为基准→优惠补差）/ 'deposit'（抵扣为基准→优惠补差）/ 'discount'（优惠为基准→实收补差）。
 // 仅结清模式生效；挂账模式三项独立、互不联动。计算入口统一走 account.settleBalance，便于单测。
 const settleAnchor = ref('paid')
+// el-input-number 的 input 事件比 v-model 先跑一步（Element Plus 里 handleInput 先 emit('input')
+// 再 emit('update:modelValue')），在 @input 里直接算补差读到的是**上一个值**：
+// 例如实收框里 7 → 点结清（优惠补成 68）→ 把 7 改成 75，联动仍按 7 算，优惠停在 68，
+// 于是出现「实收 75 / 应收 7 / 未收 0」这种自相矛盾，保存还会撞红线①。
+// 所以这里只记锚点，等一个 tick 让 v-model 落地后再补差。
+function markAnchor(anchor) {
+  settleAnchor.value = anchor
+  nextTick(() => reconcile())
+}
+// 结清模式下实收/实付的上限 = 折后金额 − 已用抵扣：结清单据多收的部分只能变成优惠，
+// 收不进钱却把金额填大，保存必被红线①拦下，不如把输入框直接封顶。
+// 挂账模式不封顶（多收可转预存，由红线提示）；上限低于下限时也不封顶（历史超付单据不能被夹死）。
+const cashCeil = computed(() => {
+  if (form.settle !== '结清') return undefined
+  const ceil = round2(discountedTotal.value - Number(form.depositPay || 0))
+  return ceil >= cashFloor.value ? ceil : undefined
+})
 function reconcile(anchor) {
   if (anchor) settleAnchor.value = anchor
   if (form.settle !== '结清') return
