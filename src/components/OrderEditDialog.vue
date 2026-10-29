@@ -129,17 +129,19 @@
       <el-form-item label="整单优惠金额">
         <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="reconcile('discount')" />
       </el-form-item>
-      <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：现金实收/实付可直接改（抵扣部分沿用原单，改抵扣走「付款/收款」弹窗） -->
+      <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只能持平或调高（下限＝已记现金流水，调高即补一笔），要减少走「记录付款/收款」弹窗逐笔改 -->
       <el-form-item :label="`实${payWord}金额`">
         <template v-if="editingId">
-          <el-input-number v-model="form.paidNow" :min="0" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
+          <el-input-number v-model="form.paidNow" :min="cashFloor" :precision="2" :controls="false" style="width:150px" v-select-on-focus :placeholder="`现金实${payWord}金额`" @input="reconcile('paid')" />
           <span class="pay-now-hint">现金{{ payWord }}款（原 {{ payCount }} 笔流水）</span>
           <div v-if="Number(form.depositPay) > 0" class="pay-now-row" style="margin-top:6px">
             <el-input-number :model-value="Number(form.depositPay)" :min="0" :precision="2" :controls="false" style="width:150px" disabled />
             <span class="pay-now-hint">已用{{ depositLabel }}抵扣 ¥{{ Number(form.depositPay).toFixed(2) }}（改抵扣请走「{{ payWord }}款」弹窗）</span>
           </div>
           <div class="calc-hint" style="margin-top:4px">
-            编辑单可直接修改现金实{{ payWord }}金额（抵扣部分沿用原单，改抵扣请走「{{ payWord }}款」弹窗）；选「结清」时与优惠金额联动，未付款必须为 0。
+            已记{{ payWord }}款流水 ¥{{ cashFloor.toFixed(2) }} 是这一栏的<b>下限</b>：这里只能持平或调高（调高即补一笔{{ payWord }}款），
+            要减少请到详情页「记录{{ payWord }}款」里逐笔删改——历史流水各自对应已开的资金凭证，编辑弹窗不会替你改。
+            选「结清」时与优惠金额联动，未付款必须为 0。
           </div>
         </template>
         <template v-else>
@@ -291,6 +293,16 @@ const payCount = computed(() => ensurePayments(editOrder.value, sumField.value).
 // 累计实付/实收（实时跟随表单）：编辑单取表单当前现金实付+抵扣（用户可直接改），新增单取本次填的「现金+抵扣」
 const sumPaid = computed(() => round2(Number(form.paidNow || 0) + Number(form.depositPay || 0)))
 
+// 编辑单「实付/实收金额」的下限 = 已记的现金流水合计（不含 fromDeposit 抵扣笔）。
+// 调低这个框并不会改写历史流水（每笔流水各自对应已开的资金凭证，保存时只会发一条
+// 「未生效」的 warning），所以与其让用户填完被弹回，不如直接把下限钉在已记金额上：
+// 这里只能持平或调高（调高＝补一笔），要减少请到「记录收款/付款」里逐笔删改。
+const cashFloor = computed(() => round2(
+  ensurePayments(editOrder.value, sumField.value)
+    .filter(p => !p.fromDeposit)
+    .reduce((s, p) => s + Number(p.amount || 0), 0)
+))
+
 // 预付款（采购）/ 预收款（销售）：当前所选往来单位的可用余额
 const depositLabel = computed(() => (isPurchase.value ? '预付款' : '预收款'))
 const depositAvailable = computed(() => {
@@ -397,13 +409,19 @@ function reconcile(anchor) {
   if (anchor) settleAnchor.value = anchor
   if (form.settle !== '结清') return
   const gross = round2(totalAmount.value * effRate.value)
-  const { discount: d, paidNow: p } = settleBalance({
+  let { discount: d, paidNow: p } = settleBalance({
     gross,
     paidNow: form.paidNow,
     depositPay: form.depositPay,
     discount: form.discount,
     anchor: settleAnchor.value
   })
+  const floor = cashFloor.value
+  if (p < floor) {
+    // 已记流水不能凭空减掉：实付钉在下限上，优惠按剩余量重算，仍保持「未付款 = 0」
+    p = floor
+    d = Math.max(0, round2(gross - floor - Number(form.depositPay || 0)))
+  }
   if (Number(form.discount || 0) !== d) form.discount = d
   if (Number(form.paidNow || 0) !== p) form.paidNow = p
 }

@@ -64,7 +64,9 @@ test('分分钱尾差、全退还原净额', () => {
   assert.equal(returnableLines(s.sales[0], s.sales)[0].available, 0)
 })
 test('两张历史退款补凭证幂等、原金额库存不改', () => {
-  const s = fixture(); s.purchases = [8618, 302].map((a, i) => ({ id: `T2026051912000000${i + 1}`, supplier: '供应商甲', date: '2026-05-19', total: -a, paid: -a, settle: '结清', items: [{ code: 'P00001', qty: -1, total: -a }] }))
+  // 单据编码统一后（4f5f243），这两张历史退货单的 id 已从 T2026051912000000x 改名为 CT-20260519-000x，
+  // backfillHistoricalRefunds 按新 id 定位，测试夹具必须跟着改名，否则命中「历史退货单缺失」分支。
+  const s = fixture(); s.purchases = [8618, 302].map((a, i) => ({ id: `CT-20260519-000${i + 1}`, supplier: '供应商甲', date: '2026-05-19', total: -a, paid: -a, settle: '结清', items: [{ code: 'P00001', qty: -1, total: -a }] }))
   const result = backfillHistoricalRefunds(s)
   assert.equal(result.codes.length, 2); assert.equal(result.state.refunds.reduce((n, v) => n + v.total, 0), 8920)
   assert.equal(backfillHistoricalRefunds(result.state).codes.length, 0)

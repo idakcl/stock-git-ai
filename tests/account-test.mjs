@@ -7,7 +7,8 @@
 import assert from 'node:assert/strict'
 import {
   grossOf, payableOf, receivableOf, netOf, paidSumOf, receivedSumOf,
-  overpaidOf, settleActionOf, isSettledOf
+  overpaidOf, settleActionOf, isSettledOf, settleBalance,
+  discountRatesOf, effectiveRateOf, discountRatesTextOf, discountAmountOf, discountedTotalOf
 } from '../src/utils/account.js'
 
 let pass = 0, fail = 0
@@ -84,6 +85,76 @@ await t('金额已平但含抹零优惠：给出「改挂账」', () => {
 })
 await t('仍有未付：给出「改结清」', () => {
   assert.equal(settleActionOf(P(100, [{ amount: 40 }]), 'payable'), 'settle')
+})
+
+console.log('\nsettleBalance：结清联动（此前仓库内无覆盖）')
+await t("anchor='paid'：优惠补差，实付原样返回", () => {
+  assert.deepEqual(settleBalance({ gross: 100, paidNow: 85, anchor: 'paid' }), { discount: 15, paidNow: 85 })
+})
+await t("anchor='paid'：抵扣计入凑够的钱，但返回的 paidNow 只含现金", () => {
+  // 毛额 100 = 现金 50 + 抵扣 30 + 抹零 20
+  assert.deepEqual(settleBalance({ gross: 100, paidNow: 50, depositPay: 30, anchor: 'paid' }), { discount: 20, paidNow: 50 })
+})
+await t("anchor='discount'：实付补差 = 毛额 − 优惠 − 抵扣", () => {
+  assert.deepEqual(settleBalance({ gross: 100, discount: 10, depositPay: 20, anchor: 'discount' }), { discount: 10, paidNow: 70 })
+})
+await t('超额一律夹 0，不反向制造欠款', () => {
+  assert.deepEqual(settleBalance({ gross: 100, paidNow: 120, anchor: 'paid' }), { discount: 0, paidNow: 120 })
+  assert.deepEqual(settleBalance({ gross: 100, discount: 150, anchor: 'discount' }), { discount: 150, paidNow: 0 })
+})
+await t('非法/缺失/负数输入按 0 处理', () => {
+  assert.deepEqual(settleBalance({}), { discount: 0, paidNow: 0 })
+  assert.deepEqual(settleBalance({ gross: 'abc', paidNow: null, depositPay: undefined, discount: NaN }), { discount: 0, paidNow: 0 })
+  assert.deepEqual(settleBalance({ gross: -50, paidNow: 10, anchor: 'paid' }), { discount: 0, paidNow: 10 })
+})
+await t('与 grossOf 联动：折后毛额补差后未付恰为 0', () => {
+  const base = { id: 'C3', date: '2026-02-02', total: 100, discountRates: [0.9], payments: [{ amount: 85 }] }
+  const { discount } = settleBalance({ gross: discountedTotalOf(base), paidNow: 85, anchor: 'paid' })
+  assert.equal(discount, 5)
+  const settled = { ...base, discount }
+  assert.equal(grossOf(settled), 85)
+  assert.equal(payableOf(settled), 0)
+  assert.equal(overpaidOf(settled, 'payable'), 0)
+})
+
+console.log('\n折扣链：旧标量回退、非法剔除、连乘与展示')
+await t('旧单只有标量 discountRate 时按单级链生效，不丢折扣', () => {
+  assert.deepEqual(discountRatesOf({ discountRate: 0.85 }), [0.85])
+  assert.equal(effectiveRateOf({ discountRate: 0.85 }), 0.85)
+  assert.equal(discountedTotalOf({ total: 200, discountRate: 0.85 }), 170)
+})
+await t('折扣链剔除非法项（≤0 / >1 / NaN），空数组与 0 视为无折扣', () => {
+  assert.deepEqual(discountRatesOf({ discountRates: [0.9, 0, 1.5, 'abc', 0.8] }), [0.9, 0.8])
+  assert.deepEqual(discountRatesOf({}), [])
+  assert.deepEqual(discountRatesOf({ discountRates: [] }), [])
+  assert.deepEqual(discountRatesOf({ discountRate: 0 }), [])
+  assert.equal(effectiveRateOf({ discountRates: [0.9, 0, 1.5] }), 0.9)
+})
+await t('等效折扣率连乘；无折扣为 1', () => {
+  assert.equal(effectiveRateOf({}), 1)
+  assert.equal(effectiveRateOf({ discountRates: [0.9, 0.9] }), 0.81)
+})
+await t('折扣率文本：无折扣空串 / 单级 / 多级带等效', () => {
+  assert.equal(discountRatesTextOf({}), '')
+  assert.equal(discountRatesTextOf({ discountRate: 0.9 }), '×0.90')
+  assert.equal(discountRatesTextOf({ discountRates: [0.9, 0.9, 0.8] }), '×0.90 ×0.90 ×0.80 = ×0.65')
+})
+await t('折扣金额与折后金额互补：合计 = 折后 + 折扣额', () => {
+  const o = { total: 100, discountRates: [0.9, 0.9] }
+  assert.equal(discountedTotalOf(o), 81)
+  assert.equal(discountAmountOf(o), 19)
+  assert.equal(discountedTotalOf(o) + discountAmountOf(o), 100)
+})
+await t('长折扣链末位收敛：1000 × 0.1³ 恰为 1（不留浮点尘）', () => {
+  assert.equal(discountedTotalOf({ total: 1000, discountRates: [0.1, 0.1, 0.1] }), 1)
+  assert.equal(discountAmountOf({ total: 1000, discountRates: [0.1, 0.1, 0.1] }), 999)
+})
+await t('红字单据：折后仍为负、折扣额夹 0，且不参与整单优惠抵减', () => {
+  const ret = { total: -100, discountRates: [0.9], discount: 5, type: 'purchase-return' }
+  assert.equal(discountedTotalOf(ret), -90)
+  assert.equal(discountAmountOf(ret), 0)
+  assert.equal(grossOf(ret), -90)
+  assert.equal(overpaidOf({ ...ret, payments: [{ amount: -90 }] }, 'payable'), 0)
 })
 
 console.log(`\n${pass} passed, ${fail} failed`)

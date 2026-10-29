@@ -12,7 +12,7 @@
         <span class="logo-dot">进</span>进销存
       </div>
       <div class="header-right">
-        <span class="build-tag">构建 {{ buildTime }}</span>
+        <span class="build-tag">构建 {{ buildStamp }}</span>
         <el-button text class="logout-btn" @click="onLogout">
           <el-icon><SwitchButton /></el-icon>
           <span class="logout-text">退出登录</span>
@@ -34,7 +34,7 @@
             <span class="cn-clock-label">北京时间</span>
             <span class="cn-clock-time">{{ clock }}</span>
           </div>
-          <div class="build-info">构建 {{ buildTime }}</div>
+          <div class="build-info">构建 {{ buildStamp }}</div>
         </div>
       </el-aside>
       <el-main class="main">
@@ -55,7 +55,7 @@
           <span class="cn-clock-label">北京时间</span>
           <span class="cn-clock-time">{{ clock }}</span>
         </div>
-        <div class="build-info">构建 {{ buildTime }}</div>
+        <div class="build-info">构建 {{ buildStamp }}</div>
       </div>
     </el-drawer>
   </el-container>
@@ -74,7 +74,8 @@ import { cnDateTime } from './utils/time.js'
 const router = useRouter()
 
 const drawer = ref(false)
-const buildTime = __BUILD_TIME__
+// 左下角版本标识：由 vite.config.js 注入「短 sha · 提交时间」，同一提交重复构建字节一致
+const buildStamp = __BUILD_TIME__
 // 侧边栏左下角时钟：固定北京时间（UTC+8），不随设备时区变化
 const clock = ref(cnDateTime())
 let clockTimer = 0
