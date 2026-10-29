@@ -63,6 +63,7 @@
           <el-select
             v-model="form.suppliers"
             multiple filterable clearable
+            :reserve-keyword="false"
             placeholder="可多选，留空表示暂未指定"
             style="width:100%"
           >

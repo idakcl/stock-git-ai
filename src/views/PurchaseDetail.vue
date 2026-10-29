@@ -13,6 +13,7 @@
             <el-checkbox v-if="!priceHidden" v-model="showCostCol" class="opt-cb">显示进价</el-checkbox>
             <el-checkbox v-if="!priceHidden" v-model="showHistory" class="opt-cb">展开历史价与商品档案</el-checkbox>
             <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏价格·只读）</el-checkbox>
+            <el-checkbox v-model="showPartyInfo" class="opt-cb">显示供应商信息详情</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(purchase) || purchases.some(o => o.sourceOrderId === purchase.id)" @click="editDialog = true">编辑</el-button>
@@ -311,6 +312,9 @@ const detailItems = computed(() => {
 // ---- 导出 CSV / 打印(A4) ----
 // 「隐藏单价与金额」勾选后剔除所有价格列，只留商品与数量：用于不带价对账场景
 const hidePrice = ref(false)
+// 打印/导出是否带供应商联系方式（联系人、电话、地址）。默认不带：单据打印出去多半是给外部的，
+// 联系方式属于供应商档案，不该跟着一张对账单一起流出去；要留档时再勾上
+const showPartyInfo = ref(false)
 // 采购单详情默认不展示售价（商品档案当前卖价），需要时勾选「显示售价」查看
 const showSellPrice = ref(false)
 // 历史采购单默认只看「本次数据」：本单成交价已在「本次单价」列，档案进价属重复信息，
@@ -348,18 +352,17 @@ const exportColumns = computed(() => {
 })
 // 打印页副标题：商品行数摘要（完整单头信息见下方 fields 字段区，避免重复）
 const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品`)
-// 单头信息：供应商档案全量信息 + 单据关键字段（供应商/日期/合计/优惠/应付/实付/未付/结算状态/备注，有折扣显示折扣）。
-// 「隐藏单价与金额」勾选时同步剔除金额类字段，与明细列保持同一脱敏口径
-const AMOUNT_FIELD_LABELS = ['合计', '原价合计', '整单折扣', '优惠', '应付', '实付', '未付']
+// 单头信息：供应商 + 日期 + 单据金额与结算字段（有折扣显示折扣）。
+// 「隐藏单价与金额 / 对外查看」时剔除全部金额类字段（含折扣与折后金额），与明细列同一口径；
+// 供应商编码属于系统内部标识，打印与导出一律不带；
+// 联系人/电话/地址受「显示供应商信息详情」控制，默认不打印
+const AMOUNT_FIELD_LABELS = ['合计', '原价合计', '整单折扣', '折后金额', '优惠', '应付', '实付', '未付']
 const docHeaderFields = computed(() => {
   const o = purchase.value
   const s = (suppliers.value || []).find(x => x.name === o.supplier) || {}
   const fields = [
     ['供应商', o.supplier || '—'],
-    ['供应商编码', s.code],
-    ['联系人', s.contact],
-    ['电话', s.phone],
-    ['地址', s.address],
+    ...(showPartyInfo.value ? [['联系人', s.contact], ['电话', s.phone], ['地址', s.address]] : []),
     ['日期', o.date],
     ['合计', `¥${Number(o.total || 0).toFixed(2)}`]
   ]

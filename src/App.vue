@@ -365,8 +365,20 @@ body {
      ② 可以点击（按钮、开关）→ 同色实心填充 + 白字（文字像镂空）
    色相一律沿用上面已定义的语义色，不新增颜色；禁用态按「不可点」归到 ①。 */
 
-/* ① 状态标签：el-tag 全站只做状态与类别展示，一律白底空心 */
-.el-tag { background-color: #fff !important; }
+/* ① 状态标签：el-tag 全站只做状态与类别展示，一律白底空心。
+   空心块再在内部右上角点一颗与文字同色的小圆点：白底描边的块单独看像「没上色」，
+   加一颗点之后这块的颜色到底指什么，扫一眼就清楚 */
+.el-tag { background-color: #fff !important; position: relative; padding-right: 16px; }
+.el-tag::after {
+  content: ''; position: absolute; top: 4px; right: 5px;
+  width: 5px; height: 5px; border-radius: 50%;
+  /* currentColor = 该标签的文字色，状态点多深就是描边/文字多深，不额外引入颜色 */
+  background: currentColor;
+}
+.el-tag--small { padding-right: 14px; }
+.el-tag--small::after { top: 3px; right: 4px; width: 4px; height: 4px; }
+.el-tag--large { padding-right: 19px; }
+.el-tag--large::after { top: 6px; right: 7px; width: 6px; height: 6px; }
 
 /* ② 可点按钮：Element 的 plain / text / link 默认是空心，统一改成与实心按钮同一套配色 */
 .el-button--primary.is-plain, .el-button--primary.is-text, .el-button--primary.is-link {
@@ -394,11 +406,13 @@ body {
   --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-info-light-3); --el-button-hover-border-color:var(--el-color-info-light-3);
   --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-info-dark-2); --el-button-active-border-color:var(--el-color-info-dark-2);
 }
-/* 未指定 type 的中性按钮：底与字取文字灰阶（#606266 上白字对比度达标），与 info 的浅灰区分主次 */
+/* 未指定 type 的中性按钮：以前是实心灰，但灰底和「禁用/白底灰字」在列表里挤在一起时很难分辨，
+   而且灰色看起来总像“不能点”。统一改成实心蓝（与 primary 同色同三档），
+   实心 = 可点 这条语义就不会被灰色削弱 */
 .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info) {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--text-regular); --el-button-border-color:var(--text-regular);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--text-primary); --el-button-hover-border-color:var(--text-primary);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--text-primary); --el-button-active-border-color:var(--text-primary);
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-primary); --el-button-border-color:var(--el-color-primary);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-primary-light-3); --el-button-hover-border-color:var(--el-color-primary-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-primary-dark-2); --el-button-active-border-color:var(--el-color-primary-dark-2);
 }
 /* text / link 被 Element 重置成无边框透明底小字，这里显式补上实心底与描边，并恢复三档尺寸 */
 .el-button.is-text, .el-button.is-link {
