@@ -358,6 +358,66 @@ body {
 .el-button { border-radius: var(--radius-sm) !important; font-size: var(--fs-base); }
 .el-button--small { font-size: var(--fs-sub); }
 .el-button--large { font-size: var(--fs-base); }
+
+/* ==================== 方块语义：状态=空心，可点=实心 ====================
+   全站只有两种「方块」，一眼能分清能不能按：
+     ① 只表示状态/类别（不可点）→ 白底 + 同色描边 + 同色字（空心）
+     ② 可以点击（按钮、开关）→ 同色实心填充 + 白字（文字像镂空）
+   色相一律沿用上面已定义的语义色，不新增颜色；禁用态按「不可点」归到 ①。 */
+
+/* ① 状态标签：el-tag 全站只做状态与类别展示，一律白底空心 */
+.el-tag { background-color: #fff !important; }
+
+/* ② 可点按钮：Element 的 plain / text / link 默认是空心，统一改成与实心按钮同一套配色 */
+.el-button--primary.is-plain, .el-button--primary.is-text, .el-button--primary.is-link {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-primary); --el-button-border-color:var(--el-color-primary);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-primary-light-3); --el-button-hover-border-color:var(--el-color-primary-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-primary-dark-2); --el-button-active-border-color:var(--el-color-primary-dark-2);
+}
+.el-button--success.is-plain, .el-button--success.is-text, .el-button--success.is-link {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-success); --el-button-border-color:var(--el-color-success);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-success-light-3); --el-button-hover-border-color:var(--el-color-success-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-success-dark-2); --el-button-active-border-color:var(--el-color-success-dark-2);
+}
+.el-button--warning.is-plain, .el-button--warning.is-text, .el-button--warning.is-link {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-warning); --el-button-border-color:var(--el-color-warning);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-warning-light-3); --el-button-hover-border-color:var(--el-color-warning-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-warning-dark-2); --el-button-active-border-color:var(--el-color-warning-dark-2);
+}
+.el-button--danger.is-plain, .el-button--danger.is-text, .el-button--danger.is-link {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-danger); --el-button-border-color:var(--el-color-danger);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-danger-light-3); --el-button-hover-border-color:var(--el-color-danger-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-danger-dark-2); --el-button-active-border-color:var(--el-color-danger-dark-2);
+}
+.el-button--info.is-plain, .el-button--info.is-text, .el-button--info.is-link {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-info); --el-button-border-color:var(--el-color-info);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-info-light-3); --el-button-hover-border-color:var(--el-color-info-light-3);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-info-dark-2); --el-button-active-border-color:var(--el-color-info-dark-2);
+}
+/* 未指定 type 的中性按钮：底与字取文字灰阶（#606266 上白字对比度达标），与 info 的浅灰区分主次 */
+.el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info) {
+  --el-button-text-color:#fff; --el-button-bg-color:var(--text-regular); --el-button-border-color:var(--text-regular);
+  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--text-primary); --el-button-hover-border-color:var(--text-primary);
+  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--text-primary); --el-button-active-border-color:var(--text-primary);
+}
+/* text / link 被 Element 重置成无边框透明底小字，这里显式补上实心底与描边，并恢复三档尺寸 */
+.el-button.is-text, .el-button.is-link {
+  background-color: var(--el-button-bg-color);
+  border-width: 1px; border-style: solid; border-color: var(--el-button-border-color);
+  padding: 8px 15px; height: 32px;
+}
+.el-button.is-text.el-button--small, .el-button.is-link.el-button--small { padding: 5px 11px; height: 24px; }
+.el-button.is-text.el-button--large, .el-button.is-link.el-button--large { padding: 12px 19px; height: 40px; }
+.el-button.is-text:hover:not(.is-disabled), .el-button.is-link:hover:not(.is-disabled) {
+  background-color: var(--el-button-hover-bg-color); border-color: var(--el-button-hover-border-color); color: var(--el-button-hover-text-color);
+}
+.el-button.is-text:active:not(.is-disabled), .el-button.is-link:active:not(.is-disabled) {
+  background-color: var(--el-button-active-bg-color); border-color: var(--el-button-active-border-color); color: var(--el-button-active-text-color);
+}
+/* 禁用＝不可点：不论原来什么色，一律白底空心灰字 */
+.el-button.is-disabled, .el-button:disabled {
+  background-color:#fff !important; border-color:var(--border-color) !important; color:var(--text-disabled) !important;
+}
 /* 输入类控件圆角 */
 .el-input__wrapper,
 .el-select__wrapper,

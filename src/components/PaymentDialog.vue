@@ -1,5 +1,5 @@
 <template>
-  <el-dialog v-model="visible" :title="`${kindLabel}流水 - ${order.id || ''}`" width="660" @closed="onClosed">
+  <el-dialog v-model="visible" :title="`${kindLabel}流水 - ${order.id || ''}`" width="720" @closed="onClosed">
     <div class="pay-summary">
       <span>{{ kind === 'payable' ? '应付' : '应收' }}：<b>¥ {{ due.toFixed(2) }}</b></span>
       <span>累计{{ kind === 'payable' ? '实付' : '实收' }}：<b>¥ {{ paidSum.toFixed(2) }}</b>（{{ rows.length }} 笔）</span>
@@ -10,7 +10,7 @@
 
     <el-table :data="rows" stripe max-height="280" empty-text="暂无收付款记录">
       <el-table-column type="index" label="#" width="46" />
-      <el-table-column label="时间" width="170">
+      <el-table-column label="时间" width="150">
         <template #default="{ row }">{{ fmtCNTime(row.time) || orderTimeOf(order) }}</template>
       </el-table-column>
       <el-table-column prop="amount" label="金额" width="120" align="right">
@@ -22,8 +22,8 @@
           <span v-else class="none">现金</span>
         </template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" width="130" show-overflow-tooltip />
-      <el-table-column label="操作" width="120" class-name="ops-col">
+      <el-table-column prop="remark" label="备注" width="120" show-overflow-tooltip />
+      <el-table-column label="操作" width="140" class-name="ops-col">
         <template #default="{ row, $index }">
           <el-button size="small" type="primary" link :class="{ 'is-editing': editingIndex === $index }" @click="startEdit($index)">编辑</el-button>
           <el-button size="small" type="danger" link @click="removeRow($index)">删除</el-button>

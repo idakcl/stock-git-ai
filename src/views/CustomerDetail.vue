@@ -164,7 +164,7 @@
               </template>
             </el-table-column>
             <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
-            <el-table-column label="操作" width="130" class-name="ops-col">
+            <el-table-column label="操作" width="140" class-name="ops-col">
               <template #default="{ row, $index }">
                 <el-button size="small" type="primary" link @click="openDepositEdit(row, $index)">编辑</el-button>
                 <el-button size="small" type="danger" link @click="removeDeposit($index)">删除</el-button>
