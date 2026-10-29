@@ -25,7 +25,11 @@
       <div class="table-wrap">
       <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
         <el-table-column label="单号" width="190" class-name="id-col">
-          <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
+          <template #default="{ row }">
+            <!-- 补差单是「变更明细」追加出来的正数单，跟单号长得很像退货单，必须标出来 -->
+            <router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link>
+            <span v-if="isAmend(row)" class="amend-flag" title="补差单：由原单「变更明细」追加生成">补</span>
+          </template>
         </el-table-column>
         <el-table-column label="客户" width="150">
           <template #default="{ row }">
@@ -112,6 +116,7 @@
       kind="receivable"
       :saving="saving"
       @saved="onOrderSaved"
+      @amended="refreshFromServer"
     />
 
     <PaymentDialog v-model="payDialog" :order="payOrder" kind="receivable" :deposit-balance="customerDepositBalance(payOrder)" @saved="onPaySaved" />
@@ -129,6 +134,7 @@ import { matchText } from '../utils/search'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf, settleActionOf, round2 } from '../utils/account'
 import { isReturn } from '../utils/refunds.js'
+import { isAmend } from '../utils/amend.js'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 // 资金单据联动：任何一笔实际收付款都必须落到收款单（SK-），见 utils/voucherFlow.js
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
@@ -535,4 +541,6 @@ async function remove(row) {
 .voucher-codes{color:var(--text-secondary);}
 .settle-cell{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
 .item-codes{color:var(--text-secondary);}
+/* 补差单角标：单号前缀与退货单容易混，用一个小徽章区分「追加出来的正数单」 */
+.amend-flag{display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;background:var(--color-warning);color:#fff;font-size:11px;line-height:16px;vertical-align:middle;}
 </style>

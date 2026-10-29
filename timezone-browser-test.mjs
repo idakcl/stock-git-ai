@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const { chromium } = createRequire(import.meta.url)('playwright')
 
 // 关键点：浏览器时区故意设成 UTC，验证系统仍按东八区取日期、显示时间
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, executablePath: existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined })
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'UTC' })
 await context.addInitScript(() => sessionStorage.setItem('stock.auth.token', 'isolated-test'))
 const state = {

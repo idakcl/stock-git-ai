@@ -1,6 +1,8 @@
 import { readJSON, writeJSON, readJSONWithRaw, serialize } from './github.js'
 import { readCollection, readCollectionWithRaw, writeCollection, sortOrders, SPLIT_KEYS } from './storage.js'
 import { refundTransaction } from './refunds.js'
+import { orderTransaction } from './orders.js'
+import { amendTransaction } from './amends.js'
 import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 
@@ -446,6 +448,9 @@ export async function handleApi(req, url, env) {
     if (path === '/receipts' && method === 'GET') return json(req, env, await readOptionalArray(env, 'receipts.json'))
     if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readOptionalArray(env, 'payment-vouchers.json'))
     if (path === '/refunds' && method === 'GET') return json(req, env, await readOptionalArray(env, 'refunds.json'))
+    // 订单（未过账单据）：新上线的集合，数据仓里可能还没有这个文件。
+    // 与资金单据同一处理——读失败按空集合返回，首次保存订单时由事务自动建文件。
+    if (path === '/orders' && method === 'GET') return json(req, env, await readOptionalArray(env, 'orders.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
 
@@ -520,6 +525,15 @@ export async function handleApi(req, url, env) {
       // 退款业务只接收操作指令，不允许整表覆盖退款凭证。
       if (path === '/refunds') {
         return json(req, env, await refundTransaction(env, body, derive, rebuildStock))
+      }
+      // 订单与变更同理：只接收操作指令，不做整表覆盖。
+      // 订单住在 orders.json 这个独立集合里，derive/rebuildStock 都只看 purchases+sales，
+      // 因此草稿天然不占库存、不进应收；过账时才会把那张单写进单据集合并重算派生数据。
+      if (path === '/orders') {
+        return json(req, env, await orderTransaction(env, body, derive, rebuildStock))
+      }
+      if (path === '/amends') {
+        return json(req, env, await amendTransaction(env, body, derive, rebuildStock))
       }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷

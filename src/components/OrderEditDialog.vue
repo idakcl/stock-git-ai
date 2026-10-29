@@ -4,6 +4,20 @@
        落库由父组件完成：本组件只组装 entry 并 emit('saved')，失败时弹窗保持打开便于重试 -->
   <!-- 保存中禁止误关：点遮罩/按 ESC 不会中断保存（关闭由保存结果驱动） -->
   <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+    <!-- 已动过钱的单：明细/折扣/优惠/结算状态全部锁定（表单级 disabled 会连按钮一起禁用，
+         所以这块放在 el-form 外面），要增减商品改走「变更明细」生成退货单/补差单 -->
+    <div v-if="moneyLocked" class="lock-bar">
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        :title="lockTitle"
+      />
+      <div class="lock-actions">
+        <el-button type="primary" size="small" @click="amendVisible = true">变更明细（增减商品）</el-button>
+        <span class="calc-hint">减少的商品开退货单、新增的商品开补差单，原单保持不动并可追溯。</span>
+      </div>
+    </div>
     <!-- label-width 110px：容纳「整单优惠金额」6 个字不换行（80px 会折成两行与下行挤压） -->
     <el-form :model="form" label-width="110px">
       <el-form-item :label="partyLabel">
@@ -36,7 +50,7 @@
       </el-form-item>
       <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
       <el-form-item label="结算状态">
-        <el-radio-group v-model="form.settle">
+        <el-radio-group v-model="form.settle" :disabled="moneyLocked">
           <el-radio-button label="挂账" />
           <el-radio-button label="结清" />
         </el-radio-group>
@@ -54,17 +68,20 @@
       </el-form-item>
       <el-form-item label="快速添加">
         <!-- 顶部快捷加商品：选已有商品或输入新名回车即加入下方明细，免去滚动到表格底部操作 -->
-        <el-select v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" class="quick-add-select" @change="addQuickItem">
+        <el-select v-if="!moneyLocked" v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" class="quick-add-select" @change="addQuickItem">
           <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
         </el-select>
-        <div class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</div>
+        <el-input v-else model-value="明细已锁定，请点上方「变更明细」增减商品" disabled class="quick-add-select" />
+        <div v-if="!moneyLocked" class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</div>
       </el-form-item>
-      <!-- 商品明细表：紧跟「快速添加」下方，新增商品即可在下方明细继续改数量/单价 -->
+      <!-- 商品明细表：紧跟「快速添加」下方，新增商品即可在下方明细继续改数量/单价。
+           锁定态（原单已动过钱）整表改为纯文本展示：明细改动只能走「变更明细」生成关联单 -->
       <div class="lines-scroll">
         <el-table :data="form.lines" stripe max-height="320">
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select
+                v-if="!moneyLocked"
                 v-model="row.code"
                 filterable
                 allow-create
@@ -75,29 +92,39 @@
               >
                 <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
               </el-select>
+              <span v-else>{{ row.name || row.code }}</span>
             </template>
           </el-table-column>
           <el-table-column label="数量" width="100" align="right">
-            <template #default="{ row }"><el-input-number v-model="row.qty" :min="1" size="small" v-select-on-focus /></template>
+            <template #default="{ row }">
+              <el-input-number v-if="!moneyLocked" v-model="row.qty" :min="1" size="small" v-select-on-focus />
+              <span v-else>{{ row.qty }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="单价" width="100" align="right">
-            <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus /></template>
+            <template #default="{ row }">
+              <el-input-number v-if="!moneyLocked" v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus />
+              <span v-else>{{ Number(row.price || 0).toFixed(2) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="折扣" width="100" align="right">
-            <template #default="{ row }"><el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" v-select-on-focus /></template>
+            <template #default="{ row }">
+              <el-input-number v-if="!moneyLocked" v-model="row.discountRate" :min="0" :max="1" :step="0.05" :controls="false" size="small" v-select-on-focus />
+              <span v-else>{{ lineRate(row) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="小计" width="100" align="right">
             <template #default="{ row }">
               <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineNet(row).toFixed(2) }}</span>
             </template>
           </el-table-column>
-          <el-table-column label="" width="60">
+          <el-table-column v-if="!moneyLocked" label="" width="60">
             <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
           </el-table-column>
         </el-table>
       </div>
       <div style="margin-top:8px">
-        <el-button size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1})">添加行</el-button>
+        <el-button v-if="!moneyLocked" size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1})">添加行</el-button>
         <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单下方「整单优惠」</span>
       </div>
       <div style="margin-top:12px;text-align:right">
@@ -112,22 +139,27 @@
         </div>
       </div>
       <el-form-item label="整单折扣">
+        <!-- 锁定态只展示等效折扣率，改折扣会改应收/应付，与已开凭证冲突 -->
+        <span v-if="moneyLocked" class="locked-value">{{ orderRateText || '不打折' }}（已锁定）</span>
         <!-- 多级折扣链：每级一个折扣率(0~1) 连乘生效，支持「打完9折再打9折、再打8折」这类逐级叠加 -->
-        <div class="rate-chain">
-          <div v-for="(r, i) in form.discountRates" :key="i" class="rate-row">
-            <span class="rate-idx">第 {{ i + 1 }} 级</span>
-            <el-input-number v-model="form.discountRates[i]" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:120px" v-select-on-focus />
-            <el-button link type="danger" size="small" @click="removeRate(i)">删除</el-button>
+        <template v-else>
+          <div class="rate-chain">
+            <div v-for="(r, i) in form.discountRates" :key="i" class="rate-row">
+              <span class="rate-idx">第 {{ i + 1 }} 级</span>
+              <el-input-number v-model="form.discountRates[i]" :min="0" :max="1" :step="0.01" :precision="2" :controls="false" style="width:120px" v-select-on-focus />
+              <el-button link type="danger" size="small" @click="removeRate(i)">删除</el-button>
+            </div>
+            <el-button size="small" type="primary" plain @click="addRate">+ 添加一级折扣</el-button>
           </div>
-          <el-button size="small" type="primary" plain @click="addRate">+ 添加一级折扣</el-button>
-        </div>
-        <div class="calc-hint" style="margin-top:4px">
-          支持多级折扣：每级 0~1（1＝不打折，0.9＝九折），各级连乘。例如 0.9 → 0.9 → 0.8 等效 6.5 折；按比例作用于单据合计（在「整单优惠金额」之前）。全部删空即不打折。
-        </div>
-        <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
+          <div class="calc-hint" style="margin-top:4px">
+            支持多级折扣：每级 0~1（1＝不打折，0.9＝九折），各级连乘。例如 0.9 → 0.9 → 0.8 等效 6.5 折；按比例作用于单据合计（在「整单优惠金额」之前）。全部删空即不打折。
+          </div>
+          <div v-if="orderRateText" class="rate-eff">累计等效折扣：{{ orderRateText }}</div>
+        </template>
       </el-form-item>
       <el-form-item label="整单优惠金额">
-        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus @input="markAnchor('discount')" />
+        <el-input-number v-model="form.discount" :min="0" :precision="2" :controls="false" style="width:200px" v-select-on-focus :disabled="moneyLocked" @input="markAnchor('discount')" />
+        <span v-if="moneyLocked" class="locked-value" style="margin-left:10px">（已锁定）</span>
       </el-form-item>
       <!-- 新增单：直接填本次实付/实收金额，并可用预付款/预收款支付；编辑单：只能持平或调高（下限＝已记现金流水，调高即补一笔），要减少走「记录付款/收款」弹窗逐笔改 -->
       <el-form-item :label="`实${payWord}金额`">
@@ -176,6 +208,15 @@
       <el-button @click="visible = false">取消</el-button>
       <el-button type="primary" :loading="saving || emitting" @click="save">{{ saveLabel }}</el-button>
     </template>
+    <!-- 变更明细：嵌在这里，销售/采购两个列表页与两个详情页四处调用点自动全部继承 -->
+    <OrderAmendDialog
+      v-model="amendVisible"
+      :order="editOrder"
+      :list="list"
+      :items="items"
+      :kind="amendKind"
+      @amended="onAmended"
+    />
   </el-dialog>
 </template>
 
@@ -186,6 +227,8 @@ import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
+import OrderAmendDialog from './OrderAmendDialog.vue'
+import { moneyTouched } from '../utils/amend.js'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
 
@@ -205,7 +248,7 @@ const props = defineProps({
   // 父级保存锁：配合按钮 loading，防止双击重复提交（会生成两张同内容单据、库存翻倍）
   saving: { type: Boolean, default: false }
 })
-const emit = defineEmits(['update:modelValue', 'saved'])
+const emit = defineEmits(['update:modelValue', 'saved', 'amended'])
 
 // ---- 由 kind 派生的差异配置 ----
 const isPurchase = computed(() => props.kind === 'payable')
@@ -218,6 +261,8 @@ const sumField = computed(() => (isPurchase.value ? 'paid' : 'received'))
 const title = computed(() => (editingId.value ? `编辑${isPurchase.value ? '采购单' : '销售单'}` : (isPurchase.value ? '采购入库' : '销售出库')))
 const saveLabel = computed(() => (isPurchase.value ? '保存入库' : '保存出库'))
 const bizWord = computed(() => (isPurchase.value ? '采购' : '销售'))
+// 变更/退款链路口径是 sale|purchase（本组件的 kind 是 receivable|payable），这里做一次映射
+const amendKind = computed(() => (isPurchase.value ? 'purchase' : 'sale'))
 
 const visible = computed({
   get: () => props.modelValue,
@@ -232,6 +277,15 @@ const photoKey = ref(0)
 const editingId = ref('')
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
+// 变更明细弹窗：原单已动过钱时，明细只能走它生成退货单/补差单
+const amendVisible = ref(false)
+// 变更成功后两层都关掉：原单本身没被改，但它所在的「单族」金额已经变了
+// （净成交、未收/未付都会带上新的退货单/补差单），留着旧表单容易基于过期数字点保存。
+function onAmended(result) {
+  amendVisible.value = false
+  visible.value = false
+  emit('amended', result)
+}
 const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRates:[], paidNow:0, depositPay:0, lines:[] })
 // 历史销售价改为按需接口，不再随 items.json 下发；打开弹窗时取一次，
 // 用于「该客户最近一次成交价」带出单价（未取到则退回分级售价/当前售价）
@@ -289,6 +343,15 @@ watch(() => props.modelValue, async (open) => {
 
 // 编辑中的原始单据（用于展示累计实付/实收，实收实付不在表单里改，统一走流水）
 const editOrder = computed(() => (editingId.value ? (props.list || []).find(o => o.id === editingId.value) : null) || {})
+// 原单是否已动过钱：动过就不能再原地改明细/折扣/优惠/结算状态——每一笔已记收付款流水都对应
+// 一张已开的资金凭证，把金额改小等于凭空抹掉一笔真实进账。此时明细交给「变更明细」：
+// 减少的商品生成退货单、新增的商品开补差单，原单不动。判据与服务端共用 utils/amend.js。
+// 另一种锁定原因是本单已经有下级单（退货/补差按「原单行索引」定位商品行，明细一改索引就错位）。
+const hasChildren = computed(() => !!editingId.value && (props.list || []).some(o => o.sourceOrderId === editingId.value))
+const moneyLocked = computed(() => !!editingId.value && (hasChildren.value || moneyTouched(editOrder.value, props.kind)))
+const lockTitle = computed(() => (hasChildren.value
+  ? '这张单已经生成过退货单 / 补差单，明细与金额不能原地修改，否则下级单会指向错误的商品行。'
+  : '这张单已记收付款流水：明细、折扣、优惠与结算状态已锁定，否则金额会与已开的收付款凭证对不上账。'))
 const payCount = computed(() => ensurePayments(editOrder.value, sumField.value).length)
 // 累计实付/实收（实时跟随表单）：编辑单取表单当前现金实付+抵扣（用户可直接改），新增单取本次填的「现金+抵扣」
 const sumPaid = computed(() => round2(Number(form.paidNow || 0) + Number(form.depositPay || 0)))
@@ -670,6 +733,10 @@ async function save() {
 <style scoped>
 /* label 不换行：110px 下「整单优惠金额」6 字单行显示，两个字段各自独立一行 */
 :deep(.el-form-item__label){white-space:nowrap;}
+/* 资金锁定提示条：置于 el-form 之外，否则表单级禁用会连带「变更明细」按钮一起灰掉 */
+.lock-bar{margin:-8px 0 14px;}
+.lock-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;}
+.locked-value{color:var(--text-regular);font-size:var(--fs-table);}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 /* 快速添加选择框撑满表单内容区，避免 300px 硬宽在窄弹窗下右侧溢出 */
 .quick-add-select{width:100%;max-width:100%;}

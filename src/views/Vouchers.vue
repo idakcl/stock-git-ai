@@ -116,6 +116,8 @@
           <el-table-column label="关联采购 / 销售单" min-width="210" show-overflow-tooltip>
             <template #default="{ row }">
               <router-link v-if="row.orderId && ['sale', 'purchase'].includes(row.orderType)" :to="{ path: `${row.orderType === 'sale' ? '/sale/' : '/purchase/'}${encodeURIComponent(row.orderId)}` }" class="link" :class="{ 'return-code': isReturnId(row.orderId) }">{{ row.orderType === 'sale' ? '销售单' : '采购单' }} · {{ row.orderId }}</router-link>
+              <!-- 订单订金：订金是在「还没过账」的阶段收的，关联的是订单号，跳订单页并带上单号筛出来 -->
+              <router-link v-else-if="row.orderId && row.orderType === 'order'" :to="{ path: '/orders', query: { kw: row.orderId } }" class="link">订单 · {{ row.orderId }}</router-link>
               <span v-else class="none" :class="{ 'return-code': isReturnId(row.orderId) }">{{ row.orderId || row.note || '无关联采购 / 销售单（纯资金业务）' }}</span>
             </template>
           </el-table-column>
@@ -249,6 +251,7 @@ function categoryTagType(cat) {
   if (cat === 'deposit-recharge') return 'warning'
   if (cat === 'deposit-over') return 'info'
   if (cat === 'deposit-deduct') return 'success'
+  if (cat === 'deposit') return 'warning'
   return ''
 }
 

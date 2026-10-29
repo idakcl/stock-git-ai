@@ -5,6 +5,7 @@ import Suppliers from './views/Suppliers.vue'
 import Customers from './views/Customers.vue'
 import Purchases from './views/Purchases.vue'
 import Sales from './views/Sales.vue'
+import Orders from './views/Orders.vue'
 import Stock from './views/Stock.vue'
 import Report from './views/Report.vue'
 import Receivables from './views/Receivables.vue'
@@ -30,6 +31,7 @@ const routes = [
   { path: '/purchase/:id', component: PurchaseDetail },
   { path: '/sales', component: Sales },
   { path: '/sale/:id', component: SalesDetail },
+  { path: '/orders', component: Orders },
   { path: '/stock', component: Stock },
   { path: '/report', component: Report },
   { path: '/receivables', component: Receivables },

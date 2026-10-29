@@ -39,6 +39,16 @@
       </div>
     </el-card>
 
+    <!-- 待过账订单：订单住在 orders.json，不占库存也不进往来账，
+         不提醒就容易被忘掉（客户钱都收了单还没开），所以看板上只放这一个数字 -->
+    <el-card v-if="pendingOrders.length" class="orders-card">
+      <div class="orders-row">
+        <b>待过账订单 {{ pendingOrders.length }} 张</b>
+        <span class="orders-hint">订金合计 ¥{{ pendingDeposit.toFixed(2) }} · 这些订单还没生成单据，不占库存、不计应收/应付</span>
+        <el-button size="small" type="primary" plain @click="$router.push('/orders')">去处理</el-button>
+      </div>
+    </el-card>
+
     <el-card>
       <template #header><b>{{ periodTitle }}采购单汇总（{{ filteredPurchases.length }} 张）</b></template>
       <div class="filter-row">
@@ -154,6 +164,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderTimeOf } from '../utils/time.js'
 import { isReturn } from '../utils/refunds.js'
+import { orderDepositSum, DRAFT } from '../utils/orders.js'
 
 const PAGE_SIZE = 20
 
@@ -174,6 +185,9 @@ const items = ref([])
 const costMap = ref({})
 const lowStock = ref([])
 const keyword = ref('')
+// 待过账订单（草稿）：看板只提醒这一件事，不与本期时间筛选联动——
+// 订单本来就没有业务日期归属，按时间段过滤反而会出现「看板说 0 张、订单页一堆」的矛盾
+const pendingOrders = ref([])
 
 const quickList = [
   { key: 'today', label: '今日' },
@@ -246,6 +260,8 @@ const profit = computed(() => {
   return money(saleTotal.value - cost)
 })
 const filteredLowStock = computed(() => lowStock.value.filter(i => matchText(keyword.value, i.code, i.name)))
+// 待过账订单里已收的订金：这是「钱已经动了、单还没开」的风险提示，值得单独看一眼
+const pendingDeposit = computed(() => money(pendingOrders.value.reduce((s, o) => s + orderDepositSum(o), 0)))
 
 // 表格底部合计：基于「全部筛选结果」，不受分页影响
 const makeSummary = (rowsGetter) => ({ columns }) => {
@@ -277,13 +293,15 @@ async function saveWarning(row, value) {
 
 onMounted(async () => {
   try {
-    const [itemList, purchaseList, saleList, stock] = await Promise.all([
-      api.getItems(), api.getPurchases(), api.getSales(), api.getStock()
+    const [itemList, purchaseList, saleList, stock, orderList] = await Promise.all([
+      api.getItems(), api.getPurchases(), api.getSales(), api.getStock(), api.getOrders().catch(() => [])
     ])
     items.value = itemList || []
     purchases.value = purchaseList || []
     sales.value = saleList || []
     stats.itemCount = (itemList || []).length
+    // 老库里还没有 orders.json 时后端返回空数组，看板这条提示自然不显示
+    pendingOrders.value = (orderList || []).filter(o => o.status === DRAFT)
 
     const stockObj = stock && !Array.isArray(stock) ? stock : {}
     const cm = {}
@@ -309,6 +327,9 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.orders-card { margin-top: 16px; }
+.orders-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.orders-hint { color: var(--text-secondary); font-size: var(--fs-sub); }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; }
 .filter-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
 .filter-label { color:var(--text-regular); font-size:var(--fs-base); }

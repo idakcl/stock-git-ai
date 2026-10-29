@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const { chromium } = createRequire(import.meta.url)('playwright')
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, executablePath: existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined })
 const context = await browser.newContext({ viewport: { width: 1280, height: 1000 } })
 await context.addInitScript(() => sessionStorage.setItem('stock.auth.token', 'isolated-test'))
 const fixture = () => ({

@@ -148,6 +148,29 @@ export const api = {
     for (const path of ['/refunds', '/sales', '/purchases', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
     return result
   },
+  // 订单（未过账单据）：住在独立的 orders.json，不进库存、不进应收，随便改随便删。
+  // 写接口只接收操作指令（save/deposit/post/unpost/delete），不接受整表覆盖 ——
+  // 过账会真正生成销售/采购单，因此服务端是一次 git 提交把单据、库存、凭证、日志一起写下去。
+  getOrders: () => cachedGet('/orders'),
+  orderOperation: async (operation) => {
+    const result = await request('/orders', { method: 'POST', body: JSON.stringify(operation) })
+    invalidate('/orders')
+    // 订金会开收款单/付款单（SK-/FK-），两类凭证都失效，免得资金页看到旧账
+    invalidate('/receipts')
+    invalidate('/payment-vouchers')
+    // 只有过账/撤销过账会增删单据，才需要连带失效单据与派生数据缓存
+    if (operation.action === 'post' || operation.action === 'unpost') {
+      for (const path of ['/sales', '/purchases', '/stock', '/items', '/customers', '/suppliers', '/purchase-history', '/sale-history']) invalidate(path)
+    }
+    return result
+  },
+  // 单据变更：原单不动，减少的商品生成退货单、增加的商品生成补差单（一次提交）。
+  // requestId 由调用方生成并在失败重试时复用，服务端据此幂等，绝不重复生成两张单。
+  amendOrder: async (operation) => {
+    const result = await request('/amends', { method: 'POST', body: JSON.stringify(operation) })
+    for (const path of ['/sales', '/purchases', '/refunds', '/receipts', '/payment-vouchers', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
+    return result
+  },
   getPurchases: () => cachedGet('/purchases'),
   savePurchases: async (purchases) => {
     const r = await request('/purchases', { method: 'POST', body: JSON.stringify({ purchases }) })

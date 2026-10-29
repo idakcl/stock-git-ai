@@ -15,11 +15,13 @@ import { todayCN } from './time.js'
 //   deposit-recharge 预存/预付充值（无关联单号）
 //   deposit-over   超额收/付款转存预存款/预付款（无关联单号）
 //   deposit-deduct 用预存款/预付款抵扣货款的划转（关联单号，资金从预付款余额划出）
+//   deposit        订单阶段收/付的订金（关联订单号，此时还没有采购/销售单）
 export const VOUCHER_CATEGORY = {
   normal: '收付款',
   'deposit-recharge': '预存预付充值',
   'deposit-over': '超额转存',
-  'deposit-deduct': '预存款抵扣'
+  'deposit-deduct': '预存款抵扣',
+  deposit: '订单订金'
 }
 
 // 把客户预存款 / 供应商预付款流水逐条对上资金单据编号（供详情页「关联收付款单据」列展示）。

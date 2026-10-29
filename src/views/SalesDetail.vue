@@ -16,7 +16,7 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">显示客户信息详情</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
-            <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="editDialog = true">编辑</el-button>
+            <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale)" @click="editDialog = true">编辑</el-button>
             <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
             <el-button v-if="found && !externalView" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'sale', source: isReturn(sale) ? undefined : sale.id } })">退货 / 退款</el-button>
             <el-button @click="$router.push('/sales')">返回列表</el-button>
@@ -132,6 +132,33 @@
       <template #header>退货核销（不计现金实收或优惠）</template>
       <el-table :data="sale.settlements"><el-table-column label="时间" width="170"><template #default="{ row }">{{ fmtCNTime(row.time) || row.date }}</template></el-table-column><el-table-column v-if="!priceHidden" prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
     </el-card>
+    <!-- 关联变更单：本单做过的「变更明细」会留下退货单（XT-，负数）与补差单（XA-，正数），
+         原单金额保持不动，净额由这几张单一起算出来，故必须在原单页面上看得见 -->
+    <el-card v-if="!externalView && relatedDocs.length" class="pay-card">
+      <template #header>
+        <div class="card-header">
+          <b>关联变更单（{{ relatedDocs.length }} 张）</b>
+          <span class="related-sum">变更后净成交 ¥ {{ netDeal.toFixed(2) }} · 未收 ¥ {{ netDue.toFixed(2) }}</span>
+        </div>
+      </template>
+      <div class="table-wrap">
+        <el-table :data="relatedDocs" stripe>
+          <el-table-column label="单号" min-width="190">
+            <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
+          </el-table-column>
+          <el-table-column label="类型" width="100">
+            <template #default="{ row }">{{ isAmend(row) ? '补差单' : '退货单' }}</template>
+          </el-table-column>
+          <el-table-column prop="date" label="日期" width="110" />
+          <el-table-column v-if="!priceHidden" label="金额" width="120" align="right">
+            <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
+          </el-table-column>
+          <el-table-column label="原因" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.returnReason || row.amendReason || row.remark || '—' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-card>
     <PaymentDialog v-model="payDialog" :order="sale" kind="receivable" :deposit-balance="customerDepositBalance" @saved="onPaySaved" />
 
     <!-- 就地编辑本单：与列表页「编辑」共用同一个弹窗组件（客户档案用于分级售价策略） -->
@@ -144,6 +171,7 @@
       kind="receivable"
       :saving="saving"
       @saved="onOrderSaved"
+      @amended="onAmended"
     />
 
     <!-- 轻量补照片：仅更新本单 photos 字段 -->
@@ -160,13 +188,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { isReturn } from '../utils/refunds.js'
+import { isAmend } from '../utils/amend.js'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
+import { receivableOf, grossOf, netOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -220,6 +249,16 @@ const unpaid = computed(() => receivableOf(sale.value))
 const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
 // 未收金额为 0 即显示结清；结算状态旁的改账按钮由 settleActionOf 统一判定（改结清 / 改挂账 / 不显示）
+// 单据家族：本单 + 它派生的退货/补差单；本单自己若是补差单，再把指回的原单也算进来。
+// 变更后「净成交」「未收」都必须按家族合计——原单金额不再代表这单最终成交了多少。
+const familyDocs = computed(() => {
+  const all = sales.value || []
+  const parent = sale.value.sourceOrderId ? all.filter(o => o.id === sale.value.sourceOrderId) : []
+  return [...parent, sale.value, ...all.filter(o => o.sourceOrderId === sale.value.id)]
+})
+const relatedDocs = computed(() => familyDocs.value.filter(o => o.id !== sale.value.id))
+const netDeal = computed(() => round2(familyDocs.value.reduce((s, o) => s + grossOf(o), 0)))
+const netDue = computed(() => round2(familyDocs.value.reduce((s, o) => s + netOf(o, 'receivable'), 0)))
 const settleLabel = computed(() => isSettledOf(unpaid.value, sale.value.settle) ? '结清' : '挂账')
 const settleAction = computed(() => settleActionOf(sale.value, 'receivable'))
 
@@ -512,6 +551,17 @@ async function onOrderSaved({ entry, depositDeduct, payRows }) {
   } finally { saving.value = false }
 }
 
+// 变更明细由弹窗自己落库（服务端一次提交生成退货单/补差单），这里只负责整页重拉：
+// 库存、客户往来账、销售价历史都是派生的，本地无法拼出变更后的结果
+async function onAmended() {
+  try {
+    const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])
+    sales.value = s
+    items.value = it
+    customers.value = cu || []
+  } catch { ElMessage.warning('变更已保存，但页面刷新失败，请返回列表重新进入') }
+}
+
 // 删除本单：库存与历史价由后端自动重算；删除成功后必须跳回列表，否则路由 id 失效只剩占位空单
 async function removeOrder() {
   try {
@@ -551,6 +601,7 @@ onMounted(async () => {
 
 <style scoped>
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.related-sum { color: var(--text-secondary); font-size: var(--fs-sub); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .hide-price-cb { margin-right: 4px; white-space: nowrap; }
 .opt-cb { margin-right: 4px; white-space: nowrap; }

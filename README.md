@@ -1,6 +1,8 @@
 # 进销存系统（GitHub 数据仓 + Cloudflare 部署）
 
 > **退款功能新增契约**：见 [退货与退款](docs/refunds.md)。默认退现金；`GET /api/refunds` 读凭证，`POST /api/refunds` 接收操作指令（不是整表覆盖）。退货核销使用 `settlements`，不计入优惠或现金；本文旧的普通收付款公式不适用于退货核销。
+>
+> **订单与变更新增契约**：见 [订单（草稿）与单据变更](docs/orders.md)。订单住在独立文件 `orders.json`，**不占库存、不进应收**，过账才生成正式单据（`POST /api/orders` 操作指令）；已动过钱的单据**不允许原地改明细**，增减商品走 `POST /api/amends` 生成退货单（`XT-`/`CT-`）与补差单（`XA-`/`CA-`）。
 
 单 Worker 同时托管：
 - 前端静态资源（Vite 构建产物 `dist/`，通过 `assets` 绑定 `ASSETS`）
@@ -12,8 +14,12 @@
 - `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNNN`）
 - `src/utils/voucherFlow.js` — **收付款 → 资金单据联动的唯一入口**（纯逻辑，不含 UI）
 - `src/utils/account.js` — 全站唯一账务公式（应收/未收/结清判定）
+- `src/utils/orders.js` — 订单（草稿）状态机与校验：`validateOrder` / `orderAmount` / `orderToOrderDoc` / `canUnpost` / `applyOrderOperation`（前端预览与服务端落库共用）
+- `src/utils/amend.js` — 单据变更口径：`moneyTouched` / `diffOrderLines` / `refundPreview` / `applyAmendOperation`（同上，共用一份实现）
 - `src/utils/dedupe.js` — 导入去重（前端预览与后端落库共用）
 - `api/github.js` — GitHub API 读写辅助
+- `api/tx.js` — 「读固定快照 → 纯函数算 → 一次提交发布」的事务骨架（退款 / 订单 / 变更共用）
+- `api/orders.js` / `api/amends.js` — 订单、变更两个操作接口的事务入口
 - `api/auth.js` — 登录票据（HMAC）与 CORS 白名单
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
 - `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
@@ -23,7 +29,7 @@
 
 ## 数据仓
 独立 GitHub 仓库 `stock-git-ai-data`，全部为**紧凑 JSON**（无缩进，程序读不给人读）。文件：
-`items.json / suppliers.json / customers.json / receipts.json / payment-vouchers.json / refunds.json / stock.json / logs.json`
+`items.json / suppliers.json / customers.json / receipts.json / payment-vouchers.json / refunds.json / orders.json / stock.json / logs.json`
 加上按年分片的单据：`purchases-2025.json`、`sales-2025.json`…，以及分片判据文件 `.split-yearly.json`。
 
 数据仓由 Worker 直接读写，是系统的**唯一数据源**。
@@ -84,6 +90,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/purchases` / `/sales` | 单据**全量**数组 | 含 `payments` 收付款流水 |
 | `/receipts` / `/payment-vouchers` | 资金单据**全量**数组 | 收款单 `SK-` / 付款单 `FK-`；**文件不存在时返回 `[]`**（老数据仓里可能没有这两个文件，首次开单自动创建），其余主数据缺失仍照常报错 |
 | `/stock` | `{ "P00001": { qty, cost } }` | 派生数据，只读 |
+| `/orders` | 订单数组 | **文件不存在时返回 `[]`**（见「订单（预售 / 预订）与过账」）；草稿不在 `purchases` / `sales` 里，因此不占库存、不进应收应付 |
 | `/logs` | 数组 | 最近 200 条导入/合并日志，`source` 为 `ai` 或 `merge` |
 | `/session` | `{ ok }` | 票据自检 |
 
@@ -102,6 +109,8 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/normalize` | `{}` | 全量重跑派生，修复编码/历史价/库存漂移。**幂等，改完数据仓后调一次即可** |
 | `/import` | `{"text":"<整份 JSON 的字符串>"}` | 见下方「导入」 |
 | `/import-merge` | `{"key":"items","records":[...]}` | 按主键去重后**追加**，不覆盖已有数据；`key` 可取 `items / customers / suppliers / purchases / sales / receipts / payment-vouchers`，主键为编码（档案、资金单据）或单号（单据），客户/供应商另按名称查重；返回各项计数 `{ ok, added, skippedKey, skippedName, invalid, total }` |
+| `/orders` | `{"action": "save" / "deposit" / "post" / "unpost" / "delete", …}` | **操作接口，不是整表覆盖**，请求体形状与闸门规则见 [docs/orders.md](docs/orders.md)。只有 `post` / `unpost` 才跑 `derive()` + `rebuildStock()`（存草稿、收订金不重写 200KB 的 `items.json`） |
+| `/amends` | `{"kind","requestId","sourceOrderId","party","date","reason","mode","refundLines":[{index,qty}],"amendLines":[{code,name,unit,qty,price}]}` | **操作接口**：原单不动，减少的商品生成退货单（复用退款四档资金处理）、增加的商品生成补差单，一次提交落库；`requestId` 幂等，金额一律服务端重算 |
 | `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
 | `/stock` | 任意 | **403**：库存为派生数据，禁止直写 |
 
@@ -166,6 +175,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 - 历史采购价**不在** `items.json` 里。要么调 `GET /api/purchase-history`，要么自己按采购单 `items[]` 聚合成 `{ 商品编码: [行] }`。
 - 历史销售价同样**不在** `items.json` 里。要么调 `GET /api/sale-history`，要么自己按销售单 `items[]` 聚合成 `{ 商品编码: [行] }`。
 - `items.json` 里的空字段不落库（`package / warning / priceWholesale / priceInstaller / remark / saleCustomers / photos` 为空时整个键都被删掉）。读的时候按「缺键 = 空值」处理：`it.warning || 0`、`it.photos || []`。
+- `orders.json` **可能整个文件都不存在**（订单是新上线的集合，没人存过草稿就没有这个文件）。把它当可选集合读：`orders || []`，并记住**这里的草稿不算账**——库存、应收、报表一律只看 `purchases-*` / `sales-*`。
 - 若发现 `payments: []` 而 `paid`/`received > 0`，那是外部直写产生的脏数据（实付会被算成 0、虚增欠款）：请调 `POST /api/normalize` 让服务端补成流水。
 
 ### Node 端最小可用示例
@@ -229,6 +239,7 @@ console.log('已生成收款单', code, '｜本单未收', due)
 > 生产代码请优先复用 `src/utils/voucherFlow.js`（`allocVoucherCodes` / `attachPaymentVouchers` / `savePaymentWithVouchers` / `voucherNotices`）——编号预分配、`settle` 计算、失败分 `stage` 提示都已处理好，且是可单测的纯逻辑。
 
 ### 对接前必读的变更
+- **2026-10-29｜新增订单与单据变更两个操作接口**：`GET/POST /api/orders`（草稿住 `orders.json`，**文件不存在返回 `[]`**，不参与库存与应收派生）与 `POST /api/amends`（已动过钱的单增减商品 → 生成 `XT-`/`CT-` 退货单 + `XA-`/`CA-` 补差单，原单不动）。**两者都不是整表覆盖**，脚本按「读全量 → 改一条 → 写回全量」的老套路调它们会直接 400。销售/采购单可能开始出现 `type: 'sale-amend'` / `'purchase-amend'` 与 `sourceOrderId`、`fromOrderId` 字段，统计时注意：补差单是正数正常单，退货单是负数红字，两者都算进「单族」的净成交。详见 [docs/orders.md](docs/orders.md)。
 - **2026-10-29｜历史销售价外置**：`items.json` 不再内嵌 `saleHistory`，改由 `GET /api/sale-history` 按需返回；商品上只保留去重后的 `saleCustomers`（客户名数组），供商品页按客户筛选和销售价带出。任何读 `items[].saleHistory` 的脚本必须改调接口或自行聚合。
 - **2026-10-28｜`items.json` 瘦身**：不再内嵌 `purchaseHistory`，改由 `GET /api/purchase-history` 按需返回（实测 `items.json` 体积 **−62.7%**）。任何读 `items[].purchaseHistory` 的脚本必须改调接口或自行聚合。
 - **2026-10-28｜资金单据全链路联动**：收付款、结清、预存预付抵扣/充值/超额转存都会成对写入「单据流水 + 资金凭证」，`payments[].voucher` 现在稳定有值（此前常为空，脚本别把它当可选字段忽略）。
@@ -248,7 +259,8 @@ console.log('已生成收款单', code, '｜本单未收', due)
 - **录入校验不得静默**：明细里的空白行（未选商品且未填任何值）不再拦下整单，「快速添加」会优先填入第一个空白行而不是追加，避免残留空行导致「点保存没反应」；填了数量/单价却没选商品的行会指明第几行。校验提示统一停留 5 秒。
 - **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
-- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node refund-test.mjs`（退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`、`node tests/account-test.mjs`（账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）。两者都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
+- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（10 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/orders-api-test.mjs`（14 项，`/api/orders` 与 `/api/amends` 全链路）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
+- **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（10 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
 
 ## 读取性能优化（Phase 0）
 
@@ -269,9 +281,12 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | 销售单 | `X` + 年月日时分秒 + 本日 4 位流水 | `X202610121330000007` | `genOrderId('X', …)`，流水按单据日期当日计数 |
 | 销售退货单 | `XT-` + 年月日 + 4 位流水 | `XT-20261029-0001` | `genVoucherCode('XT', …, 4)`，流水按退货日期当日计数 |
 | 采购退货单 | `CT-` + 年月日 + 4 位流水 | `CT-20261029-0001` | `genVoucherCode('CT', …, 4)`，流水按退货日期当日计数 |
+| 销售补差单 | `XA-` + 年月日 + 4 位流水 | `XA-20261029-0001` | `genVoucherCode('XA', …, 4)`，「变更明细」追加商品时生成，与原单同集合（`sales`） |
+| 采购补差单 | `CA-` + 年月日 + 4 位流水 | `CA-20261029-0001` | `genVoucherCode('CA', …, 4)`，同上，落 `purchases` |
+| 订单（草稿） | `D` + 年月日时分秒 + 本日 4 位流水 | `D202610290930000001` | `genOrderId('D', …)`，与销售单同规则，只是前缀换成 `D`，一眼可辨「这不是账」 |
 
 - 实体编码（P/C/S）新建时前端自动预填，可手动修改；AI 导入新建时由 `api/routes.js` 的 `derive()` 同规则生成。
-- 单据号（C/X）在保存时自动生成，流水号为「本日开单流水号」，跨日自动归零。
+- 单据号（C/X/D）在保存时自动生成，流水号为「本日开单流水号」，跨日自动归零。
 - **脚本/批量补录历史单据也必须遵守同一规则**：单号固定 19 位（`C`/`X` + 8 位日期 + 6 位时分秒 + 4 位流水，共 19 个字符）。
   历史纸质单据无法获知录入时刻时，时分秒补 `000000`（同时便于识别为补录单），流水仍按「当日单据序号」4 位补齐；
   切勿简化为 `C` + 日期 + 3 位流水这类短格式，否则会导致单号长度不一致、下游历史价明细的单号链接难以对齐。
@@ -325,6 +340,35 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | `category` | 客户类别（如 `批发`），用于「客户类别 → 商品分级售价」取价；未定类别时留空字符串 |
 | `deposits` | **预存款流水**数组，结构同 `advances` |
 
+### orders.json（订单 / 草稿）
+**独立集合，不在 `purchases` / `sales` 里**——库存与应收一律由那两个集合派生（`rebuildStock` 没有状态过滤），
+所以草稿只有住在别的文件里才真的「不算数」。结构：
+
+```json
+{
+  "id": "D202610290930000001",
+  "kind": "sale",
+  "customer": "客户甲",
+  "date": "2026-10-29",
+  "no": "",
+  "remark": "",
+  "photos": [],
+  "items": [ { "code": "P00001", "name": "管件", "qty": 4, "price": 10, "total": 40 } ],
+  "discount": 0,
+  "discountRates": [],
+  "status": "草稿",
+  "postedOrderId": "",
+  "deposits": [ { "date": "2026-10-29", "amount": 100, "remark": "订单订金", "time": "…", "voucher": "SK-20261029-0001" } ],
+  "createdAt": "…", "updatedAt": "…"
+}
+```
+
+- `kind` 取 `sale` / `purchase`，销售用 `customer`、采购用 `supplier`（与单据同名，过账时直接搬）。
+- `status` 取 `草稿` / `已过账`；已过账时 `postedOrderId` 是过账生成的正式单据号。
+- `deposits[]` 是订金流水，每笔都对应一张**已开**的资金凭证（`voucher`），因此收过订金的订单不能删。
+- 采购单 / 销售单上的 `fromOrderId` / `fromOrderType: 'order'` 回指订单，双向可查。
+- 完整状态机、订金与撤销闸门见 [docs/orders.md](docs/orders.md)。
+
 ### stock.json（库存）
 按商品 code 为键：
 ```json
@@ -366,6 +410,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 - **单一数据源**：所有关系与历史价都由采购单 / 销售单派生，手工只维护单据，永不失步。
 - **幂等**：历史每次从单据全量重建（而非追加），同一单据重复保存不会让历史翻倍。
 - 新供应商在采购单中出现时自动建档（`G` + 序号）；新商品在单据中出现时自动建档。
+- **`orders.json` 一律不参与派生**：`derive()` / `rebuildStock()` 只吃 `purchases` + `sales`，这正是订单能当草稿的前提——存草稿不会扣库存、不会进应收，只有「过账」把那张单写进单据集合时才算数（见 [docs/orders.md](docs/orders.md)）。
 
 ## 前端展示
 - **方块语义（全站统一，规则只写在 `App.vue` 全局样式一处）**：页面上只有两种方块——
@@ -375,7 +420,8 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
   - **状态标签与紧跟其后的操作按钮必须同行、等高**：Element 的 `el-tag--small` 高 20px，而 `size="small"` 的 `link` 按钮按本文件上面的规则高 24px，两者并排就是一高一矮；加上状态点又给标签右侧加了 7px 内边距，「结算状态」列原来的 130px 宽放不下，改账按钮被挤到第二行。现规则：**标签取默认档（24px）与 small 按钮等高**，外层套 `.settle-cell`（`inline-flex` + `white-space:nowrap`）保证不换行，销售/采购两个列表的该列宽 130 → **160**（实测标签 51 + 间距 6 + 按钮 60 = 117px，列内可用 136px）。
   - 单选按钮组（如录入弹窗的「挂账 / 结清」、报表的「按净额 / 按应收」）天然是选中项实心、未选中空心，符合本规则，无需改动；复选框、开关、分页等非方块控件保持原样。
   - `text` / `link` 改成实心方块后每个按钮约占 46px（两字）+ 6px 间距，表格「操作」列宽需按此估算（过窄会被裁切）。
-- **左侧菜单**：按「经营（看板/报表）→ 资料（商品/供应商/客户）→ 业务（采购/销售/库存）→ 资金」分组；**资金**为可展开子菜单，含**应收款管理**、**应付款管理**、**来往账**，菜单项带未收清/未付清单据数角标。窄屏自动折叠为左上角抽屉菜单（结构相同）。
+- **左侧菜单**：按「经营（看板/报表）→ 资料（商品/供应商/客户）→ 业务（采购/销售/订单/库存）→ 资金」分组；**资金**为可展开子菜单，含**应收款管理**、**应付款管理**、**来往账**，菜单项带未收清/未付清单据数角标。窄屏自动折叠为左上角抽屉菜单（结构相同）。「订单」菜单项带**待过账草稿数**角标（`el-badge` warning 色），看板顶部另有一张「待过账订单 N 张 · 订金合计 ¥X」卡片（点「去处理」跳 `/orders`；该卡片**故意不跟随日期筛选**——待办属于当下，不是某个区间）。
+- **订单页（`/orders`）**：草稿列表按状态（全部 / 草稿 / 已过账）、类型、日期段、关键词筛选，列为订单号（收过订金的带「订」标记）、类型、往来单位、时间、商品、订单金额、已收订金、状态（已过账的行给一个跳到生成单据的链接）与操作（草稿可 编辑 / 收订金 / 过账 / 删除，已过账只可 撤销过账）。新建/编辑走 `OrderFormDialog`（明细与折扣口径与单据完全一致，校验函数 `validateOrder` 前后端共用），**保存只发 `{action:'save'}`，绝不碰 `sales`/`purchases`**。错误提示统一分三档：`409` → 刷新重试、`5xx` → 以刷新后的数据为准、其余 → 原样显示服务端中文原因。
 - **商品管理页**：表格含「备注」列；每行可**展开**查看「历史采购价」「历史销售价」两张明细表（日期 / 供应商或客户 / 数量 / 单价 / 金额），展开区同时显示规格/包装、分级售价、备注与商品照片。历史采购价与历史销售价均在首次展开时按需拉取（见「items.json 瘦身」），未取到时展开区显示加载状态，收起再展开可重试。
 - **采购单 / 销售单详情页**：默认**只显示本次数据**——明细表只保留「本次数量 / 本次单价 / 本次折扣 / 本次金额」，商品档案的售价、进价与「本次单价」重复，默认隐藏（顶部「显示售价 / 显示进价」勾选后可看）；「备注」固定置于条目最后；「历史采购价 / 历史销售价 / 商品照片」等档案信息默认收起，由顶部「展开历史价与商品档案」勾选开启。导出 CSV 与打印遵循同一口径。
   - **隐藏单价与金额（实时生效）**：勾选后明细表只留编码/名称/单位/数量/备注，单头合计/原价合计/整单折扣/折后金额/优惠/应收(应付)/实收(实付)/未收(未付)以及明细「本次折扣」列、收款(付款)金额、退货核销金额同步隐藏——**打印与导出的折扣金额也一并去掉**，与页面同一口径；页面仍可编辑、可继续记收付款。
@@ -504,6 +550,14 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 采购单 / 销售单操作列提供**查看 / 编辑 / 删除**：
 - 编辑复用录入对话框，**沿用原单号**，可改供应商/客户、明细、日期、结算状态、备注、照片；
 - 删除有二次确认，保存后后端 `derive()` 会自动重算库存、供应商关系与历史价。
+- **两种情况下明细会被锁定**（编辑弹窗顶部出现红色锁定条，明细整表改纯文本，「实收金额」仍可补收）：
+  ① 这张单**已经动过钱**（有 `payments` 流水、有退货核销 `settlements`、或旧字段 `received`/`paid` 不为 0）——
+  改小金额等于凭空抹掉一张已开的收款凭证；
+  ② 这张单**已经有下级单**（退货单 / 补差单按原单行索引 `sourceLine` 定位商品，明细一改索引就错位）。
+- 锁定后要增减商品，点锁定条上的「**变更明细**」：减少的商品生成退货单（`XT-`/`CT-`，可选退现金 / 冲抵欠款 / 转预存款 / 先挂着），
+  新增的商品生成补差单（`XA-`/`CA-`，挂账），原单一个数字都不动。变更**不允许改价**，价格不一致会被拒。
+  完整规则与接口见 [docs/orders.md](docs/orders.md)。
+- 销售 / 采购详情页为此单族显示「**关联变更单**」卡片，顶部给出「变更后净成交 ¥X · 未收/未付 ¥Y」；列表页补差单单号前带「补」标记。
 
 ### 列表分页与导出打印
 - 商品库 / 客户 / 供应商 / 采购单 / 销售单 / 应收款 / 应付款管理均**每页 60 项**；经营看板的本期采购单汇总、销售单汇总**每页 20 项**。

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { applyRefundOperation } from './src/utils/refunds.js'
 const { chromium } = createRequire(import.meta.url)('playwright')
-const browser = await chromium.launch({ headless: true })
+const browser = await chromium.launch({ headless: true, executablePath: existsSync('/usr/bin/chromium') ? '/usr/bin/chromium' : undefined })
 const fixture = () => ({ logs: [], items: [{ code: 'P00001', name: '管件', cost: 10 }], stock: {}, refunds: [], customers: [{ code: 'C00001', name: '客户甲' }], suppliers: [{ code: 'S00001', name: '供应商甲' }],
   sales: [{ id: 'S1', date: '2026-10-01', customer: '客户甲', total: 100, discount: 10, payments: [], items: [{ code: 'P00001', name: '管件', qty: 10, price: 10, total: 100 }] }],
   purchases: [{ id: 'B1', date: '2026-10-01', supplier: '供应商甲', total: 100, paid: 100, items: [{ code: 'P00001', name: '管件', qty: 10, price: 10, total: 100 }] }] })

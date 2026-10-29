@@ -35,6 +35,11 @@
         <el-icon><Sell /></el-icon>
         <span>销售</span>
       </el-menu-item>
+      <el-menu-item index="/orders">
+        <el-icon><Tickets /></el-icon>
+        <span>订单</span>
+        <el-badge v-if="draftOrders" :value="draftOrders" type="warning" :max="99" class="menu-badge" />
+      </el-menu-item>
       <el-menu-item index="/stock">
         <el-icon><Box /></el-icon>
         <span>库存</span>
@@ -88,18 +93,22 @@ import {
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'
+import { DRAFT } from '../utils/orders.js'
 
 defineEmits(['select'])
 
 // 资金菜单角标：未收清 / 未付清的单据数（加载失败不影响菜单使用）
 const receivableOpen = ref(0)
 const payableOpen = ref(0)
+// 订单菜单角标：还没过账的草稿数（过账前不占库存、不进往来账，容易忘）
+const draftOrders = ref(0)
 
 onMounted(async () => {
   try {
-    const [sales, purchases] = await Promise.all([api.getSales(), api.getPurchases()])
+    const [sales, purchases, orders] = await Promise.all([api.getSales(), api.getPurchases(), api.getOrders()])
     receivableOpen.value = (sales || []).filter(s => receivableOf(s) > 0).length
     payableOpen.value = (purchases || []).filter(p => payableOf(p) > 0).length
+    draftOrders.value = (orders || []).filter(o => o.status === DRAFT).length
   } catch (e) { /* 忽略：角标仅为提示 */ }
 })
 </script>
