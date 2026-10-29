@@ -1,4 +1,5 @@
-import { readJSON, writeJSON } from './github.js'
+import { readJSON, writeJSON, readJSONWithRaw, serialize } from './github.js'
+import { readCollection, readCollectionWithRaw, writeCollection, sortOrders, SPLIT_KEYS } from './storage.js'
 import { refundTransaction } from './refunds.js'
 import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
@@ -66,7 +67,28 @@ function parseFreeText(text) {
   return out
 }
 
-// 从采购单/销售单推导：商品与供应商/客户的关系链接、历史采购价/销售价、库存
+// 近乎恒空的字段不写进数据仓：省字节、省解析 CPU、也省 git 历史。
+// 判定标准很保守 —— 只删「读侧一律当 falsy 处理」的字段，删了不会改变任何显示结果：
+//   Stock.vue 用 item.warning || 0、Items.vue 用 Number(i.warning || 0)、
+//   ProductTable.vue 用 v-if="row.package" / fmt(row.priceWholesale)，
+//   SalesDetail/PurchaseDetail 把 base.package 直接铺进明细行（undefined 与 '' 显示一致）。
+// 注意 cost / price 不在名单里：0 是合法业务值，不能删。
+// items.json 里这 7 个字段实测占 40KB / 208KB（19.4%），其中 warning、remark 非空率为 0%。
+const ITEM_EMPTY_FIELDS = ['package', 'warning', 'priceWholesale', 'priceInstaller', 'remark', 'saleCustomers', 'photos']
+export function pruneItem(it) {
+  if (!it || typeof it !== 'object') return it
+  const out = { ...it }
+  for (const k of ITEM_EMPTY_FIELDS) {
+    const v = out[k]
+    const empty = v === undefined || v === null || v === '' || v === 0
+      || (typeof v === 'number' && !Number.isFinite(v))
+      || (Array.isArray(v) && v.length === 0)
+    if (empty) delete out[k]
+  }
+  return out
+}
+
+// 从采购单/销售单推导：商品与供应商/客户的关系链接、历史采购价/销售价、库存。
 // 商品、供应商、客户三类主数据，凡是在单据里首次出现的新名字，都会在此自动建档：
 //   ensureItem（采购+销售明细）→ 商品
 //   ensureSupplier（采购单供应商）→ 供应商
@@ -217,7 +239,16 @@ export function derive(items, suppliers, purchases, sales, customers) {
   }
   // history：{ 商品编码: [历史采购行] }，供 GET /api/purchase-history 按需返回
   // saleHistory：{ 商品编码: [历史销售行] }，供 GET /api/sale-history 按需返回
-  return { items, suppliers, customers, purchases, sales, history: purchaseHist, saleHistory: saleHist }
+  // 落库前统一瘦身：近乎恒空的字段不占字节（见 pruneItem）
+  return {
+    items: items.map(pruneItem),
+    suppliers,
+    customers,
+    purchases,
+    sales,
+    history: purchaseHist,
+    saleHistory: saleHist
+  }
 }
 
 export function rebuildStock(purchases, sales, items) {
@@ -275,17 +306,43 @@ export function normalizeOrderPayments(order, legacyField) {
   return order
 }
 
-async function syncDerived(env, { purchases, sales }) {
-  const [items, suppliers, curP, curS, customers] = await Promise.all([
-    readJSON(env, 'items.json'),
-    readJSON(env, 'suppliers.json'),
-    readJSON(env, 'purchases.json'),
-    readJSON(env, 'sales.json'),
-    readJSON(env, 'customers.json')
+// 派生写回。known 是「本轮已经读过的文件原文快照」（readCollectionWithRaw / writeCollection 的产物），
+// 复用它可以省掉每个文件「只为拿 sha 再读一遍」的 GET + base64 解码（实测约占一次存单读侧成本的一半）。
+// 同时先比内存：派生结果与库里现值逐字节相同就整条跳过这次写。
+async function syncDerived(env, { purchases, sales, known }) {
+  const provided = new Map((known || []).map(k => [k.file, k]))
+  const knownOf = (file) => {
+    const k = provided.get(file)
+    return k && k.sha ? { content: k.content, sha: k.sha } : null
+  }
+  // 读现值：known 里有就用，没有才回源
+  const readOnce = async (file) => {
+    const k = provided.get(file)
+    if (k && k.sha) return { content: k.content, value: JSON.parse(k.content), sha: k.sha }
+    const r = await readJSONWithRaw(env, file)
+    provided.set(file, { file, content: r.content, sha: r.sha })
+    return r
+  }
+  const [itemsR, suppliersR, customersR, stockR] = await Promise.all([
+    readOnce('items.json'),
+    readOnce('suppliers.json'),
+    readOnce('customers.json'),
+    readOnce('stock.json')
   ])
-  const p = purchases != null ? purchases : curP
-  const s = sales != null ? sales : curS
-  const { items: newItems, suppliers: newSuppliers, customers: newCustomers, purchases: newP, sales: newS } = derive(items, suppliers, p, s, customers)
+  // 单据：本次入参就是全量权威（前端整表回传）；未参与本次操作的另一类由存储层读库
+  const pState = purchases != null
+    ? { value: purchases, content: null, sha: null }                 // 调用方刚落库，内容 = 入参
+    : await readCollectionWithRaw(env, 'purchases')
+  const sState = sales != null
+    ? { value: sales, content: null, sha: null }
+    : await readCollectionWithRaw(env, 'sales')
+  if (purchases == null) for (const k of (pState.known || [])) provided.set(k.file, k)
+  if (sales == null) for (const k of (sState.known || [])) provided.set(k.file, k)
+
+  const items = itemsR.value, suppliers = suppliersR.value, customers = customersR.value
+  const p = pState.value, s = sState.value
+  const derived = derive(items, suppliers, p, s, customers)
+  const { items: newItems, suppliers: newSuppliers, customers: newCustomers, purchases: newP, sales: newS } = derived
   // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
   // 一旦出现，说明上游读取异常（例如 GitHub 对大文件返回空内容），
   // 此时宁可报错中止，也不能把空数组写回去覆盖真实数据。
@@ -293,21 +350,34 @@ async function syncDerived(env, { purchases, sales }) {
     throw new Error('派生结果为空，疑似上游数据读取异常，已中止以避免覆盖商品档案')
   }
   const stock = rebuildStock(p, s, newItems)
+  // unchanged(现值原文, 新数据)：现值原文缺失（本轮没读过，比如刚被调用方写过）
+  // 一律按「可能要写」处理，交给存储层自己比。
+  const unchanged = (state, data) => typeof state.content === 'string' && state.content === serialize(data)
   // 三个文件顺序写入，无跨文件事务：中途失败时前面的文件已落库。
   // derive 是纯函数（由单据重建），重新保存一次采购单/销售单即可自动修复，故失败时给出明确修复指引。
   try {
-    await writeJSON(env, 'items.json', newItems, 'derive items')
-    await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers')
-    await writeJSON(env, 'stock.json', stock, 'derive stock')
+    if (!unchanged(itemsR, newItems)) {
+      await writeJSON(env, 'items.json', newItems, 'derive items', { known: knownOf('items.json') })
+    }
+    if (!unchanged(suppliersR, newSuppliers)) {
+      await writeJSON(env, 'suppliers.json', newSuppliers, 'derive suppliers', { known: knownOf('suppliers.json') })
+    }
+    if (!unchanged(stockR, stock)) {
+      await writeJSON(env, 'stock.json', stock, 'derive stock', { known: knownOf('stock.json') })
+    }
     // 客户：仅当销售单里出现了名单中原本没有的新客户时才写回，
     // 避免每次保存销售单都给 customers.json 产生一条内容不变的空提交
-    if (newCustomers.length > customers.length) {
-      await writeJSON(env, 'customers.json', newCustomers, 'derive customers')
+    if (newCustomers.length > customers.length && !unchanged(customersR, newCustomers)) {
+      await writeJSON(env, 'customers.json', newCustomers, 'derive customers', { known: knownOf('customers.json') })
     }
     // 回写修正后的单据：存量乱码编码（N…）已改写为正式 P 编码。
     // p/s 为本次全量（传入的整表或读库现值），derive 仅就地修正 line.code，不增删条目，幂等安全
-    await writeJSON(env, 'purchases.json', newP, 'derive fix purchase codes')
-    await writeJSON(env, 'sales.json', newS, 'derive fix sale codes')
+    if (!unchanged(pState, newP)) {
+      await writeCollection(env, 'purchases', newP, 'derive fix purchase codes', { known: [...provided.values()] })
+    }
+    if (!unchanged(sState, newS)) {
+      await writeCollection(env, 'sales', newS, 'derive fix sale codes', { known: [...provided.values()] })
+    }
   } catch (e) {
     throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
   }
@@ -352,8 +422,8 @@ export async function handleApi(req, url, env) {
       const [items, suppliers, purchases, sales, customers] = await Promise.all([
         readJSON(env, 'items.json'),
         readJSON(env, 'suppliers.json'),
-        readJSON(env, 'purchases.json'),
-        readJSON(env, 'sales.json'),
+        readCollection(env, 'purchases'),
+        readCollection(env, 'sales'),
         readJSON(env, 'customers.json')
       ])
       return json(req, env, derive(items, suppliers, purchases, sales, customers).history)
@@ -363,16 +433,16 @@ export async function handleApi(req, url, env) {
       const [items, suppliers, purchases, sales, customers] = await Promise.all([
         readJSON(env, 'items.json'),
         readJSON(env, 'suppliers.json'),
-        readJSON(env, 'purchases.json'),
-        readJSON(env, 'sales.json'),
+        readCollection(env, 'purchases'),
+        readCollection(env, 'sales'),
         readJSON(env, 'customers.json')
       ])
       return json(req, env, derive(items, suppliers, purchases, sales, customers).saleHistory)
     }
     if (path === '/suppliers' && method === 'GET') return json(req, env, await readJSON(env, 'suppliers.json'))
     if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))
-    if (path === '/purchases' && method === 'GET') return json(req, env, await readJSON(env, 'purchases.json'))
-    if (path === '/sales' && method === 'GET') return json(req, env, await readJSON(env, 'sales.json'))
+    if (path === '/purchases' && method === 'GET') return json(req, env, await readCollection(env, 'purchases'))
+    if (path === '/sales' && method === 'GET') return json(req, env, await readCollection(env, 'sales'))
     if (path === '/receipts' && method === 'GET') return json(req, env, await readOptionalArray(env, 'receipts.json'))
     if (path === '/payment-vouchers' && method === 'GET') return json(req, env, await readOptionalArray(env, 'payment-vouchers.json'))
     if (path === '/refunds' && method === 'GET') return json(req, env, await readOptionalArray(env, 'refunds.json'))
@@ -412,7 +482,8 @@ export async function handleApi(req, url, env) {
       if (path === '/items') {
         // 整表覆盖前先剥掉历史采购价：items.json 已不再保存该字段，
         // 老前端/导入数据把旧数组带回来时也不该让它重新长回去（derive 会在下次存单时再清一次）
-        const newItems = (body.items || []).map(({ purchaseHistory, ...it }) => it)
+        // 再统一 pruneItem：与 derive 落库口径一致，否则手改一次商品就把空字段写回去了
+        const newItems = (body.items || []).map(({ purchaseHistory, ...it }) => pruneItem(it))
         await writeJSON(env, 'items.json', newItems, 'update items')
         // 商品改了挂靠供应商后，必须同步供应商档案里的商品列表：
         // products 是派生字段，原本只在保存采购/销售单时重算，
@@ -452,15 +523,16 @@ export async function handleApi(req, url, env) {
       }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
-        const purchases = (body.purchases || []).map(p => normalizeOrderPayments(p, 'paid'))
-        await writeJSON(env, 'purchases.json', purchases, 'update purchases')
-        await syncDerived(env, { purchases })
+        // sortOrders：与存储层落库次序同一口径，派生（库存/历史价）才不会因次序不同而每次算出不同结果
+        const purchases = sortOrders((body.purchases || []).map(p => normalizeOrderPayments(p, 'paid')))
+        const w = await writeCollection(env, 'purchases', purchases, 'update purchases')
+        await syncDerived(env, { purchases, known: w.known })
         return json(req, env, { ok: true })
       }
       if (path === '/sales') {
-        const sales = (body.sales || []).map(s => normalizeOrderPayments(s, 'received'))
-        await writeJSON(env, 'sales.json', sales, 'update sales')
-        await syncDerived(env, { sales })
+        const sales = sortOrders((body.sales || []).map(s => normalizeOrderPayments(s, 'received')))
+        const w = await writeCollection(env, 'sales', sales, 'update sales')
+        await syncDerived(env, { sales, known: w.known })
         return json(req, env, { ok: true })
       }
       // 数据整理：重跑一次全量 derive 并写回，把历史单据里残留的乱码编码（N…）改回正式 P 编码，
@@ -471,8 +543,8 @@ export async function handleApi(req, url, env) {
           readJSON(env, 'items.json'),
           readJSON(env, 'suppliers.json'),
           readJSON(env, 'customers.json'),
-          readJSON(env, 'purchases.json'),
-          readJSON(env, 'sales.json')
+          readCollection(env, 'purchases'),
+          readCollection(env, 'sales')
         ])
         const derived = derive(items, suppliers, purchases, sales, customers)
         // derive 是「由单据全量重建」的纯函数，正常情况下不可能把非空档案推导成空。
@@ -490,8 +562,8 @@ export async function handleApi(req, url, env) {
             await writeJSON(env, 'customers.json', derived.customers, 'normalize customers')
           }
           // 回写修正后的单据：存量乱码编码（N…）已改写为正式 P 编码
-          await writeJSON(env, 'purchases.json', derived.purchases, 'normalize fix purchase codes')
-          await writeJSON(env, 'sales.json', derived.sales, 'normalize fix sale codes')
+          await writeCollection(env, 'purchases', derived.purchases, 'normalize fix purchase codes')
+          await writeCollection(env, 'sales', derived.sales, 'normalize fix sale codes')
         } catch (e) {
           throw new Error(`数据整理失败（${e.message || e}），未改动任何数据`)
         }
@@ -515,9 +587,11 @@ export async function handleApi(req, url, env) {
         const parsed = extractData(text)
         // 导入同样过一遍规范化：外部 JSON 常带「payments:[] + 旧 paid/received」结构，
         // 原样落库会造成实付漏算、幽灵欠款（与保存接口同一缺陷，同一修法）
-        if (parsed.purchases && parsed.purchases.length) parsed.purchases = parsed.purchases.map(p => normalizeOrderPayments(p, 'paid'))
-        if (parsed.sales && parsed.sales.length) parsed.sales = parsed.sales.map(s => normalizeOrderPayments(s, 'received'))
+        if (parsed.purchases && parsed.purchases.length) parsed.purchases = sortOrders(parsed.purchases.map(p => normalizeOrderPayments(p, 'paid')))
+        if (parsed.sales && parsed.sales.length) parsed.sales = sortOrders(parsed.sales.map(s => normalizeOrderPayments(s, 'received')))
         const results = []
+        // 单据导入后 syncDerived 要复用这批「写后现状」，免得再把整表读第二遍
+        const importedKnown = []
         for (const key of ['items', 'suppliers', 'customers', 'purchases', 'sales', 'receipts', 'payment-vouchers']) {
           const arr = parsed[key]
           if (!Array.isArray(arr) || !arr.length) continue
@@ -528,8 +602,9 @@ export async function handleApi(req, url, env) {
             return json(req, env, { error: `${key} 中存在非对象记录，已中止导入` }, 400)
           }
           // items 导入同样剥掉历史采购价：该字段已由「按需派生」接管，不再进 items.json
-          const payload = key === 'items' ? arr.map(({ purchaseHistory, ...it }) => it) : arr
-          await writeJSON(env, `${key}.json`, payload, `ai import ${key}`)
+          const payload = key === 'items' ? arr.map(({ purchaseHistory, ...it }) => pruneItem(it)) : arr
+          const w = await writeCollection(env, key, payload, `ai import ${key}`)
+          if (key === 'purchases' || key === 'sales') importedKnown.push(...w.known)
           results.push({ key, count: arr.length })
         }
         // 库存是采购/销售的派生数据，导入时不再直接写入（与 /stock 禁止直写的策略一致），
@@ -540,7 +615,7 @@ export async function handleApi(req, url, env) {
         const pImport = (parsed.purchases && parsed.purchases.length) ? parsed.purchases : undefined
         const sImport = (parsed.sales && parsed.sales.length) ? parsed.sales : undefined
         if (pImport || sImport) {
-          await syncDerived(env, { purchases: pImport, sales: sImport })
+          await syncDerived(env, { purchases: pImport, sales: sImport, known: importedKnown })
           results.push({ key: 'derived', count: 3 })
         }
 
@@ -571,7 +646,7 @@ export async function handleApi(req, url, env) {
           return json(req, env, { error: '存在非对象记录，已中止导入' }, 400)
         }
 
-        const existing = await readJSON(env, `${key}.json`)
+        const existing = await readCollection(env, key)
         const { added, skippedKey, skippedName, invalid } = diffImport(key, records, existing || [])
         const stats = {
           added: added.length,
@@ -588,9 +663,11 @@ export async function handleApi(req, url, env) {
         const finalAdded = (key === 'purchases' || key === 'sales')
           ? added.map(o => normalizeOrderPayments(o, key === 'purchases' ? 'paid' : 'received'))
           : added
-        const stripped = key === 'items' ? finalAdded.map(({ purchaseHistory, ...it }) => it) : finalAdded
-        const merged = (existing || []).concat(stripped)
-        await writeJSON(env, `${key}.json`, merged, `merge import ${key}`)
+        const stripped = key === 'items' ? finalAdded.map(({ purchaseHistory, ...it }) => pruneItem(it)) : finalAdded
+        const merged = SPLIT_KEYS.has(key)
+          ? sortOrders((existing || []).concat(stripped))
+          : (existing || []).concat(stripped)
+        const wMerged = await writeCollection(env, key, merged, `merge import ${key}`)
 
         if (key === 'items') {
           // 与 POST /items 同策略：商品导入后重算供应商档案里的商品列表（products 是派生字段）
@@ -607,8 +684,8 @@ export async function handleApi(req, url, env) {
         }
         // 采购/销售单导入后必须按全部单据重算派生数据（商品链接、历史价、库存、客户档案）；
         // 只传本次合并后的完整数组，另一类单据由 syncDerived 读库内现值，互不影响
-        if (key === 'purchases') await syncDerived(env, { purchases: merged })
-        if (key === 'sales') await syncDerived(env, { sales: merged })
+        if (key === 'purchases') await syncDerived(env, { purchases: merged, known: wMerged.known })
+        if (key === 'sales') await syncDerived(env, { sales: merged, known: wMerged.known })
 
         const logs = await readJSON(env, 'logs.json')
         logs.push({ time: new Date().toISOString(), source: 'merge', key, ...stats })

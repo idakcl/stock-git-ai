@@ -22,12 +22,19 @@
 > **要给另一个 AI / 外部脚本对接？直接看「AI / 脚本对接（接口契约）」一节。**
 
 ## 数据仓
-独立 GitHub 仓库 `stock-git-ai-data`，JSON 文件：
-`items.json / suppliers.json / customers.json / purchases.json / sales.json / receipts.json / payment-vouchers.json / stock.json / logs.json`
+独立 GitHub 仓库 `stock-git-ai-data`，全部为**紧凑 JSON**（无缩进，程序读不给人读）。文件：
+`items.json / suppliers.json / customers.json / receipts.json / payment-vouchers.json / refunds.json / stock.json / logs.json`
+加上按年分片的单据：`purchases-2025.json`、`sales-2025.json`…，以及分片判据文件 `.split-yearly.json`。
 
 数据仓由 Worker 直接读写，是系统的**唯一数据源**。
 
-历史采购价**不在数据仓里单独存文件、也不内嵌进 `items.json`**，由 `GET /api/purchase-history` 每次从 `purchases.json` 现场派生（见「自动推导」）。
+**单据为什么按年切文件**：采购单是全仓唯一只增不减的大文件（416 张单 371KB），整表存储时每保存一张单都要把整表重读、重编码、重新提交一次。切成年片后，一次保存只重写改动的那一年（实测：改一张历史单 = 1 次内容写）。粒度选「年」而不是「月」是因为读侧要读全量，月片 = 92 个文件 = 92 个子请求，会直接顶爆 Workers 免费版每请求 50 个子请求的上限；年片 = 10 个文件，全量读 12 个子请求。
+
+> ⚠️ 迁移是自动发生的：第一次通过 API 保存单据时，Worker 会在**同一次 git 提交**里写完所有年片、写 `.split-yearly.json`、并删除旧的 `purchases.json` / `sales.json`。
+> 所以**任何直读数据仓的脚本都不能依赖 `purchases.json` / `sales.json` 这两个文件名**，
+> 正确口径见下「只想读数据」。判据文件缺失（`.split-yearly.json` 不存在或该集合未记录）时，旧整表仍然是唯一权威。
+
+历史采购价**不在数据仓里单独存文件、也不内嵌进 `items.json`**，由 `GET /api/purchase-history` 每次从单据现场派生（见「自动推导」）。
 
 ## AI / 脚本对接（接口契约）
 
@@ -151,9 +158,14 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 
 ### 只想读数据（没有写权限时）
 直读私有仓 `idakcl/stock-git-ai-data@main` 的 JSON 完全可以，但注意：
-- `stock.json`、`suppliers[].products`、`items[].saleCustomers` 都是派生值，写入按 `purchases/sales.json → items → suppliers → stock` 分步提交（无跨文件事务），理论上可能与最新单据差一次提交。**对账一律以 `purchases.json` / `sales.json` 为准**，按上面的公式自己重算。
-- 历史采购价**不在** `items.json` 里。要么调 `GET /api/purchase-history`，要么自己按 `purchases.json` 的 `items[]` 聚合成 `{ 商品编码: [行] }`。
-- 历史销售价同样**不在** `items.json` 里。要么调 `GET /api/sale-history`，要么自己按 `sales.json` 的 `items[]` 聚合成 `{ 商品编码: [行] }`。
+- **单据要先看分片判据**：读 `.split-yearly.json`（内容形如 `{"purchases":true,"sales":true}`）。
+  该集合被记为 `true` → 单据在 `purchases-YYYY.json` / `sales-YYYY.json` 里，把**所有**年片读出来按 `date`、再按 `id` 升序合并就是全量（年片可能是 `[]`，那是该年单据被删完后的空片，不是错误）；
+  没被记录（或整个判据文件不存在）→ 权威仍然是旧的 `purchases.json` / `sales.json` 整表，**这些年片要一律忽略**（它们可能只是迁移到一半的残留）。
+  两种情况下都只有一份是真数据，绝不把整表和年片相加。
+- `stock.json`、`suppliers[].products`、`items[].saleCustomers` 都是派生值，写入按 `单据 → items → suppliers → stock` 分步提交（无跨文件事务），理论上可能与最新单据差一次提交。**对账一律以单据为准**，按上面的公式自己重算。
+- 历史采购价**不在** `items.json` 里。要么调 `GET /api/purchase-history`，要么自己按采购单 `items[]` 聚合成 `{ 商品编码: [行] }`。
+- 历史销售价同样**不在** `items.json` 里。要么调 `GET /api/sale-history`，要么自己按销售单 `items[]` 聚合成 `{ 商品编码: [行] }`。
+- `items.json` 里的空字段不落库（`package / warning / priceWholesale / priceInstaller / remark / saleCustomers / photos` 为空时整个键都被删掉）。读的时候按「缺键 = 空值」处理：`it.warning || 0`、`it.photos || []`。
 - 若发现 `payments: []` 而 `paid`/`received > 0`，那是外部直写产生的脏数据（实付会被算成 0、虚增欠款）：请调 `POST /api/normalize` 让服务端补成流水。
 
 ### Node 端最小可用示例
@@ -229,12 +241,14 @@ console.log('已生成收款单', code, '｜本单未收', due)
 - **后端不静默**：GitHub 读写任何一步失败（token 失效、仓库不存在、网络异常、5xx），`gh()` 都会抛出带状态码的错误（如 `GitHub 401: Bad credentials`），由 `handleApi` 统一捕获并返回 **HTTP 500 + 明确 error 文案**，前端 `request()` 收到非 2xx 即抛错。
 - **前端明确报错**：所有保存/删除/登记收付款函数均有 try/catch，失败时弹出红色错误提示（含后端错误原因），**不显示"已保存"假成功**，弹窗保持打开可重试，同时本地列表回滚为线上数据，避免界面与数据仓不一致。
 - **瞬时故障重试**：`writeJSON` 对网络异常、GitHub 5xx 与 429（限流）自动重试一次（重试前重新获取文件 sha）；**409 不重试**——那说明确实有人并发改过该文件，用本端旧全量重试会覆盖对方写入，宁可报错；其余 4xx（鉴权/参数错误）立即失败。
-- **无变化不提交**：`writeJSON` 拿到现有内容后先逐字节比对，相同就跳过提交。保存一张单据会派生写回 `items/suppliers/stock/purchases/sales` 等最多 6 个文件（其中 `items.json` 约 0.36MB、`purchases.json` 约 0.5MB），跳过重复提交可显著减少无谓 commit 与 GitHub 写入压力。
+- **无变化不提交**：`writeJSON` 拿到现有内容后先逐字节比对，相同就跳过提交。保存一张单据会派生写回 `items/suppliers/stock` 与单据年片等多个文件，跳过重复提交可显著减少无谓 commit 与 GitHub 写入压力。这条比对依赖「本轮刚读到的原文」：`readJSONWithRaw` / `writeCollection` 会把读到的 `content` 与 `sha` 作为 `known` 一路传给后续写入，省掉「每个文件再 GET 一遍只为拿 sha」的重复请求与整文件 base64 解码（实测约占一次存单读侧成本的一半）。落库次序统一为 `date` 升序、同日按 `id` 升序（`sortOrders`），读写同口径，「读回来原样再存一次」才能真正命中跳过分支（实测：原样重存 = 0 次提交、0 次内容写）。
+- **单据按年分片**：`purchases` / `sales` 不再整表一个文件，改为 `purchases-2025.json` 一年一片（`api/storage.js`），只有内容真变了的那一片才提交；改一张历史单据只重写它那一年的片。权威判据是 `.split-yearly.json`：没记录 → 旧整表有效（分片一律忽略），有记录 → 年片有效（旧整表已在迁移提交里删除）。迁移由第一次存单自动触发，两个集合 + 标记 + 删除旧表压进**同一次 git 提交**（`git/trees` + `git/commits` + `refs PATCH force:false`），不存在「标记写了但年片只写一半」的中间态，并发迁移会被拒绝而不是覆盖。
 - **items.json 瘦身（历史采购价与销售价外置）**：`items.json` 曾内嵌每个商品的历史采购价，实测 1559 个商品 / 2450 行历史约占整个文件 **62.7%**（0.91MB → 0.34MB，紧凑 JSON 口径），而这些数据 100% 可由采购单重建、且只有商品行「展开历史价」时才用到。现改为 `derive()` 不再写 `商品.purchaseHistory`（存量数据在下次存单时自动清除），改由 `GET /api/purchase-history` 按需返回 `{ 商品编码: [历史行] }`。销售历史同理：`商品.saleHistory` 不再落文件，改由 `GET /api/sale-history` 按需返回，`items.json` 只保留去重后的 `saleCustomers`（客户名数组）。两个接口与 `derive` 同源同口径；前端 `ProductTable` 首次展开任意商品行时才请求一次（走 15 秒内存缓存 + 边缘缓存），销售录入弹窗在打开时拉取销售历史用于「该客户最近成交价」。
 - **整表覆盖的红线**：单据保存语义是「提交整个数组覆盖」，因此前端（`Sales.vue`/`Purchases.vue`）在提交前必须确认本地是线上全量——加载失败会标记 `loadFailed`，保存时先 `ensureLoaded()` 重新拉取，仍失败就**拒绝保存并明确报错**（否则会用「只有这一张新单」的数组覆盖掉全部历史单据）。加载失败时列表也不再清空，写库后的回读失败同样不影响已成功的写入。
 - **录入校验不得静默**：明细里的空白行（未选商品且未填任何值）不再拦下整单，「快速添加」会优先填入第一个空白行而不是追加，避免残留空行导致「点保存没反应」；填了数量/单价却没选商品的行会指明第几行。校验提示统一停留 5 秒。
 - **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
+- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退）、`node tests/api-test.mjs`（直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node refund-test.mjs`、`node deposit-test.mjs`。两者都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false` 语义），所以 409/覆盖类缺陷能在本地就被抓到。
 
 ## 读取性能优化（Phase 0）
 

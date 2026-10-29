@@ -19,7 +19,9 @@ export async function gh(req, env, method = 'GET', body) {
   return data
 }
 
-export async function readJSON(env, file) {
+// 读取 + 保留原文。writeJSON 的 opts.known 用的就是这里的 content，
+// 一次读、一次比对，省掉「为拿 sha 再 GET 一遍」的重复请求与重复解析。
+export async function readJSONWithRaw(env, file) {
   const data = await gh(`/contents/${file}`, env, 'GET')
   let content = ''
   if (data.encoding === 'base64') content = b64d(data.content)
@@ -29,23 +31,51 @@ export async function readJSON(env, file) {
   // 若此时静默返回 []，下一次 writeJSON 就会用空数组把整份数据仓覆盖掉 —— 历史数据全丢。
   // 因此先改用 git blob API 取真实内容；仍取不到就抛错，宁可报错也绝不静默变空。
   if (!content && data.sha && data.size > 0) {
-    const blob = await gh(`/git/blobs/${data.sha}`, env, 'GET')
-    if (blob && blob.encoding === 'base64' && blob.content) content = b64d(blob.content)
+    // blob 读取本身的失败不能冒泡成 404：上层用 404 判断「文件还没创建」，
+    // 把「文件在、内容取不到」误判成「文件不存在」就等于授权了一次空表覆盖
+    try {
+      const blob = await gh(`/git/blobs/${data.sha}`, env, 'GET')
+      if (blob && blob.encoding === 'base64' && blob.content) content = b64d(blob.content)
+    } catch { /* 落到下面的抛错分支 */ }
   }
   if (!content) {
     // 只有文件确实为空（size 为 0，如新建仓库）才允许当作空数组
-    if (!data.size) return []
+    if (!data.size) return { value: [], content: '', sha: data.sha }
     throw new Error(`读取 ${file} 失败：GitHub 返回空内容但文件有 ${data.size} 字节，已中止以避免覆盖数据`)
   }
   try {
-    return JSON.parse(content)
+    return { value: JSON.parse(content), content, sha: data.sha }
   } catch (e) {
     throw new Error(`读取 ${file} 失败：内容不是合法 JSON（${e.message}），已中止以避免覆盖数据`)
   }
 }
 
-export async function writeJSON(env, file, data, message) {
-  const payload = JSON.stringify(data, null, 2)
+export async function readJSON(env, file) {
+  return (await readJSONWithRaw(env, file)).value
+}
+
+// 数据仓一律写紧凑 JSON（不缩进）。
+// 实测同一份数据 compact 比 pretty 小 31%–41%（purchases 608→371KB、items 310→208KB、
+// suppliers 33→19KB），而体积同时决定：GitHub 内容请求的字节数、Worker 解析 CPU、git 历史增速。
+// 代价是文件人工不可读、git diff 一行就是整条记录；数据仓本来就是给程序与 AI 读的，不给人读。
+export function serialize(data) {
+  return JSON.stringify(data, null, 0)
+}
+
+export async function writeJSON(env, file, data, message, opts = {}) {
+  const payload = serialize(data)
+  // 资金保护对「按年分片后的单据文件」同样必须生效：分片只是把同一批单据拆到不同文件，
+  // 每个文件内部仍是「该片旧单据 vs 该片新单据」的整组比对，校验语义与整表完全一致。
+  // 漏掉这一条，退货单锁、关联单锁、核销锁在分片库上就全部失效（可直接改金额保存）。
+  const isDocFile = /^(?:purchases|sales)(?:-\d{4})?\.json$/.test(file)
+  const isPartyFile = /^(?:customers|suppliers)\.json$/.test(file)
+  const protectedFile = isDocFile || isPartyFile
+  // opts.known = 调用方本轮刚读到的该文件原文 { content, sha }（见 readJSONWithRaw）。
+  // 传进来就复用：省掉一次「只为拿 sha」的 GET 和一次整文件 base64 解码。
+  // 复用范围仅限「同一条读取链」：写单张单据时 syncDerived 刚把全表读进内存，
+  // 拿那份原文做 sha 与资金保护校验，与重新回读等价，安全性不打折；
+  // 重试轮一律回源取新 sha（并发写必须由新 sha 暴露成 409，不能拿旧 known 蒙过去）。
+  const known = opts.known || null
   const body = {
     message: message || `update ${file}`,
     content: b64(payload),
@@ -56,29 +86,34 @@ export async function writeJSON(env, file, data, message) {
   // 重试会用本端的旧全量覆盖对方刚写入的内容（丢数据），宁可报错让用户重开单据；
   // 其余 4xx（鉴权/参数问题）重试无意义，直接抛出
   for (let attempt = 1; attempt <= 2; attempt++) {
+    const useKnown = attempt === 1 ? known : null
     try {
       let existing = null
-      try {
-        existing = await gh(`/contents/${file}`, env, 'GET')
-        body.sha = existing.sha
-      } catch {
-        // 文件不存在，不传 sha
-        delete body.sha
+      if (useKnown && typeof useKnown.content === 'string' && useKnown.sha) {
+        existing = { sha: useKnown.sha, encoding: 'base64', content: b64(useKnown.content) }
+        body.sha = useKnown.sha
+      } else {
+        try {
+          existing = await gh(`/contents/${file}`, env, 'GET')
+          body.sha = existing.sha
+        } catch {
+          // 文件不存在，不传 sha
+          delete body.sha
+        }
       }
       // 内容逐字节相同就不提交：保存一张单据要派生写回 items/suppliers/stock/purchases/sales 等
-      // 最多 6 个文件，其中 items.json 约 0.9MB、purchases.json 约 0.5MB，
-      // 重复提交同样内容只会放大 GitHub 写入压力（限流/超时概率），没有任何收益
-      if (existing && existing.encoding === 'base64' && typeof existing.content === 'string'
-        && existing.content && b64d(existing.content) === payload) {
+      // 最多 6 个文件；重复提交同样内容只会放大 GitHub 写入压力（限流/超时概率），没有任何收益
+      if (existing && typeof existing.content === 'string' && existing.content
+        && b64d(existing.content) === payload) {
         return { skipped: true, sha: existing.sha }
       }
-      if (existing && ['purchases.json', 'sales.json', 'customers.json', 'suppliers.json'].includes(file)) {
+      if (existing && protectedFile) {
         let current = existing
         if (!current.content && current.size > 0) current = await gh(`/git/blobs/${current.sha}`, env)
         if (!current.content) throw new Error('资金保护校验无法读取原数据，已中止')
         const before = JSON.parse(b64d(current.content))
         const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-        if (file === 'purchases.json' || file === 'sales.json') {
+        if (isDocFile) {
           const parentIds = new Set(before.filter(o => o.sourceOrderId).map(o => o.sourceOrderId))
           for (const old of before) {
             const next = data.find(o => o.id === old.id)
@@ -111,4 +146,11 @@ export async function writeJSON(env, file, data, message) {
       await new Promise(r => setTimeout(r, status === 429 ? 1500 : 600))
     }
   }
+}
+
+// 列目录：按年分片后要找到 purchases-2025.json 这一族文件。
+// 数据仓是平铺结构，一次列根目录即可拿到全部文件名与 sha。
+export async function listFiles(env) {
+  const data = await gh(`/contents/`, env, 'GET')
+  return Array.isArray(data) ? data : []
 }

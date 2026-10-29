@@ -86,6 +86,15 @@ test('原子提交：先生成单一提交；并发移动分支时拒绝，不�
     const respond = (obj, status = 200) => new Response(JSON.stringify(obj), { status })
     if (path === '/git/ref/heads/main') return respond({ object: { sha: 'base' } })
     if (path === '/git/commits/base') return respond({ tree: { sha: 'treebase' } })
+    // 读取一律走「固定提交快照」：recursive tree 拿路径→blob sha，再按 sha 取内容。
+    // 不再逐文件读 /contents —— 那样读到的不是同一个提交，跨文件会对不上。
+    if (path === '/git/trees/treebase') return respond({ tree: Object.keys(s).map(k => ({ path: `${k}.json`, type: 'blob', sha: `b-${k}` })) })
+    if (path.startsWith('/git/blobs/')) {
+      const key = path.split('/').pop().replace(/^b-/, '')
+      return respond({ encoding: 'base64', content: Buffer.from(JSON.stringify(s[key])).toString('base64') })
+    }
+    // 分片判据：这里模拟「还没迁移过」，退款必须继续写整表
+    if (path === '/contents/.split-yearly.json') return respond({ message: 'Not Found' }, 404)
     if (path.startsWith('/contents/')) { const key = path.split('/').pop().replace('.json', ''); return respond({ content: Buffer.from(JSON.stringify(s[key])).toString('base64') }) }
     if (path === '/git/trees') { const body = JSON.parse(options.body); assert.ok(body.tree.some(e => e.path === 'refunds.json')); assert.ok(body.tree.some(e => e.path === 'sales.json')); return respond({ sha: 'newtree' }) }
     if (path === '/git/commits') return respond({ sha: 'newcommit' })
