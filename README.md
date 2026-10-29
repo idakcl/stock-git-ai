@@ -9,7 +9,7 @@
 ## 目录
 - `src/` — Vue 3 + Element Plus 前端
 - `src/api/index.js` — 前端 API 层（携带票据、15s 内存缓存、写后 20s 强刷窗口）
-- `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNN`）
+- `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNNN`）
 - `src/utils/voucherFlow.js` — **收付款 → 资金单据联动的唯一入口**（纯逻辑，不含 UI）
 - `src/utils/account.js` — 全站唯一账务公式（应收/未收/结清判定）
 - `src/utils/dedupe.js` — 导入去重（前端预览与后端落库共用）
@@ -112,7 +112,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 ### 资金单据（`SK-` / `FK-`）结构
 ```json
 {
-  "code": "SK-20261028-001",
+  "code": "SK-20261028-0001",
   "kind": "receivable",
   "category": "normal",
   "party": "张三",
@@ -126,7 +126,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 }
 ```
 - `kind`：`receivable`（收款单，存 `receipts.json`）/ `payable`（付款单，存 `payment-vouchers.json`）。
-- `code`：`SK-`/`FK-` + `YYYYMMDD`（凭证日期）+ 3 位序号；序号 = **当天同前缀已有最大序号 + 1**，不用全局计数器。
+- `code`：`SK-`/`FK-` + `YYYYMMDD`（凭证日期）+ 4 位序号；序号 = **当天同前缀已有最大序号 + 1**，不用全局计数器。
 - `category` 只用于列表/抽屉展示区分，不参与金额计算：`normal`（收付款）、`deposit-recharge`（预存/预付充值）、`deposit-over`（超额收付转存）、`deposit-deduct`（用预存款/预付款抵扣货款的划转）。后两类允许 `items[0].orderId` 为空串（纯资金变动，不挂单号）。
 - **一张凭证可覆盖多张单据**：`items[]` 多条，`total` = Σ`items[].amount`；反方向的对应关系靠单据流水里的 `payments[].voucher` 回写，即**一笔流水 ↔ 一张凭证**。
 - 红线：**钱只要动了就必须有凭证**；纯抹零优惠（钱没动）不生成凭证，也不占用编号。
@@ -330,7 +330,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
   "discount": 0,
   "paid": 736.2,
   "settle": "结清",
-  "payments": [ { "date": "2026-10-11", "amount": 736.2, "remark": "历史收付", "time": "", "voucher": "FK-20261011-001" } ],
+  "payments": [ { "date": "2026-10-11", "amount": 736.2, "remark": "历史收付", "time": "", "voucher": "FK-20261011-0001" } ],
   "remark": "备注内容（可选）"
 }
 ```

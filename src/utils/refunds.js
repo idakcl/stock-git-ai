@@ -60,7 +60,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
         qty: -qty, price: Number(row.price), total: -value }
     })
     const total = round2(lines.reduce((s, l) => s + l.total, 0))
-    const id = genVoucherCode(input.kind === 'sale' ? 'XT' : 'CT', input.date, orders.map(o => ({ code: o.id })), 4)
+    const id = genVoucherCode(input.kind === 'sale' ? 'XT' : 'CT', input.date, orders.map(o => ({ code: o.id })))
     const entry = { id, type: `${input.kind}-return`, sourceOrderId: source.id, no: source.no || '',
       [partyKey]: source[partyKey], date: input.date, items: lines, total, discount: 0,
       returnReason: String(input.reason).trim(), refundMode: mode, remark: String(input.remark || ''),

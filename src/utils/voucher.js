@@ -1,5 +1,6 @@
-// 收付款单编码生成：SK-YYYYMMDD-NNN（收款单）/ FK-YYYYMMDD-NNN（付款单）
-// 序号 = 当天（同前缀 + 同日）已存在单据数量 + 1，补零三位。
+// 资金/退款单据编码生成：SK-YYYYMMDD-NNNN（收款单）/ FK-YYYYMMDD-NNNN（付款单）
+// TK-YYYYMMDD-NNNN（退款单）/ HX-YYYYMMDD-NNNN（退货核销凭证）
+// 序号 = 当天（同前缀 + 同日）已存在单据数量 + 1，补零四位。
 // 这样同一天多张单据自然递增，且不依赖全局自增计数器（避免并发/漏号问题）。
 
 // 把任意可读日期规整成 YYYYMMDD 八位，无法解析时回退今天
@@ -15,11 +16,10 @@ export function ymd8(date) {
 }
 
 // 生成下一个单据编码
-//   prefix: 'SK' | 'FK' | 'XT' | 'CT'
+//   prefix: 'SK' | 'FK' | 'TK' | 'HX' | 'XT' | 'CT'
 //   date:   本次单据日期（YYYY-MM-DD 或任意可解析日期）
 //   list:   已有的同类型单据数组（取其中 code 字段比对）
-//   digits: 流水位数，资金单据 3 位；退货单 4 位（XT-/CT-YYYYMMDD-NNNN）
-export function genVoucherCode(prefix, date, list, digits = 3) {
+export function genVoucherCode(prefix, date, list) {
   const head = `${prefix}-${ymd8(date)}-`
   let max = 0
   for (const v of (list || [])) {
@@ -29,5 +29,5 @@ export function genVoucherCode(prefix, date, list, digits = 3) {
       if (m) max = Math.max(max, parseInt(m[1], 10) || 0)
     }
   }
-  return `${head}${String(max + 1).padStart(digits, '0')}`
+  return `${head}${String(max + 1).padStart(4, '0')}`
 }

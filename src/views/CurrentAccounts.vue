@@ -689,7 +689,7 @@ async function onBatchApplied(groups) {
     // 组装资金单据条目（orderId / 类型 / 本次金额 / 本次优惠 / 是否结清）
     // 结清口径以「本次入账后该单最终净额」为准，不再只看手动的 settleIds：
     // 合并收款把金额收满（或抹零结清）时也必须落成「结清」，否则凭证显示挂账、
-    // 单据流水里也找不到「结清收款」这条备注（SK-20261028-008）。
+    // 单据流水里也找不到「结清收款」这条备注（SK-20261028-0008）。
     const voucherItems = orderIds.filter(id => working[id]).map(id => {
       const o = working[id]
       const amount = round2(allocAmount[id] || 0)
