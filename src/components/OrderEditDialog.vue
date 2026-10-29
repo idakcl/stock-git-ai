@@ -182,7 +182,7 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
-import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
+import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
@@ -589,14 +589,24 @@ async function doSave() {
     entry[sumField.value] = round2(cashOldTotal + Math.max(0, delta) + depositFromTotal)
     form.depositPay = depositFromTotal
   }
-  // 红线校验①：实付/实收合计不得超过应付/应收总额（折后总价），超额保存无意义（多付部分请走「收款/付款」弹窗转预存）
+  // 红线校验①：实付/实收合计不得超过本单应付/应收总额（合计 × 折扣链 − 整单优惠）。
+  // 上限必须用 grossOf（应付/应收总额），不能用 payableOf / receivableOf ——
+  // 那两个是「未付/未收余额」：已结清的单据余额恒为 0，拿余额当上限会把
+  // 实付＝应付的正常单据全部拦下（编辑任何一张已付满的单都存不了，
+  // 新增时选「结清」并填实付同样被拦）。该错误自 1f3fc72 引入起就存在。
   const paidAtSave = isPurchase.value ? paidSumOf(entry) : receivedSumOf(entry)
-  const dueAtSave = isPurchase.value ? payableOf(entry) : receivableOf(entry)
-  if (paidAtSave > dueAtSave + 0.005) {
-    return ElMessage.error(`实${payWord.value}金额不能超过应付/应收总额 ¥${dueAtSave.toFixed(2)}（当前实${payWord.value} ¥${paidAtSave.toFixed(2)}）。请调低「实${payWord.value}金额」或减少抵扣。`)
+  const dueTotalAtSave = grossOf(entry)
+  const over = overpaidOf(entry, isPurchase.value ? 'payable' : 'receivable')
+  if (over > 0.005) {
+    // 编辑单里把「实付金额」调小并不会改写历史流水（每笔流水各自对应已开的资金单据），
+    // 所以提示必须指向真正能改的地方；否则用户照着提示调小实付、再点保存还是被拦。
+    return ElMessage.error(isEdit
+      ? `本单已记${payWord.value}款流水合计 ¥${paidAtSave.toFixed(2)}，超过${dueWord.value}总额 ¥${dueTotalAtSave.toFixed(2)}（超出 ¥${over.toFixed(2)}）。\n` +
+        `编辑弹窗不会改动历史${payWord.value}款流水，请到详情页「记录${payWord.value}款」里逐笔修改，或把${dueWord.value}（合计／折扣／优惠）调回不低于已${payWord.value}金额；多${payWord.value}的部分也可转为${depositLabel.value}。`
+      : `实${payWord.value}金额不能超过${dueWord.value}总额 ¥${dueTotalAtSave.toFixed(2)}（当前实${payWord.value} ¥${paidAtSave.toFixed(2)}，超出 ¥${over.toFixed(2)}）。请调低「实${payWord.value}金额」或减少抵扣。`)
   }
-  // 红线校验②：结清状态下未付款必须为 0（按金额判定，与结算状态标签无关；容忍半分钱以内的浮点尘）
-  const debtAtSave = dueAtSave
+  // 红线校验②：结清状态下未付/未收必须为 0（按金额判定，与结算状态标签无关；容忍半分钱以内的浮点尘）
+  const debtAtSave = isPurchase.value ? payableOf(entry) : receivableOf(entry)
   if (form.settle === '结清' && debtAtSave > 0.005) {
     return ElMessage.error(`「结清」状态下未付款必须为 0，但当前仍有未付款 ¥${debtAtSave.toFixed(2)}。请调高「实${payWord.value}金额」或「整单优惠金额」后再保存。`)
   }

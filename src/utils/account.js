@@ -149,6 +149,15 @@ export function netOf(order, kind) {
   return kind === 'payable' ? payableOf(order) : receivableOf(order)
 }
 
+// 保存红线：累计实收/实付相对「应收/应付总额」的超出额（单位元，已 round2，欠付一律 0）。
+// 上限必须是 grossOf（应收/应付总额），不是 netOf（未收/未付余额）——
+// 结清单据的余额恒为 0，拿余额当上限会把「实付＝应付」的正常单据全部误拦。
+// 红字单据（退货单，total<0）：实付为负、总额也为负，超出额同样 ≤0，不会被拦。
+export function overpaidOf(order, kind) {
+  const paid = kind === 'payable' ? paidSumOf(order) : receivedSumOf(order)
+  return Math.max(0, round2(paid - grossOf(order)))
+}
+
 // 展示层结清判定：以金额为准——未收/未付 ≤ 1e-6（浮点尘容忍，与 syncPayments 口径一致）即结清。
 // 不再让库内 settle 标签短路判定：脏数据（标了结清但钱没收回）必须暴露为挂账，
 // 否则会出现「未付合计 > 0 却显示 0 单未结清」的自相矛盾（C202610251227400005 事故：
