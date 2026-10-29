@@ -64,15 +64,20 @@
             <span :class="payableOf(row) > 0 ? 'debt' : 'none'">{{ payableOf(row).toFixed(2) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="结算状态" width="130">
+        <el-table-column label="结算状态" width="160">
           <template #default="{ row }">
-            <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
-              {{ settleLabelOf(row) }}
-            </el-tag>
-            <!-- 未付为 0 且无抹零优惠时不显示；两个改账动作：改结清＝结清未付差额，改挂账＝撤销抹零优惠、恢复未付 -->
-            <el-button v-if="!isReturn(row) && settleActionOf(row) !== 'none'" link size="small" type="primary" style="margin-left:4px" @click="toggleSettle(row)">
-              {{ settleActionOf(row) === 'settle' ? '改结清' : '改挂账' }}
-            </el-button>
+            <!-- 状态标签与改账按钮取同一高度（标签默认档 24px = small link 按钮 24px），
+                 并用 .settle-cell 强制同行不换行：列宽 130 时二者会挤成两行，
+                 标签加了状态点后又宽了 7px，换行更明显 -->
+            <span class="settle-cell">
+              <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" disable-transitions>
+                {{ settleLabelOf(row) }}
+              </el-tag>
+              <!-- 未付为 0 且无抹零优惠时不显示；两个改账动作：改结清＝结清未付差额，改挂账＝撤销抹零优惠、恢复未付 -->
+              <el-button v-if="!isReturn(row) && settleActionOf(row) !== 'none'" link size="small" type="primary" @click="toggleSettle(row)">
+                {{ settleActionOf(row) === 'settle' ? '改结清' : '改挂账' }}
+              </el-button>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="收付款单" min-width="170" show-overflow-tooltip>
@@ -555,6 +560,7 @@ async function remove(row) {
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .voucher-codes{color:var(--text-secondary);}
+.settle-cell{display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
 .item-codes{color:var(--text-secondary);}
 .debt{color:var(--color-danger);font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}

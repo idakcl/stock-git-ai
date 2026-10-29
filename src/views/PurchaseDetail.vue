@@ -30,6 +30,13 @@
           <router-link v-if="supplierCodeMap[purchase.supplier]" :to="`/supplier/${supplierCodeMap[purchase.supplier]}`" class="link">{{ purchase.supplier }}</router-link>
           <span v-else>{{ purchase.supplier }}</span>
         </span>
+        <!-- 勾「显示供应商信息详情」时，页面与打印/导出同步显示联系方式：
+             只印不显会造成「纸上有的信息在屏幕上反而看不到」，两处必须同一口径 -->
+        <template v-if="showPartyInfo">
+          <span>联系人：{{ supplierInfo.contact || '—' }}</span>
+          <span>电话：{{ supplierInfo.phone || '—' }}</span>
+          <span>地址：{{ supplierInfo.address || '—' }}</span>
+        </template>
         <span>记录时间：{{ orderTimeOf(purchase) }}</span>
         <!-- 退款单必须能回到原采购单：以后所有退款单都带 sourceOrderId -->
         <span v-if="isReturn(purchase)">原采购单：
@@ -51,7 +58,9 @@
         <span v-else class="price-hidden-note">（价格与金额已隐藏）</span>
         <span class="settle-cell">
           结算状态：
-          <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
+          <!-- 状态标签与改账按钮取同一高度（标签默认档 24px = small link 按钮 24px）并禁止换行：
+               以前标签 small（20px）配按钮（24px）一高一矮，还常被挤成两行 -->
+          <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" disable-transitions>
             {{ settleLabel }}
           </el-tag>
           <!-- 未付 0 且无优惠时不显示；两个改账动作：改结清＝结清未付差额，改挂账＝撤销抹零优惠、恢复未付 -->
@@ -61,7 +70,14 @@
             {{ settleAction === 'settle' ? '改结清' : '改挂账' }}
           </el-button>
         </span>
-        <span v-if="purchase.remark">备注：{{ purchase.remark }}</span>
+        <!-- 备注单独一个轻量入口：补一句话不必打开整单编辑弹窗（那要重算金额明细，风险大得多） -->
+        <span class="remark-cell">
+          备注：<span v-if="purchase.remark">{{ purchase.remark }}</span><span v-else class="none">—</span>
+          <el-button v-if="!externalView" link size="small" type="primary" class="settle-btn"
+            :disabled="!found" @click="remarkDialog = true">
+            {{ purchase.remark ? '编辑备注' : '添加备注' }}
+          </el-button>
+        </span>
       </div>
       <div class="photos-block">
         <div class="photos-title">
@@ -132,6 +148,9 @@
 
     <!-- 轻量补照片：仅更新本单 photos 字段 -->
     <OrderPhotoDialog v-model="photoDialog" :order="purchase" @saved="onPhotosSaved" />
+
+    <!-- 轻量补备注：仅更新本单 remark 字段 -->
+    <OrderRemarkDialog v-model="remarkDialog" :order="purchase" placeholder="例如：货款月结、发票待开、到货分两批…" @saved="onRemarkSaved" />
   </div>
 </template>
 
@@ -144,6 +163,7 @@ import { isReturn } from '../utils/refunds.js'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
+import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { payableOf, grossOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
@@ -163,6 +183,8 @@ const suppliers = ref([])
 const loading = ref(true)
 const payDialog = ref(false)
 const photoDialog = ref(false)
+// 备注弹窗（轻量，只改 remark 字段）
+const remarkDialog = ref(false)
 const editDialog = ref(false)
 // 保存中标记：配合弹窗按钮 loading，防止双击重复提交
 const saving = ref(false)
@@ -176,6 +198,10 @@ const supplierAdvanceBalance = computed(() => {
   return depositSumOf(s && s.advances)
 })
 // 供应商名 → 编码：详情页点供应商名跳转供应商详情
+// 本单供应商的档案（联系人/电话/地址）：页面显示与打印导出的联系方式取同一份数据，
+// 避免「勾了显示供应商信息详情，纸上有了、屏幕上还要靠打印预览看」
+const supplierInfo = computed(() =>
+  (suppliers.value || []).find(x => x.name === purchase.value.supplier) || {})
 const supplierCodeMap = computed(() => {
   const m = {}
   ;(suppliers.value || []).forEach(s => { if (s && s.name) m[s.name] = s.code })
@@ -359,7 +385,7 @@ const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品`)
 const AMOUNT_FIELD_LABELS = ['合计', '原价合计', '整单折扣', '折后金额', '优惠', '应付', '实付', '未付']
 const docHeaderFields = computed(() => {
   const o = purchase.value
-  const s = (suppliers.value || []).find(x => x.name === o.supplier) || {}
+  const s = supplierInfo.value
   const fields = [
     ['供应商', o.supplier || '—'],
     ...(showPartyInfo.value ? [['联系人', s.contact], ['电话', s.phone], ['地址', s.address]] : []),
@@ -434,6 +460,26 @@ async function onPhotosSaved(photos) {
   }
   photoDialog.value = false
   ElMessage.success('已更新单据照片')
+}
+
+// 保存备注：只合并 remark 一个字段。金额、明细、付款流水原样带回去，
+// 后端资金保护里退货单锁比对的是「去掉 photos/remark 的其余字段」，所以补备注不会被锁住，
+// 也不会绕过锁改到金额
+async function onRemarkSaved(text) {
+  const cur = purchase.value
+  const idx = purchases.value.findIndex(p => p.id === cur.id)
+  if (idx < 0) return
+  const origin = purchases.value[idx]
+  purchases.value[idx] = { ...origin, remark: text }
+  try {
+    await api.savePurchases(purchases.value)
+  } catch (e) {
+    purchases.value[idx] = origin
+    ElMessage.error(`保存失败：${e.message || '网络异常'}，请重试`)
+    return
+  }
+  remarkDialog.value = false
+  ElMessage.success(text ? '已保存备注' : '已清空备注')
 }
 
 // 编辑本单：弹窗组装好 entry 后在此落库，保存成功后重拉数据，页面原地刷新
@@ -514,7 +560,8 @@ onMounted(async () => {
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .external-banner { margin-bottom: 12px; }
 .price-hidden-note { color: var(--text-secondary); }
-.settle-cell { display: inline-flex; align-items: center; gap: 4px; }
+.settle-cell { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.remark-cell { display: inline-flex; align-items: center; gap: 4px; }
 .settle-btn { margin-left: 2px; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color:var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
