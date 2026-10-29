@@ -74,11 +74,6 @@
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column prop="remark" label="备注" min-width="160" show-overflow-tooltip />
-          <el-table-column label="操作" width="90" align="center">
-            <template #default="{ row }">
-              <el-button size="small" @click.stop="openDrawer(row)">查看</el-button>
-            </template>
-          </el-table-column>
         </el-table>
       </div>
       <el-empty v-if="!filteredList.length" :description="loadError ? `资金单据读取失败：${loadError}` : `暂无${tabLabel}——收款/付款/结清、预存预付与超额转存时自动生成`" />
@@ -241,11 +236,6 @@ function enrichedItems(voucher) {
     const meta = orderMeta.value[`${orderType}:${it.orderId}`] || {}
     return { ...it, orderType, date: meta.date || it.date || '', time: meta.time || fmtCNTime(it.date), remark: it.remark || meta.remark || '' }
   })
-}
-
-function openDrawer(row) {
-  if (!row || !row.code) return
-  router.push({ path: '/vouchers', query: { ...route.query, code: row.code } })
 }
 
 // 业务子类别保持独立，普通单据按收付方向分别命名。
