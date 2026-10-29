@@ -22,6 +22,60 @@ export const VOUCHER_CATEGORY = {
   'deposit-deduct': '预存款抵扣'
 }
 
+// 把客户预存款 / 供应商预付款流水逐条对上资金单据编号（供详情页「关联收付款单据」列展示）。
+// 优先使用流水上已回写的 voucher（新充值会写入）；历史流水按以下顺序兜底匹配，且每张单据只消费一次，
+// 避免同一天同金额的多笔充值都显示成同一个编号：
+//   1) 抵扣流水（负数、带 order）：按 orderId + 金额匹配 deposit-deduct 单；
+//   2) 超额转存（正数、带 order）：按单位 + 日期 + 金额匹配 deposit-over 单（日期不一致时按单位+金额兜底）；
+//   3) 手动充值（正数、不带 order）：按单位 + 日期 + 金额匹配 deposit-recharge 单。
+// 返回与 flows 等长的编号数组，匹配不到的位置为空串。
+export function mapDepositVouchers(flows, vouchers, party) {
+  const rows = flows || []
+  const list = vouchers || []
+  const out = new Array(rows.length).fill('')
+  const used = new Set()
+  const ymd = v => String(v || '').slice(0, 10)
+  const amt = v => round2(Math.abs(Number(v || 0)))
+  const take = (i, hit) => { out[i] = hit.code; used.add(hit.code) }
+
+  // 1) 流水上已回写的编号优先
+  rows.forEach((f, i) => {
+    const code = f && f.voucher
+    if (!code) return
+    const hit = list.find(v => v.code === code && !used.has(v.code))
+    if (hit) take(i, hit)
+  })
+
+  // 2) 抵扣与超额转存：靠 order 定位
+  rows.forEach((f, i) => {
+    if (out[i] || !f || !f.order) return
+    const amount = amt(f.amount)
+    const positive = Number(f.amount) > 0
+    const hit = positive
+      ? list.find(v => !used.has(v.code) && v.category === 'deposit-over' && v.party === party &&
+          amt(v.total) === amount && ymd(v.date) === ymd(f.date))
+      : list.find(v => !used.has(v.code) && v.category === 'deposit-deduct' &&
+          (v.items || []).some(it => it.orderId === f.order && amt(it.amount) === amount))
+    if (hit) take(i, hit)
+  })
+  // 2b) 超额转存单日期可能取订单日期而非流水日期，按单位+金额兜底
+  rows.forEach((f, i) => {
+    if (out[i] || !f || !f.order || Number(f.amount) <= 0) return
+    const hit = list.find(v => !used.has(v.code) && v.category === 'deposit-over' &&
+      v.party === party && amt(v.total) === amt(f.amount))
+    if (hit) take(i, hit)
+  })
+
+  // 3) 手动充值：按单位 + 日期 + 金额
+  rows.forEach((f, i) => {
+    if (out[i] || !f || f.order || Number(f.amount) <= 0) return
+    const hit = list.find(v => !used.has(v.code) && v.category === 'deposit-recharge' &&
+      v.party === party && amt(v.total) === amt(f.amount) && ymd(v.date) === ymd(f.date))
+    if (hit) take(i, hit)
+  })
+  return out
+}
+
 // 当天同前缀已有单据数 + 1：预分配 n 个连续不重号编码。
 // 为什么要「先分配、后保存」：资金单据编号要写回单据流水（payments[].voucher），
 // 若等单据集合落库再生成编号，就得把整表再覆盖一次（两次 GitHub 往返 + 中途失败的悬挂风险）。

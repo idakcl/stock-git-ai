@@ -858,6 +858,17 @@ async function onRechargeSaved(payload) {
   }]
   try {
     const { created } = await appendVouchers(api, kind, bases)
+    const code = created[0]?.code
+    if (code) {
+      // 编号回写到充值流水，详情页「关联收付款单据」列可精确展示
+      const latest = kind === 'receivable' ? cust : sup
+      const entity2 = (latest || []).find(x => x.name === name)
+      const flow = (entity2?.[field] || []).find(f => f.time === now)
+      if (flow) {
+        flow.voucher = code
+        try { await save(latest) } catch { /* 展示层仍会按单位/日期/金额兜底匹配 */ }
+      }
+    }
     const codes = created.map(v => v.code).filter(Boolean)
     if (codes.length) ElMessage.success(`已生成资金单据：${codes.join('、')}`)
   } catch (e) {

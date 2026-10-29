@@ -150,9 +150,9 @@
                 </b>
               </template>
             </el-table-column>
-            <el-table-column label="关联单据" width="180">
-              <template #default="{ row }">
-                <router-link v-if="row.order" :to="`/sale/${row.order}`" class="link" :class="{ 'return-code': isReturnId(row.order) }">{{ row.order }}</router-link>
+            <el-table-column label="关联收付款单据" width="180">
+              <template #default="{ $index }">
+                <router-link v-if="depositVouchers[$index]" :to="{ path: '/vouchers', query: { code: depositVouchers[$index] } }" class="link">{{ depositVouchers[$index] }}</router-link>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -210,13 +210,14 @@ import ProductTable from '../components/ProductTable.vue'
 import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 import { isReturn, isReturnId } from '../utils/refunds.js'
-import { appendVouchers } from '../utils/voucherFlow'
+import { appendVouchers, mapDepositVouchers } from '../utils/voucherFlow'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const route = useRoute()
 const customers = ref([])
 const items = ref([])
 const sales = ref([])
+const receipts = ref([])
 const tab = ref('products')
 const dateStart = ref('')
 const dateEnd = ref('')
@@ -227,6 +228,8 @@ const customer = computed(() => customers.value.find(c => c.code === route.param
 
 // ---- 预存款：余额 = 客户档案 deposits 流水合计；支持单独充值/删除 ----
 const depositBalance = computed(() => depositSumOf(customer.value.deposits))
+// 每条预存款流水对应的收款单编号（新充值优先用流水上回写的 voucher，历史流水按单位/日期/金额/订单兜底匹配）
+const depositVouchers = computed(() => mapDepositVouchers(customer.value.deposits || [], receipts.value, customer.value.name))
 const depositDialog = ref(false)
 const depSaving = ref(false)
 const depDraft = ref({ date: '', amount: null, remark: '' })
@@ -245,12 +248,13 @@ async function saveDeposit() {
     const c = list.find(x => x.code === customer.value.code)
     if (!c) return ElMessage.error('客户档案未找到，请刷新页面重试')
     const date = depDraft.value.date || todayCN()
-    c.deposits = [...(c.deposits || []), {
+    const flow = {
       date,
       amount,
       remark: depDraft.value.remark || '',
       time: new Date().toISOString()
-    }]
+    }
+    c.deposits = [...(c.deposits || []), flow]
     await api.saveCustomers(list)
     customers.value = list
     depositDialog.value = false
@@ -258,15 +262,21 @@ async function saveDeposit() {
     // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的收款单
     const note = '存入客户预存款'
     try {
-      const { created } = await appendVouchers(api, 'receivable', [{
+      const { all, created } = await appendVouchers(api, 'receivable', [{
         category: 'deposit-recharge',
         party: customer.value.name,
         date,
         remark: depDraft.value.remark || note,
         items: [{ orderId: '', orderType: '', amount, note }]
       }])
-      const codes = created.map(v => v.code).filter(Boolean)
-      if (codes.length) ElMessage.success(`已生成收款单：${codes.join('、')}`)
+      if (Array.isArray(all)) receipts.value = all
+      const code = created[0]?.code
+      if (code) {
+        // 编号回写到流水，详情页「关联收付款单据」列直接按流水精确展示
+        flow.voucher = code
+        try { await api.saveCustomers(customers.value) } catch { /* 展示层仍会按单位/日期/金额兜底匹配 */ }
+        ElMessage.success(`已生成收款单：${code}`)
+      }
     } catch (e) {
       ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
     }
@@ -416,10 +426,11 @@ const ledgerSummary = ({ columns, data }) => {
 
 onMounted(async () => {
   try {
-    const [cu, it, sa] = await Promise.all([api.getCustomers(), api.getItems(), api.getSales()])
+    const [cu, it, sa, rc] = await Promise.all([api.getCustomers(), api.getItems(), api.getSales(), api.getReceipts().catch(() => [])])
     customers.value = cu
     items.value = it
     sales.value = sa
+    receipts.value = rc || []
   } catch (e) { customers.value = []; items.value = []; sales.value = [] }
 })
 </script>

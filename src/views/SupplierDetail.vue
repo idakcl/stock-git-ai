@@ -149,9 +149,9 @@
                 </b>
               </template>
             </el-table-column>
-            <el-table-column label="关联单据" width="180">
-              <template #default="{ row }">
-                <router-link v-if="row.order" :to="`/purchase/${row.order}`" class="link" :class="{ 'return-code': isReturnId(row.order) }">{{ row.order }}</router-link>
+            <el-table-column label="关联收付款单据" width="180">
+              <template #default="{ $index }">
+                <router-link v-if="advanceVouchers[$index]" :to="{ path: '/vouchers', query: { code: advanceVouchers[$index] } }" class="link">{{ advanceVouchers[$index] }}</router-link>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -240,12 +240,13 @@ import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import { isReturn, isReturnId } from '../utils/refunds.js'
-import { appendVouchers } from '../utils/voucherFlow'
+import { appendVouchers, mapDepositVouchers } from '../utils/voucherFlow'
 
 const route = useRoute()
 const suppliers = ref([])
 const items = ref([])
 const purchases = ref([])
+const vouchers = ref([])
 const tab = ref('products')
 const dateStart = ref('')
 const dateEnd = ref('')
@@ -254,6 +255,8 @@ const supplier = computed(() => suppliers.value.find(s => s.code === route.param
 
 // ---- 预付款：余额 = 供应商档案 advances 流水合计；支持单独充值/删除 ----
 const advanceBalance = computed(() => depositSumOf(supplier.value.advances))
+// 每条预付款流水对应的付款单编号（新充值优先用流水上回写的 voucher，历史流水按单位/日期/金额/订单兜底匹配）
+const advanceVouchers = computed(() => mapDepositVouchers(supplier.value.advances || [], vouchers.value, supplier.value.name))
 const advanceDialog = ref(false)
 const advSaving = ref(false)
 const advDraft = ref({ date: '', amount: null, remark: '' })
@@ -272,12 +275,13 @@ async function saveAdvance() {
     const s = list.find(x => x.code === supplier.value.code)
     if (!s) return ElMessage.error('供应商档案未找到，请刷新页面重试')
     const date = advDraft.value.date || todayCN()
-    s.advances = [...(s.advances || []), {
+    const flow = {
       date,
       amount,
       remark: advDraft.value.remark || '',
       time: new Date().toISOString()
-    }]
+    }
+    s.advances = [...(s.advances || []), flow]
     await api.saveSuppliers(list)
     suppliers.value = list
     advanceDialog.value = false
@@ -285,15 +289,21 @@ async function saveAdvance() {
     // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的付款单
     const note = '存入供应商预付款'
     try {
-      const { created } = await appendVouchers(api, 'payable', [{
+      const { all, created } = await appendVouchers(api, 'payable', [{
         category: 'deposit-recharge',
         party: supplier.value.name,
         date,
         remark: advDraft.value.remark || note,
         items: [{ orderId: '', orderType: '', amount, note }]
       }])
-      const codes = created.map(v => v.code).filter(Boolean)
-      if (codes.length) ElMessage.success(`已生成付款单：${codes.join('、')}`)
+      if (Array.isArray(all)) vouchers.value = all
+      const code = created[0]?.code
+      if (code) {
+        // 编号回写到流水，详情页「关联收付款单据」列直接按流水精确展示
+        flow.voucher = code
+        try { await api.saveSuppliers(suppliers.value) } catch { /* 展示层仍会按单位/日期/金额兜底匹配 */ }
+        ElMessage.success(`已生成付款单：${code}`)
+      }
     } catch (e) {
       ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
     }
@@ -514,10 +524,11 @@ const ledgerSummary = ({ columns, data }) => {
 onMounted(load)
 async function load() {
   try {
-    const [sp, it, pu] = await Promise.all([api.getSuppliers(), api.getItems(), api.getPurchases()])
+    const [sp, it, pu, vs] = await Promise.all([api.getSuppliers(), api.getItems(), api.getPurchases(), api.getPaymentVouchers().catch(() => [])])
     suppliers.value = sp
     items.value = it
     purchases.value = pu
+    vouchers.value = vs || []
   } catch (e) { suppliers.value = []; items.value = []; purchases.value = [] }
 }
 </script>
