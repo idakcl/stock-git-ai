@@ -35,7 +35,7 @@
         </el-select>
       </el-form-item>
       <el-form-item label="日期"><el-date-picker v-model="form.date" type="date" value-format="YYYY-MM-DD" /></el-form-item>
-      <el-form-item label="结算">
+      <el-form-item label="结算状态">
         <el-radio-group v-model="form.settle">
           <el-radio-button label="挂账" />
           <el-radio-button label="结清" />

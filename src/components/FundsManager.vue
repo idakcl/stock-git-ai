@@ -95,7 +95,7 @@
                 <span :class="netOf(row) > 0 ? 'debt' : 'none'">{{ netOf(row).toFixed(2) }}</span>
               </template>
             </el-table-column>
-            <el-table-column label="结算" width="90">
+            <el-table-column label="结算状态" width="90">
               <template #default="{ row }">
                 <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
                   {{ settleLabelOf(row) }}
@@ -305,7 +305,7 @@ const exportColumns = computed(() => [
   { label: L.value.paid, value: r => { const n = payCountOf(r); return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => Number(r.discount || 0) > 0 ? '-' + Number(r.discount).toFixed(2) : '—' },
   { label: L.value.unpaid, value: r => netOf(r).toFixed(2) },
-  { label: '结算', value: r => settleLabelOf(r) },
+  { label: '结算状态', value: r => settleLabelOf(r) },
   { label: '备注', prop: 'remark' }
 ])
 

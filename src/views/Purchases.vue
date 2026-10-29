@@ -64,7 +64,7 @@
             <span :class="payableOf(row) > 0 ? 'debt' : 'none'">{{ payableOf(row).toFixed(2) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="结算" width="130">
+        <el-table-column label="结算状态" width="130">
           <template #default="{ row }">
             <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
               {{ settleLabelOf(row) }}
@@ -220,7 +220,7 @@ const exportColumns = [
   { label: '实付', value: r => { const n = ensurePayments(r, 'paid').length; return paidSumOf(r).toFixed(2) + (n > 1 ? `（${n}笔）` : '') } },
   { label: '优惠', value: r => (Number(r.discount || 0) ? Number(r.discount).toFixed(2) : '') },
   { label: '未付', value: r => payableOf(r).toFixed(2) },
-  { label: '结算', value: r => settleLabelOf(r) },
+  { label: '结算状态', value: r => settleLabelOf(r) },
   { label: '资金单据编号', value: r => voucherCodesOf(r).join('、') },
   { label: '备注', prop: 'remark' }
 ]

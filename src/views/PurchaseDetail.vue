@@ -44,7 +44,7 @@
           未付：<b :class="unpaid > 0 ? 'debt' : 'zero'">¥ {{ unpaid.toFixed(2) }}</b>
         </span>
         <span class="settle-cell">
-          结算：
+          结算状态：
           <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
             {{ settleLabel }}
           </el-tag>
@@ -362,7 +362,7 @@ const docHeaderFields = computed(() => {
     ['应付', `¥${dueAmount.value.toFixed(2)}`],
     ['实付', `¥${paidSum.value.toFixed(2)}${payments.value.length ? `（${payments.value.length} 笔）` : ''}`],
     ['未付', `¥${unpaid.value.toFixed(2)}`],
-    ['结算', settleLabel.value],
+    ['结算状态', settleLabel.value],
     ['备注', o.remark]
   )
   if (hidePrice.value || externalView.value) return fields.filter(([label]) => !AMOUNT_FIELD_LABELS.includes(label))

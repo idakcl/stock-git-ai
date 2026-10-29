@@ -46,7 +46,7 @@
           批量设置：
           优惠 ¥<el-input-number v-model="bulkDiscount" :min="0" :precision="2" :controls="false" size="small" style="width:104px" />
           <el-button size="small" @click="applyBulkDiscount">应用到所选</el-button>
-          结算
+          结算状态
           <el-select v-model="bulkSettle" size="small" style="width:104px" @change="applyBulkSettle">
             <el-option label="请选择" value="" />
             <el-option label="结清" value="结清" />

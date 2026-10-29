@@ -62,7 +62,7 @@
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
-            <el-table-column label="结算" width="100">
+            <el-table-column label="结算状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
                   {{ settleLabelOf(row) }}
@@ -117,7 +117,7 @@
                 <b :class="row.balance > 0 ? 'amount-debt' : 'amount-zero'">{{ row.balance.toFixed(2) }}</b>
               </template>
             </el-table-column>
-            <el-table-column prop="settle" label="结算" width="100">
+            <el-table-column prop="settle" label="结算状态" width="100">
               <template #default="{ row }">
                 <el-tag :type="row.settle === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
                   {{ row.settle || '挂账' }}

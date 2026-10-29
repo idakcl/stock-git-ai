@@ -128,7 +128,7 @@
           <el-table-column label="本次优惠" width="100" align="right">
             <template #default="{ row }">{{ Number(row.discount || 0) > 0 ? Number(row.discount).toFixed(2) : '—' }}</template>
           </el-table-column>
-          <el-table-column label="结算" width="80" align="center">
+          <el-table-column label="结算状态" width="80" align="center">
             <template #default="{ row }">
               <el-tag v-if="row.settle != null" :type="row.settle ? 'success' : 'danger'" size="small" disable-transitions>{{ row.settle ? '结清' : '挂账' }}</el-tag>
               <span v-else class="none">—</span>
@@ -258,7 +258,7 @@ const voucherColumns = [
   { label: '时间', value: r => r.time || r.date || '' },
   { label: '本次金额', value: r => Number(r.amount || 0).toFixed(2) },
   { label: '本次优惠', value: r => Number(r.discount || 0) > 0 ? Number(r.discount).toFixed(2) : '' },
-  { label: '结算', value: r => r.settle ? '结清' : '挂账' },
+  { label: '结算状态', value: r => r.settle ? '结清' : '挂账' },
   { label: '备注', prop: 'remark' }
 ]
 function exportVoucher() {

@@ -85,43 +85,36 @@
         </div>
         <div class="net-side">
           <div class="net-side-title net-side-title-row">
-            <span>往来排行（按净额）</span>
+            <span>往来排行（{{ rankMetricLabel }}）</span>
             <div class="rank-topn">
               <span class="rank-topn-label">Top</span>
               <el-select v-model="rankTopN" style="width:92px">
                 <el-option v-for="n in [3, 5, 10, 20]" :key="n" :label="n" :value="n" />
               </el-select>
             </div>
-            <TableToolbar filename="来往账-债权债务排行" title="来往账·债权债务排行" :subtitle="rankSubtitle" :columns="rankColumns" :rows="rankExportRows" />
+            <TableToolbar :filename="rankFilename" :title="rankTitle" :subtitle="rankSubtitle" :columns="rankColumns" :rows="rankExportRows" />
           </div>
           <div class="net-side-title-row rank-type-filter">
+            <el-radio-group v-model="rankMetric" size="small">
+              <el-radio-button value="net">按净额</el-radio-button>
+              <el-radio-button value="recv">按应收</el-radio-button>
+              <el-radio-button value="pay">按应付</el-radio-button>
+            </el-radio-group>
             <el-radio-group v-model="partyTypeFilter" size="small">
               <el-radio-button value="all">全部</el-radio-button>
               <el-radio-button value="customer">只看客户</el-radio-button>
               <el-radio-button value="supplier">只看供应商</el-radio-button>
             </el-radio-group>
           </div>
-          <div class="rank-group">
-            <div class="rank-head">债权 Top · 客户欠我方</div>
+          <div class="rank-group" v-for="g in rankGroups" :key="g.key">
+            <div class="rank-head">{{ g.head }}</div>
             <div class="rank-list">
-              <div class="rank-empty" v-if="!topDebtors.length">——</div>
-              <div class="rank-item" v-for="(r, i) in topDebtors" :key="'d' + r.party">
+              <div class="rank-empty" v-if="!g.rows.length">——</div>
+              <div class="rank-item" v-for="(r, i) in g.rows" :key="g.key + '-' + r.party">
                 <span class="rank-no">{{ i + 1 }}</span>
                 <router-link :to="`${r.partyPath}${r.code || ''}`" class="rank-name link">{{ r.party }}</router-link>
-                <span class="rank-tag recv">欠我</span>
-                <span class="rank-amt amount-in">+{{ r.net.toFixed(2) }}</span>
-              </div>
-            </div>
-          </div>
-          <div class="rank-group">
-            <div class="rank-head">债务 Top · 我方欠供应商</div>
-            <div class="rank-list">
-              <div class="rank-empty" v-if="!topCreditors.length">——</div>
-              <div class="rank-item" v-for="(r, i) in topCreditors" :key="'c' + r.party">
-                <span class="rank-no">{{ i + 1 }}</span>
-                <router-link :to="`${r.partyPath}${r.code || ''}`" class="rank-name link">{{ r.party }}</router-link>
-                <span class="rank-tag pay">我欠</span>
-                <span class="rank-amt amount-out">{{ r.net.toFixed(2) }}</span>
+                <span class="rank-tag" :class="g.tagClass">{{ g.tag }}</span>
+                <span class="rank-amt" :class="g.amountClass">{{ g.sign }}{{ r._rankAmount.toFixed(2) }}</span>
               </div>
             </div>
           </div>
@@ -221,7 +214,7 @@
               <el-table-column label="未收/未付" width="120" align="right">
                 <template #default="{ row }"><span :class="netOf(row, row._kind) > 0 ? 'debt' : 'none'">{{ netOf(row, row._kind).toFixed(2) }}</span></template>
               </el-table-column>
-              <el-table-column label="结算" width="90">
+              <el-table-column label="结算状态" width="90">
                 <template #default="{ row }">
                   <el-tag :type="isSettledOf(netOf(row, row._kind)) ? 'success' : 'danger'" size="small" disable-transitions>{{ isSettledOf(netOf(row, row._kind)) ? '结清' : '挂账' }}</el-tag>
                 </template>
@@ -280,6 +273,7 @@ const voucherLoadFailed = ref(false)
 const LS = {
   partySort: 'ca_partySort',
   rankTopN: 'ca_rankTopN',
+  rankMetric: 'ca_rankMetric',
   typeFilter: 'ca_typeFilter',
   onlyOpen: 'ca_onlyOpen',
   partyTypeFilter: 'ca_partyTypeFilter'
@@ -297,10 +291,13 @@ const partyPage = ref(1)
 const orderPage = ref(1)
 const partySort = ref(loadLS(LS.partySort, { prop: 'net', order: 'descending' })) // 受控排序：任意金额列，全量跨分页一致
 const rankTopN = ref(loadLS(LS.rankTopN, 5)) // 排行 Top 数量
+const savedRankMetric = loadLS(LS.rankMetric, 'net')
+const rankMetric = ref(['net', 'recv', 'pay'].includes(savedRankMetric) ? savedRankMetric : 'net') // 排行口径：净额 / 应收 / 应付
 const partyTypeFilter = ref(loadLS(LS.partyTypeFilter, 'all')) // 全部 / 只看客户 / 只看供应商
 
 watch(partySort, v => { try { localStorage.setItem(LS.partySort, JSON.stringify(v)) } catch {} }, { deep: true })
 watch(rankTopN, v => { try { localStorage.setItem(LS.rankTopN, JSON.stringify(v)) } catch {} })
+watch(rankMetric, v => { try { localStorage.setItem(LS.rankMetric, JSON.stringify(v)) } catch {} })
 watch(typeFilter, v => { try { localStorage.setItem(LS.typeFilter, JSON.stringify(v)) } catch {} })
 watch(onlyOpen, v => { try { localStorage.setItem(LS.onlyOpen, JSON.stringify(v)) } catch {} })
 watch(partyTypeFilter, v => { try { localStorage.setItem(LS.partyTypeFilter, JSON.stringify(v)) } catch {} })
@@ -438,9 +435,48 @@ const netBreakdown = computed(() => {
   }
 })
 
-// 往来排行：债权 Top（客户欠我方，net 最大正值）、债务 Top（我方欠供应商，net 最小负值），数量可由 rankTopN 配置（记忆到本地）
+// 往来排行：支持三种口径（净额 / 应收 / 应付），数量可由 rankTopN 配置（记忆到本地）
+// 净额：债权 Top（客户欠我方，net 最大正值）+ 债务 Top（我方欠供应商，net 最小负值）
+// 应收 / 应付：分别按应收(折后)、应付(折后)金额从大到小取 Top，便于看业务量与往来规模
 const topDebtors = computed(() => partyFiltered.value.filter(r => r.net > 0).sort((a, b) => b.net - a.net).slice(0, rankTopN.value))
 const topCreditors = computed(() => partyFiltered.value.filter(r => r.net < 0).sort((a, b) => a.net - b.net).slice(0, rankTopN.value))
+const topReceivables = computed(() => partyFiltered.value.filter(r => r.recv > 0).sort((a, b) => b.recv - a.recv).slice(0, rankTopN.value))
+const topPayables = computed(() => partyFiltered.value.filter(r => r.pay > 0).sort((a, b) => b.pay - a.pay).slice(0, rankTopN.value))
+
+const rankMetricLabel = computed(() => ({ net: '按净额', recv: '按应收', pay: '按应付' }[rankMetric.value] || '按净额'))
+const rankTitle = computed(() => rankMetric.value === 'recv'
+  ? '来往账·应收排行'
+  : rankMetric.value === 'pay' ? '来往账·应付排行' : '来往账·债权债务排行')
+const rankFilename = computed(() => rankMetric.value === 'recv'
+  ? '来往账-应收排行'
+  : rankMetric.value === 'pay' ? '来往账-应付排行' : '来往账-债权债务排行')
+
+// 排行展示分组：净额显示债权/债务两组，应收/应付各显示一组；给每行附上当前口径的金额，模板统一渲染
+const rankGroups = computed(() => {
+  const withAmount = (rows, pick) => rows.map(r => ({ ...r, _rankAmount: pick(r) }))
+  if (rankMetric.value === 'recv') {
+    return [{
+      key: 'recv', head: '应收 Top · 客户应收(折后)', tag: '应收', tagClass: 'recv', amountClass: 'amount-in', sign: '',
+      exportCategory: '应收·客户应收(折后)', rows: withAmount(topReceivables.value, r => r.recv)
+    }]
+  }
+  if (rankMetric.value === 'pay') {
+    return [{
+      key: 'pay', head: '应付 Top · 供应商应付(折后)', tag: '应付', tagClass: 'pay', amountClass: 'amount-out', sign: '',
+      exportCategory: '应付·供应商应付(折后)', rows: withAmount(topPayables.value, r => r.pay)
+    }]
+  }
+  return [
+    {
+      key: 'debt', head: '债权 Top · 客户欠我方', tag: '欠我', tagClass: 'recv', amountClass: 'amount-in', sign: '+',
+      exportCategory: '债权·客户欠我方', rows: withAmount(topDebtors.value, r => r.net)
+    },
+    {
+      key: 'credit', head: '债务 Top · 我方欠供应商', tag: '我欠', tagClass: 'pay', amountClass: 'amount-out', sign: '',
+      exportCategory: '债务·我方欠供应商', rows: withAmount(topCreditors.value, r => r.net)
+    }
+  ]
+})
 
 // 金额区间分布：按净额绝对值分桶（>1万 / 1千~1万 / ≤1千），统计各桶金额合计与单位数占比
 const bucketBreakdown = computed(() => {
@@ -476,18 +512,24 @@ const bucketExportRows = computed(() => bucketBreakdown.value.buckets.map(b => (
   单位数: b.count
 })))
 
-// 往来排行导出数据（债权 Top + 债务 Top 合并，带类别与排名）
-const rankSubtitle = computed(() => `债权 Top ${rankTopN.value} 与债务 Top ${rankTopN.value}（随筛选 / 时间段联动）`)
-const rankColumns = [
+// 往来排行导出数据：随当前口径（净额 / 应收 / 应付）分组导出
+const rankSubtitle = computed(() => {
+  if (rankMetric.value === 'recv') return `应收 Top ${rankTopN.value}（按应收折后金额，随筛选 / 时间段联动）`
+  if (rankMetric.value === 'pay') return `应付 Top ${rankTopN.value}（按应付折后金额，随筛选 / 时间段联动）`
+  return `债权 Top ${rankTopN.value} 与债务 Top ${rankTopN.value}（随筛选 / 时间段联动）`
+})
+const rankColumns = computed(() => [
   { label: '排名', prop: '排名' },
   { label: '类别', prop: '类别' },
   { label: '往来单位', prop: '往来单位' },
-  { label: '净额', prop: '净额' }
-]
-const rankExportRows = computed(() => [
-  ...topDebtors.value.map((r, i) => ({ 排名: i + 1, 类别: '债权·客户欠我方', 往来单位: r.party, 净额: '+' + r.net.toFixed(2) })),
-  ...topCreditors.value.map((r, i) => ({ 排名: i + 1, 类别: '债务·我方欠供应商', 往来单位: r.party, 净额: r.net.toFixed(2) }))
+  { label: rankMetric.value === 'recv' ? '应收(折后)' : rankMetric.value === 'pay' ? '应付(折后)' : '净额', prop: '金额' }
 ])
+const rankExportRows = computed(() => rankGroups.value.flatMap(g => g.rows.map((r, i) => ({
+  排名: i + 1,
+  类别: g.exportCategory,
+  往来单位: r.party,
+  金额: g.sign + r._rankAmount.toFixed(2)
+}))))
 
 const subtitle = computed(() => {
   const parts = [`共 ${partyFiltered.value.length} 个往来单位`]
@@ -941,7 +983,7 @@ onMounted(async () => {
 .net-side-subtitle.net-side-title-row { align-items: center; }
 .rank-topn { display: flex; align-items: center; gap: 4px; }
 .rank-topn-label { font-size: var(--fs-sub); color: var(--text-secondary); }
-.rank-type-filter { margin: 0 0 10px; }
+.rank-type-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 10px; }
 .net-side-subtitle { font-weight: 600; margin: 14px 0 10px; color: var(--text-regular); font-size: var(--fs-sub); border-top: 1px dashed var(--el-border-color-lighter); padding-top: 10px; }
 .net-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
 .net-bar-label { width: 160px; color: var(--text-regular); font-size: var(--fs-sub); flex-shrink: 0; }
