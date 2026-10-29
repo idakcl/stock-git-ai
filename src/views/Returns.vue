@@ -62,7 +62,7 @@ const route = useRoute()
 const kind = ref(route.query.kind === 'purchase' ? 'purchase' : 'sale')
 const sales = ref([]), purchases = ref([]), loading = ref(false), ready = ref(false), error = ref('')
 const selected = ref([]), table = ref(null), dialog = ref(false), saving = ref(false), retryLocked = ref(false)
-const action = ref('create'), sourceId = ref(''), lines = ref([]), reason = ref(''), mode = ref('cash'), amount = ref(0), date = ref(''), remark = ref('')
+const action = ref('create'), sourceId = ref(''), lines = ref([]), reason = ref('无'), mode = ref('cash'), amount = ref(0), date = ref(''), remark = ref('')
 const pendingKey = 'stock.refund.pending'
 let requestId = '', pendingInput = null
 const orders = computed(() => kind.value === 'sale' ? sales.value : purchases.value)
@@ -90,7 +90,7 @@ function toggleSelectAll() {
 function fillFullReturn() {
   lines.value = lines.value.map(l => ({ ...l, returnQty: Number(l.available) > 0 ? l.available : 0 }))
 }
-function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '' }
+function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '无' }
 function chooseSource() { const o = orders.value.find(o => o.id === sourceId.value); lines.value = o ? returnableLines(o, orders.value).map(l => ({ ...l, returnQty: 0 })) : [] }
 function openCreate() { resetForm(); action.value = 'create'; sourceId.value = ''; lines.value = []; dialog.value = true }
 function openSettle() {
