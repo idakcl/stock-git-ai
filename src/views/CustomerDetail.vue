@@ -152,7 +152,8 @@
             </el-table-column>
             <el-table-column label="关联销售单" width="180">
               <template #default="{ $index }">
-                <router-link v-if="depositOrders[$index]" :to="`/sale/${depositOrders[$index]}`" class="link" :class="{ 'return-code': isReturnId(depositOrders[$index]) }">{{ depositOrders[$index] }}</router-link>
+                <router-link v-if="depositOrders[$index] && saleIdSet.has(depositOrders[$index])" :to="`/sale/${depositOrders[$index]}`" class="link" :class="{ 'return-code': isReturnId(depositOrders[$index]) }">{{ depositOrders[$index] }}</router-link>
+                <span v-else-if="depositOrders[$index]" class="order-missing" title="原销售单已删除，仅保留流水关联">{{ depositOrders[$index] }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -238,7 +239,10 @@ const depositBalance = computed(() => depositSumOf(customer.value.deposits))
 const depositVouchers = computed(() => mapDepositVouchers(customer.value.deposits || [], receipts.value, customer.value.name))
 // 预存款流水关联的销售单：抵扣货款/超收转预存都会带 order（订单 id）；批量收款的 batch: 标记不是真实单据，不展示
 const saleIdSet = computed(() => new Set((sales.value || []).map(s => s.id)))
-const depositOrders = computed(() => (customer.value.deposits || []).map(f => (f.order && saleIdSet.value.has(f.order) ? f.order : '')))
+const depositOrders = computed(() => (customer.value.deposits || []).map(f => {
+  const id = f.order ? String(f.order) : ''
+  return id && !id.startsWith('batch:') ? id : ''
+}))
 const depositDialog = ref(false)
 const depSaving = ref(false)
 const depDraft = ref({ date: '', amount: null, remark: '' })
@@ -457,6 +461,7 @@ onMounted(async () => {
 .amount-deposit { color:var(--color-success); font-weight: 700; }
 .amount-received { color:var(--color-primary); font-weight: 700; }
 .none { color:var(--text-placeholder); }
+.order-missing { color:var(--text-secondary); cursor:help; }
 .discount { color:var(--color-success); }
 .balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
 </style>

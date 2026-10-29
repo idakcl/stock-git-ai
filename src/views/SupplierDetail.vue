@@ -151,7 +151,8 @@
             </el-table-column>
             <el-table-column label="关联采购单" width="180">
               <template #default="{ $index }">
-                <router-link v-if="advanceOrders[$index]" :to="`/purchase/${advanceOrders[$index]}`" class="link" :class="{ 'return-code': isReturnId(advanceOrders[$index]) }">{{ advanceOrders[$index] }}</router-link>
+                <router-link v-if="advanceOrders[$index] && purchaseIdSet.has(advanceOrders[$index])" :to="`/purchase/${advanceOrders[$index]}`" class="link" :class="{ 'return-code': isReturnId(advanceOrders[$index]) }">{{ advanceOrders[$index] }}</router-link>
+                <span v-else-if="advanceOrders[$index]" class="order-missing" title="原采购单已删除，仅保留流水关联">{{ advanceOrders[$index] }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -265,7 +266,10 @@ const advanceBalance = computed(() => depositSumOf(supplier.value.advances))
 const advanceVouchers = computed(() => mapDepositVouchers(supplier.value.advances || [], vouchers.value, supplier.value.name))
 // 预付款流水关联的采购单：抵扣货款/超付转预付款都会带 order（订单 id）；批量付款的 batch: 标记不是真实单据，不展示
 const purchaseIdSet = computed(() => new Set((purchases.value || []).map(p => p.id)))
-const advanceOrders = computed(() => (supplier.value.advances || []).map(f => (f.order && purchaseIdSet.value.has(f.order) ? f.order : '')))
+const advanceOrders = computed(() => (supplier.value.advances || []).map(f => {
+  const id = f.order ? String(f.order) : ''
+  return id && !id.startsWith('batch:') ? id : ''
+}))
 const advanceDialog = ref(false)
 const advSaving = ref(false)
 const advDraft = ref({ date: '', amount: null, remark: '' })
@@ -555,6 +559,7 @@ async function load() {
 .amount-received { color:var(--color-primary); font-weight: 700; }
 .amount-zero { color:var(--text-placeholder); }
 .none { color:var(--text-placeholder); }
+.order-missing { color:var(--text-secondary); cursor:help; }
 .discount { color:var(--color-success); }
 .balance-bar { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 10px; color:var(--text-regular); font-size:var(--fs-base); }
 .field-hint { margin-top: var(--gap-xs); color: var(--text-secondary); font-size: var(--fs-sub); line-height: 1.5; }
