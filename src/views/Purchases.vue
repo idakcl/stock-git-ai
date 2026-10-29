@@ -11,6 +11,9 @@
         <span class="filter-sep">至</span>
         <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
+        <el-button :type="onlyReturns ? 'primary' : 'default'" @click="onlyReturns = !onlyReturns">
+          {{ onlyReturns ? '显示全部单据' : '仅显示退款单' }}
+        </el-button>
       </div>
       <TableToolbar
         filename="采购单"
@@ -23,7 +26,7 @@
       <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
         <el-table-column label="单号" width="190" class-name="id-col">
           <template #default="{ row }">
-            <router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link>
+            <router-link :to="`/purchase/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link>
           </template>
         </el-table-column>
         <el-table-column label="供应商" width="170">
@@ -135,6 +138,8 @@ const list = ref([])
 const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
+// 退款单筛选：只保留红字退货/退款单（CT-），便于快速对账
+const onlyReturns = ref(false)
 const page = ref(1)
 const itemOptions = ref([])
 // 供应商档案（预付款存这里）：付款弹窗超付部分转供应商预付款时使用
@@ -169,6 +174,7 @@ const filtered = computed(() => list.value
       ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
+    if (onlyReturns.value && !isReturn(row)) return false
     return true
   })
   .sort(byNewest)
@@ -188,7 +194,7 @@ const summaryAmount = ({ columns }) => {
 
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-watch([keyword, dateStart, dateEnd], () => { page.value = 1 })
+watch([keyword, dateStart, dateEnd, onlyReturns], () => { page.value = 1 })
 
 // 展示层结算口径：未付金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
 const settleLabelOf = (row) => isSettledOf(payableOf(row), row.settle) ? '结清' : '挂账'
@@ -201,6 +207,7 @@ const itemCodesOf = (row) => [...new Set((row.items || []).map(i => i.code).filt
 const subtitle = computed(() => {
   const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
+  if (onlyReturns.value) parts.push('仅退款单')
   if (keyword.value) parts.push('已按关键词筛选')
   return parts.join(' · ')
 })
@@ -550,6 +557,7 @@ async function remove(row) {
 .voucher-codes{color:var(--text-secondary);}
 .item-codes{color:var(--text-secondary);}
 .debt{color:var(--color-danger);font-weight:600;}
+.return-code{color:var(--color-danger);font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
 .lines-scroll{overflow-x:auto;}
