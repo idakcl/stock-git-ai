@@ -149,6 +149,12 @@
                 </b>
               </template>
             </el-table-column>
+            <el-table-column label="关联采购单" width="180">
+              <template #default="{ $index }">
+                <router-link v-if="advanceOrders[$index]" :to="`/purchase/${advanceOrders[$index]}`" class="link" :class="{ 'return-code': isReturnId(advanceOrders[$index]) }">{{ advanceOrders[$index] }}</router-link>
+                <span v-else class="none">—</span>
+              </template>
+            </el-table-column>
             <el-table-column label="关联收付款单据" width="180">
               <template #default="{ $index }">
                 <router-link v-if="advanceVouchers[$index]" :to="{ path: '/vouchers', query: { code: advanceVouchers[$index] } }" class="link">{{ advanceVouchers[$index] }}</router-link>
@@ -257,6 +263,9 @@ const supplier = computed(() => suppliers.value.find(s => s.code === route.param
 const advanceBalance = computed(() => depositSumOf(supplier.value.advances))
 // 每条预付款流水对应的付款单编号（新充值优先用流水上回写的 voucher，历史流水按单位/日期/金额/订单兜底匹配）
 const advanceVouchers = computed(() => mapDepositVouchers(supplier.value.advances || [], vouchers.value, supplier.value.name))
+// 预付款流水关联的采购单：抵扣货款/超付转预付款都会带 order（订单 id）；批量付款的 batch: 标记不是真实单据，不展示
+const purchaseIdSet = computed(() => new Set((purchases.value || []).map(p => p.id)))
+const advanceOrders = computed(() => (supplier.value.advances || []).map(f => (f.order && purchaseIdSet.value.has(f.order) ? f.order : '')))
 const advanceDialog = ref(false)
 const advSaving = ref(false)
 const advDraft = ref({ date: '', amount: null, remark: '' })
