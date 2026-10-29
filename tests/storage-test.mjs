@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { makeFakeRepo } from './fake-github.mjs'
 import { readCollectionWithRaw, writeCollection, bucketOf, bucketize, SPLIT_KEYS } from '../api/storage.js'
-import { serialize } from '../api/github.js'
+import { serialize, commitFiles } from '../api/github.js'
 
 // Worker 侧用的浏览器全局，Node 里补齐
 globalThis.btoa = (s) => Buffer.from(s, 'binary').toString('base64')
@@ -217,6 +217,61 @@ await t('空字段瘦身只作用于商品档案，不动单据', async () => {
   const { pruneItem } = await import('../api/routes.js')
   assert.deepEqual(pruneItem({ code: 'P1', name: 'a', warning: 0, remark: '', package: '', photos: [], cost: 0, price: 0 }), { code: 'P1', name: 'a', cost: 0, price: 0 })
   assert.equal(pruneItem({ code: 'P1', package: '90个/件' }).package, '90个/件', '有值必须保留')
+})
+
+// ---- 一次提交改多个文件（git tree 层） ----
+// 这一节是「迁移为什么曾经静默失败」的守门测试：
+// GitHub 的 POST /git/trees 不吃 { path, content: null } 这种删除写法（422），
+// base_tree 也不能和删除共存。fake 必须照抄这条拒绝，否则代码怎么写都能过测试。
+console.log('\ncommitFiles（增删改一次提交）')
+await t('fake 与真实 API 一致：拒绝 content:null 的删除条目', async () => {
+  const r = await globalThis.fetch('https://api.github.com/repos/o/r/git/trees', {
+    method: 'POST', body: JSON.stringify({ tree: [{ path: 'items.json', mode: '100644', type: 'blob', content: null }] })
+  })
+  assert.equal(r.status, 422, '必须像真实 API 一样 422')
+  assert.match((await r.json()).message, /Must supply either tree\.sha or tree\.content/)
+})
+await t('fake 与真实 API 一致：拒绝 sha 与 content 同时给出', async () => {
+  const r = await globalThis.fetch('https://api.github.com/repos/o/r/git/trees', {
+    method: 'POST', body: JSON.stringify({ tree: [{ path: 'items.json', mode: '100644', type: 'blob', sha: 'deadbeef', content: '[]' }] })
+  })
+  assert.equal(r.status, 422)
+})
+await t('fake 与真实 API 一致：不传 base_tree 时提交的是完整树', async () => {
+  repo = await seeded()
+  const r = await globalThis.fetch('https://api.github.com/repos/o/r/git/trees', {
+    method: 'POST', body: JSON.stringify({ tree: [{ path: 'only.json', mode: '100644', type: 'blob', content: '[]' }] })
+  })
+  const sha = (await r.json()).sha
+  const got = (await (await globalThis.fetch(`https://api.github.com/repos/o/r/git/trees/${sha}`)).json()).tree
+  assert.deepEqual(got.map(e => e.path), ['only.json'], '没列出的路径不能从 base_tree 里补回来')
+})
+
+await t('commitFiles：改一个文件、删一个文件，未动的按 sha 引用', async () => {
+  repo = await seeded()
+  const putsBefore = repo.calls.PUT || 0
+  await commitFiles(env, {
+    set: [{ path: 'purchases-2025.json', content: '[{"id":"C202501011200000001","date":"2025-01-05","total":42}]' }],
+    remove: ['purchases-2024.json'],
+    message: 'commitFiles 测试'
+  })
+  assert.equal(repo.calls.PUT || 0, putsBefore, '走的是 git tree 层，一次 Contents PUT 都不该发')
+  assert.equal(JSON.parse(repo.read('purchases-2025.json'))[0].total, 42)
+  assert.ok(!repo.has('purchases-2024.json'), '删除项真的没了')
+  assert.ok(repo.has('sales-2025.json') && repo.has('.split-yearly.json'), '没提的文件必须原样保留')
+  assert.deepEqual(JSON.parse(repo.read('items.json')), [], '没提的文件内容没被改写')
+})
+
+await t('commitFiles：基线之后分支被别人推进 → 中止，不覆盖对方', async () => {
+  repo = await seeded()
+  const base = repo.head()
+  const { writeJSON } = await import('../api/github.js')
+  await writeJSON(env, 'items.json', [{ code: 'P9', name: '别人新加的' }], '别人先写')   // 分支前进
+  await assert.rejects(
+    () => commitFiles(env, { set: [{ path: 'sales-2025.json', content: '[]' }], message: 'stale', baseCommit: base }),
+    /已被其他操作更新/
+  )
+  assert.equal(JSON.parse(repo.read('items.json'))[0].name, '别人新加的', '对方的写入必须还在')
 })
 
 console.log(`\n${pass} passed, ${fail} failed`)

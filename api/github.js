@@ -19,6 +19,40 @@ export async function gh(req, env, method = 'GET', body) {
   return data
 }
 
+// 一次 git 提交完成多文件的「改 + 增 + 删」，原子生效。
+// 为什么不用 base_tree：GitHub 的 POST /git/trees 实测拒绝删除条目 ——
+//   { path, content: null } → 422 "Must supply either tree.sha or tree.content.
+//   Request will be rejected if both are present."
+// （整仓迁移就是这么每次都静默失败的）。base_tree 本身也不能和删除共存。
+// 可行写法：把基线提交的**根 tree** 整份列出来，未变动的条目按 sha 原样引用（不重传内容），
+// 变动的条目带 content，要删的条目干脆不列 —— 提交的是完整树，不是补丁。
+// 并发保护：commit 的 parent 固定为基线提交，再 PATCH refs 且 force:false；
+// 基线之后分支若已被别人推进，直接中止（否则会以「新数据为祖先」的姿态静默覆盖对方的写）。
+export async function commitFiles(env, { set, remove = [], message, baseCommit, baseTree }) {
+  const branch = env.GITHUB_BRANCH || 'main'
+  const ref = await gh(`/git/ref/heads/${encodeURIComponent(branch)}`, env)
+  const head = ref.object.sha
+  const base = baseCommit || head
+  if (baseCommit && baseCommit !== head) {
+    throw new Error(`数据仓已被其他操作更新（${baseCommit.slice(0, 8)} → ${head.slice(0, 8)}），本次保存已中止，请刷新后重试`)
+  }
+  let treeSha = baseTree
+  if (!treeSha) treeSha = (await gh(`/git/commits/${base}`, env)).tree.sha
+  const root = await gh(`/git/trees/${treeSha}`, env)
+  const overwrite = new Map((set || []).map(e => [e.path, e]))
+  const gone = new Set(remove)
+  const entries = []
+  for (const e of (root.tree || [])) {
+    if (overwrite.has(e.path) || gone.has(e.path)) continue
+    entries.push({ path: e.path, mode: e.mode, type: e.type, sha: e.sha })
+  }
+  for (const e of (set || [])) entries.push({ path: e.path, mode: e.mode || '100644', type: 'blob', content: e.content })
+  const newTree = await gh('/git/trees', env, 'POST', { tree: entries })
+  const created = await gh('/git/commits', env, 'POST', { message, tree: newTree.sha, parents: [base] })
+  await gh(`/git/refs/heads/${encodeURIComponent(branch)}`, env, 'PATCH', { sha: created.sha, force: false })
+  return created.sha
+}
+
 // 读取 + 保留原文。writeJSON 的 opts.known 用的就是这里的 content，
 // 一次读、一次比对，省掉「为拿 sha 再 GET 一遍」的重复请求与重复解析。
 export async function readJSONWithRaw(env, file) {

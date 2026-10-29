@@ -4,6 +4,10 @@
 //   · >1MB 的文件不返回 content（只有 sha/size）
 //   · PUT 带 sha 但 sha 不符 → 409；DELETE 同理
 //   · 创建 commit 对象不移动分支，只有 PATCH /git/ref 才移动（force:false 时必须是当前 head 的子提交）
+//   · POST /git/trees 的条目必须「sha 与 content 二选一」：两者都有、或两者都无
+//     （包括 { path, content: null } 这种删除写法）→ 422。
+//     真实 API 就是这条让整仓迁移每次都静默失败的；fake 必须一样拒绝，否则测试测不出来。
+//   · 不传 base_tree 时提交的 tree 是「完整树」：没列出的路径就等于被删除
 export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail = false } = {}) {
   // tree 是当前分支快照：{ path: content }
   const tree = {}
@@ -16,6 +20,11 @@ export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail
     for (let i = 0; i < s.length; i++) h = (h * 33 + s.charCodeAt(i)) >>> 0
     return h.toString(16).padStart(8, '0') + '0'.repeat(32)
   }
+  // sha → 内容。git 的 blob 是仓库级对象、不属于某一棵 tree，
+  // 所以 POST /git/trees 里「按 sha 引用未改动文件」要能查回原文
+  const blobStore = new Map()
+  const remember = (c) => { blobStore.set(shaOf(c), c); return c }
+  for (const c of Object.values(tree)) remember(c)
 
   let seq = 0
   let refSha = 'root'
@@ -63,6 +72,7 @@ export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail
         const next = unb64(body.content)
         if (body.sha && (name in tree) && shaOf(tree[name]) !== body.sha) return respond(409, { message: 'sha could not be found' })
         if (body.sha && !(name in tree)) return respond(422, { message: 'file does not exist' })
+        remember(next)
         addCommit({ ...tree, [name]: next }, body.message, null, true)
         return respond(201, { content: { sha: shaOf(next) } })
       }
@@ -111,13 +121,22 @@ export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail
       if (method === 'GET') {
         const t = trees.get(sha)
         if (!t) return respond(404, { message: 'Not Found' })
-        return respond(200, { sha, tree: Object.entries(t).map(([p, c]) => ({ path: p, type: 'blob', sha: shaOf(c) })) })
+        return respond(200, { sha, tree: Object.entries(t).map(([p, c]) => ({ path: p, mode: '100644', type: 'blob', sha: shaOf(c) })) })
       }
       if (method === 'POST') {
-        const base = body.base_tree ? { ...(trees.get(body.base_tree) || {}) } : { ...tree }
-        for (const e of (body.tree || [])) {
-          if (e.content === null || e.content === undefined) delete base[e.path]
-          else base[e.path] = e.content
+        const bad = (body.tree || []).find(e => (e.content === null || e.content === undefined) === !e.sha)
+        if (bad) {
+          return respond(422, { message: 'Must supply either tree.sha or tree.content. Request will be rejected if both are present.' })
+        }
+        // 真实语义：给了 base_tree 就是打补丁，没给就是「完整树」——没列出的路径等于删除
+        const base = body.base_tree ? { ...(trees.get(body.base_tree) || {}) } : {}
+        if (body.base_tree && !trees.get(body.base_tree)) return respond(422, { message: 'base_tree does not exist' })
+        for (const e of body.tree || []) {
+          if (e.sha) {
+            if (!blobStore.has(e.sha)) return respond(422, { message: `Object sha ${e.sha} does not exist` })
+            base[e.path] = blobStore.get(e.sha)
+          } else base[e.path] = e.content
+          if (e.content !== null && e.content !== undefined) remember(e.content)
         }
         const tsha = 'ntree-' + (++treeSeq)
         trees.set(tsha, base)
@@ -127,11 +146,10 @@ export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail
 
     if (path.startsWith('/git/blobs/')) {
       const sha = path.split('/').pop()
-      const entry = Object.entries(tree).find(([, c]) => shaOf(c) === sha)
-      if (!entry) return respond(404, { message: 'Not Found' })
+      if (!blobStore.has(sha)) return respond(404, { message: 'Not Found' })
       // 模拟「blob 也取不到内容」的异常，用来验证读取失败绝不静默变空
       if (blobFail) return respond(404, { message: 'Not Found' })
-      return respond(200, { encoding: 'base64', content: b64(entry[1]) })
+      return respond(200, { encoding: 'base64', content: b64(blobStore.get(sha)) })
     }
 
     throw new Error(`fake GitHub 未实现：${method} ${path}`)
@@ -146,7 +164,7 @@ export function makeFakeRepo(initial = {}, { inlineLimit = 1024 * 1024, blobFail
     names: () => Object.keys(tree).sort(),
     log: () => commits.map(c => c.message),
     // 并发模拟：外部直接改库（绕过被测代码），用来验证 sha/force 兜底
-    poke: (p, content) => { tree[p] = typeof content === 'string' ? content : JSON.stringify(content) },
+    poke: (p, content) => { const c = typeof content === 'string' ? content : JSON.stringify(content); tree[p] = c; remember(c) },
     head: () => refSha
   }
 }

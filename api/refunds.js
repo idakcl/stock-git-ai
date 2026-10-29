@@ -1,4 +1,4 @@
-import { gh } from './github.js'
+import { gh, commitFiles } from './github.js'
 import { applyRefundOperation, backfillHistoricalRefunds } from '../src/utils/refunds.js'
 import { SPLIT_KEYS, bucketName, bucketOf, isBucketFile, readMarker, sortOrders } from './storage.js'
 
@@ -68,20 +68,19 @@ export async function refundTransaction(env, input, derive, rebuildStock) {
   // 库里还没做过分片迁移：写整表（紧凑 JSON），只有真变了的文件才进提交
   const anySplit = [...SPLIT_KEYS].some(k => split[k])
   if (!anySplit) {
-    const tree = keys.filter(k => JSON.stringify(next[k]) !== JSON.stringify(state[k])).map(k => ({
-      path: `${k}.json`, mode: '100644', type: 'blob', content: JSON.stringify(next[k], null, 0)
+    const set = keys.filter(k => JSON.stringify(next[k]) !== JSON.stringify(state[k])).map(k => ({
+      path: `${k}.json`, content: JSON.stringify(next[k], null, 0)
     }))
-    if (!tree.length) return { ok: true, codes: result.codes || [], unchanged: true }
+    if (!set.length) return { ok: true, codes: result.codes || [], unchanged: true }
     const logs = [...state.logs, { time: new Date().toISOString(), source: 'refund', action: input.action, code: result.code, codes: result.codes }].slice(-200)
-    tree.push({ path: 'logs.json', mode: '100644', type: 'blob', content: JSON.stringify(logs, null, 0) })
-    const newTree = await gh('/git/trees', env, 'POST', { base_tree: commit.tree.sha, tree })
-    const created = await gh('/git/commits', env, 'POST', {
+    set.push({ path: 'logs.json', content: JSON.stringify(logs, null, 0) })
+    // baseCommit/baseTree：本轮读的是 parent 这个固定快照，提交必须落在同一个基线上
+    const sha = await commitFiles(env, {
+      set,
       message: `refund: ${input.action} ${result.code || (result.codes || []).join(', ')}`,
-      tree: newTree.sha, parents: [parent]
+      baseCommit: parent, baseTree: commit.tree.sha
     })
-    // force:false：其他写入先发布时拒绝本提交，不能把旧快照覆盖到新数据上。
-    await gh(`/git/refs/heads/${encodeURIComponent(branch)}`, env, 'PATCH', { sha: created.sha, force: false })
-    return { ok: true, code: result.code, returnId: result.returnId, codes: result.codes, commit: created.sha }
+    return { ok: true, code: result.code, returnId: result.returnId, codes: result.codes, commit: sha }
   }
 
   // 已分片：整表文件不再写入（若还在则一并删除），单据改动落到对应年片。
@@ -96,7 +95,8 @@ export async function refundTransaction(env, input, derive, rebuildStock) {
     }
     return m
   }
-  const tree = []
+  const set = []
+  const remove = []
   for (const key of SPLIT_KEYS) {
     if (!split[key]) continue
     // 两边都先排成存储层的 canon 次序（退货单是 push 到末尾的，直接落片会和下次保存的次序不同，
@@ -107,26 +107,25 @@ export async function refundTransaction(env, input, derive, rebuildStock) {
       const a = before.get(name) || []
       const b = after.get(name) || []
       if (JSON.stringify(a) === JSON.stringify(b)) continue
-      tree.push({ path: name, mode: '100644', type: 'blob', content: JSON.stringify(b, null, 0) })
+      set.push({ path: name, content: JSON.stringify(b, null, 0) })
     }
     // 迁移残留的旧整表：这次提交顺手删干净，避免 AI 直读时读到过期整表
-    if (treeByName.has(`${key}.json`)) tree.push({ path: `${key}.json`, content: null })
+    if (treeByName.has(`${key}.json`)) remove.push(`${key}.json`)
   }
   for (const k of keys) {
     if (SPLIT_KEYS.has(k)) continue
     if (k === 'logs') continue
     if (JSON.stringify(next[k]) === JSON.stringify(state[k])) continue
-    tree.push({ path: `${k}.json`, mode: '100644', type: 'blob', content: JSON.stringify(next[k], null, 0) })
+    set.push({ path: `${k}.json`, content: JSON.stringify(next[k], null, 0) })
   }
   const logs = [...state.logs, { time: new Date().toISOString(), source: 'refund', action: input.action, code: result.code, codes: result.codes }].slice(-200)
-  if (tree.length) tree.push({ path: 'logs.json', mode: '100644', type: 'blob', content: JSON.stringify(logs, null, 0) })
-  if (!tree.length) return { ok: true, codes: result.codes || [], unchanged: true }
+  if (set.length) set.push({ path: 'logs.json', content: JSON.stringify(logs, null, 0) })
+  if (!set.length && !remove.length) return { ok: true, codes: result.codes || [], unchanged: true }
 
-  const newTree = await gh('/git/trees', env, 'POST', { base_tree: commit.tree.sha, tree })
-  const created = await gh('/git/commits', env, 'POST', {
+  const sha = await commitFiles(env, {
+    set, remove,
     message: `refund: ${input.action} ${result.code || (result.codes || []).join(', ')}`,
-    tree: newTree.sha, parents: [parent]
+    baseCommit: parent, baseTree: commit.tree.sha
   })
-  await gh(`/git/refs/heads/${encodeURIComponent(branch)}`, env, 'PATCH', { sha: created.sha, force: false })
-  return { ok: true, code: result.code, returnId: result.returnId, codes: result.codes, commit: created.sha }
+  return { ok: true, code: result.code, returnId: result.returnId, codes: result.codes, commit: sha }
 }

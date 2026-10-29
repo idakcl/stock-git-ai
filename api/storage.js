@@ -24,7 +24,7 @@
 //     · 已记录 → 分片是唯一权威，旧整表只是迁移残留（删除；删不掉也不影响正确性）
 //   顺序：写完全部分片 → 写标记（提交点）→ 删旧整表，三步压进同一次 git 提交。
 //   任意一步崩溃都停在「标记未写 = 旧整表仍然有效」这一侧，永远不会读到半截分片。
-import { gh, readJSONWithRaw, writeJSON, listFiles, serialize } from './github.js'
+import { readJSONWithRaw, writeJSON, listFiles, serialize, commitFiles } from './github.js'
 
 const MARKER_FILE = '.split-yearly.json'
 const UNKNOWN_BUCKET = '0000'             // 日期缺失/畸形时的兜底分片，保证不丢单据
@@ -168,13 +168,15 @@ export async function writeCollection(env, key, list, message, opts = {}) {
   const marker = await readMarker(env)
 
   // 尚未分片：权威是旧整表，先按整表写（资金保护校验照常生效），
-  // 再顺手把整个数据仓切成年片。切片失败不影响已落库数据，下次保存会再切一次。
+  // 再顺手把整个数据仓切成年片。切片失败不影响已落库数据，下次保存会再切一次，
+  // 但必须出声（console.warn）——曾经就是这里静默吞掉 422，导致迁移永远没发生过
   if (!marker[key]) {
     const file = `${key}.json`
     const before = provided.get(file) || await readJsonOrEmpty(env, file)
     const r = await writeJSON(env, file, list, message,
       { known: before.sha ? { content: before.content, sha: before.sha } : null })
-    await migrateRepoToBuckets(env, { [key]: list }).catch(() => {})
+    await migrateRepoToBuckets(env, { [key]: list }).catch(e => console.warn(
+      `单据按年迁移失败（数据仍在旧整表里，仍是权威，下次保存会再试）：${String(e && e.message || e)}`))
     return { known: [{ file, content: serialize(list), sha: shaAfterWrite(r) || before.sha }], r }
   }
 
@@ -220,35 +222,29 @@ export async function writeCollection(env, key, list, message, opts = {}) {
 // 那时它写进 sales.json 的新退货单会被读路径（已认分片）忽略，等于单据凭空消失。
 //
 // 为什么空表也要打标记：否则一张空单据集合永远处于「未迁移」，每次保存都重试迁移。
-// 走 git trees + refs PATCH(force:false)，并发写会被拒绝而不是覆盖。
+// 落地方式见 github.js 的 commitFiles（完整树 + 不列删除项），一次提交原子生效。
 async function commitRepoMigration(env, collections) {
-  const branch = env.GITHUB_BRANCH || 'main'
-  const ref = await gh(`/git/ref/heads/${encodeURIComponent(branch)}`, env)
-  const commit = await gh(`/git/commits/${ref.object.sha}`, env)
-  const tree = []
   const marker = await readMarker(env)
+  const set = []
+  const remove = []
   let files = 0
   const keys = Object.keys(collections || {})
   if (!keys.length) return null
   for (const key of keys) {
     const { list, existed } = collections[key]
     for (const [bucket, rows] of [...bucketize(list)].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-      tree.push({ path: bucketName(key, bucket), mode: '100644', type: 'blob', content: serialize(rows) })
+      set.push({ path: bucketName(key, bucket), content: serialize(rows) })
       files++
     }
-    // 旧整表在同一提交里删除；库里本来就没有就不发这条（GitHub 对不存在路径的删除会报错）
-    if (existed) tree.push({ path: `${key}.json`, content: null })
+    // 旧整表在同一提交里删除；库里本来就没有就不列（GitHub 对不存在路径的删除会报错）
+    if (existed) remove.push(`${key}.json`)
     marker[key] = true
   }
-  tree.push({ path: MARKER_FILE, mode: '100644', type: 'blob', content: serialize(marker) })
-  const newTree = await gh('/git/trees', env, 'POST', { base_tree: commit.tree.sha, tree })
-  const created = await gh('/git/commits', env, 'POST', {
-    message: `migrate ${keys.join(' & ')} to yearly splits (${files} files)`,
-    tree: newTree.sha,
-    parents: [ref.object.sha]
+  set.push({ path: MARKER_FILE, content: serialize(marker) })
+  return await commitFiles(env, {
+    set, remove,
+    message: `migrate ${keys.join(' & ')} to yearly splits (${files} files)`
   })
-  await gh(`/git/refs/heads/${encodeURIComponent(branch)}`, env, 'PATCH', { sha: created.sha, force: false })
-  return created.sha
 }
 
 // 整仓一次性迁移：把库里现存的单据全部切成年片。失败不致命 —— 权威仍是旧整表，下次保存会再试。
