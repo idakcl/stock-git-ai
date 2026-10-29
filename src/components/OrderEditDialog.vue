@@ -44,7 +44,7 @@
           已选「结清」：未{{ payWord }}必须为 0。你手填的「实{{ payWord }}金额」「整单优惠金额」优先，另一项自动补差；保存时会校验未{{ payWord }}是否为 0。
         </div>
         <div v-else-if="!editingId && dueTotal > 0" class="settle-hint">
-          实{{ payWord }}金额（含{{ depositLabel }}抵扣）填满本单金额、未{{ payWord }}为 0 时，结算将自动标记为「结清」
+          实{{ payWord }}金额（含{{ depositLabel }}抵扣）填满本单金额、未{{ payWord }}为 0 时，结算状态将自动标记为「结清」
         </div>
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
@@ -595,7 +595,7 @@ async function doSave() {
   if (paidAtSave > dueAtSave + 0.005) {
     return ElMessage.error(`实${payWord.value}金额不能超过应付/应收总额 ¥${dueAtSave.toFixed(2)}（当前实${payWord.value} ¥${paidAtSave.toFixed(2)}）。请调低「实${payWord.value}金额」或减少抵扣。`)
   }
-  // 红线校验②：结清状态下未付款必须为 0（按金额判定，与结算标签无关；容忍半分钱以内的浮点尘）
+  // 红线校验②：结清状态下未付款必须为 0（按金额判定，与结算状态标签无关；容忍半分钱以内的浮点尘）
   const debtAtSave = dueAtSave
   if (form.settle === '结清' && debtAtSave > 0.005) {
     return ElMessage.error(`「结清」状态下未付款必须为 0，但当前仍有未付款 ¥${debtAtSave.toFixed(2)}。请调高「实${payWord.value}金额」或「整单优惠金额」后再保存。`)

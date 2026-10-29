@@ -198,7 +198,7 @@ const dateEnd = ref('')
 const partyFilter = ref('')
 const page = ref(1)
 const tab = ref('orders')
-// 「仅看未结清」开关：统计卡未收/未付卡片上一键筛选，与列表结算标签同一口径
+// 「仅看未结清」开关：统计卡未收/未付卡片上一键筛选，与列表结算状态标签同一口径
 const onlyOpen = ref(false)
 const payDialog = ref(false)
 const payOrder = ref({})
@@ -226,7 +226,7 @@ const filtered = computed(() => {
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
     if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false
-    // 仅看未结清：按展示口径过滤（与列表结算标签、统计卡 openCount 完全一致）
+    // 仅看未结清：按展示口径过滤（与列表结算状态标签、统计卡 openCount 完全一致）
     if (onlyOpen.value && isSettledOf(netOf(row), row.settle)) return false
     // 搜索商品名时按编码解析为商品主数据当前名：单据快照名过期也能命中（改名后老单可搜）
     if (!matchText(keyword.value, row.id, row[partyKey.value], row.date, row.remark,
@@ -252,7 +252,7 @@ function recompute() {
   // 末位 round2：逐单未收已收敛到分，累加仍可能产生 1e-16 级尘（会被统计卡格式化成可见数字）
   stats.unpaid = round2(rows.reduce((s, r) => s + netOf(r), 0))
   stats.payCount = rows.reduce((s, r) => s + payCountOf(r), 0)
-  // 未结清数与列表结算标签同一口径（金额收清即结清），避免「全部结清却显示 N 单未结清」
+  // 未结清数与列表结算状态标签同一口径（金额收清即结清），避免「全部结清却显示 N 单未结清」
   stats.openCount = rows.filter(r => !isSettledOf(netOf(r), r.settle)).length
   stats.discount = rows.reduce((s, r) => s + Number(r.discount || 0), 0)
   stats.discountCount = rows.filter(r => Number(r.discount || 0) > 0).length

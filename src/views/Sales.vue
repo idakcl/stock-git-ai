@@ -70,9 +70,9 @@
             <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
               {{ settleLabelOf(row) }}
             </el-tag>
-            <!-- 未收为 0 且无抹零优惠时不显示：改挂账没有可恢复的欠款 -->
+            <!-- 未收为 0 且无抹零优惠时不显示；两个改账动作：改结清＝结清未收差额，改挂账＝撤销抹零优惠、恢复未收 -->
             <el-button v-if="!isReturn(row) && settleActionOf(row) !== 'none'" link size="small" type="primary" style="margin-left:4px" @click="toggleSettle(row)">
-              {{ settleActionOf(row) === 'settle' ? '结清' : '改挂账' }}
+              {{ settleActionOf(row) === 'settle' ? '改结清' : '改挂账' }}
             </el-button>
           </template>
         </el-table-column>
@@ -406,7 +406,7 @@ async function onPaySaved(updated, payload) {
 
 async function toggleSettle(row) {
   // 三个动作与 account.settleActionOf 统一口径：
-  //   settle：仍有未收 → 收款结清（生成收款单）或差额记优惠（无资金单据）
+  //   settle：仍有未收 → 点「改结清」，收款结清（生成收款单）或差额记优惠（无资金单据）
   //   unrest：金额已平但有抹零优惠 → 改挂账＝撤销优惠，未收恢复
   //   none：不显示按钮
   const action = settleActionOf(row, 'receivable')
@@ -418,7 +418,7 @@ async function toggleSettle(row) {
     try {
       await ElMessageBox.confirm(
         `本单应收已结清，其中抹零优惠 ¥${discount.toFixed(2)} 未实际收款。\n` +
-        `改挂账将撤销这笔优惠，未收恢复为 ¥${discount.toFixed(2)}，结算回到「挂账」。\n` +
+        `改挂账将撤销这笔优惠，未收恢复为 ¥${discount.toFixed(2)}，结算状态回到「挂账」。\n` +
         `如果钱其实已经收到，请用「收款」补登记，而不是改挂账。`,
         '确认改挂账', { type: 'warning', confirmButtonText: '确认改挂账', cancelButtonText: '取消' })
     } catch { return }
@@ -445,7 +445,7 @@ async function toggleSettle(row) {
       `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${unpaid.toFixed(2)}。\n` +
       `· 「收款结清」：把 ¥${unpaid.toFixed(2)} 记为一笔实际收款，并生成收款单（现金增加）\n` +
       `· 「差额记优惠」：¥${unpaid.toFixed(2)} 作为抹零优惠核销，钱未收到，因此不生成收款单`,
-      '标记结清', {
+      '确认改结清', {
         type: 'warning',
         confirmButtonText: '收款结清',
         cancelButtonText: '差额记优惠',

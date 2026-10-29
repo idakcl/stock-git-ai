@@ -252,7 +252,7 @@ function categoryTagType(cat) {
   return ''
 }
 
-// 导出当前查看的单据明细（单号 / 日期 / 本次金额 / 本次优惠 / 结算 / 备注）
+// 导出当前查看的单据明细（单号 / 日期 / 本次金额 / 本次优惠 / 结算状态 / 备注）
 const voucherColumns = [
   { label: '单号', prop: 'orderId' },
   { label: '时间', value: r => r.time || r.date || '' },

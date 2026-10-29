@@ -53,11 +53,11 @@
           <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
             {{ settleLabel }}
           </el-tag>
-          <!-- 结清：未收差额记实收或记抹零；改挂账：撤销抹零优惠、恢复未收（未收 0 且无优惠时不显示） -->
+          <!-- 未收 0 且无优惠时不显示；两个改账动作：改结清＝结清未收差额，改挂账＝撤销抹零优惠、恢复未收 -->
           <el-button v-if="!externalView && !isReturn(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
             :disabled="!found"
             @click="toggleSettle">
-            {{ settleAction === 'settle' ? '结清' : '改挂账' }}
+            {{ settleAction === 'settle' ? '改结清' : '改挂账' }}
           </el-button>
         </span>
         <span v-if="sale.remark">备注：{{ sale.remark }}</span>
@@ -192,11 +192,11 @@ const dueAmount = computed(() => grossOf(sale.value))
 const unpaid = computed(() => receivableOf(sale.value))
 const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
-// 未收金额为 0 即显示结清；结算按钮动作由 settleActionOf 统一判定（结清 / 改挂账 / 不显示）
+// 未收金额为 0 即显示结清；结算状态旁的改账按钮由 settleActionOf 统一判定（改结清 / 改挂账 / 不显示）
 const settleLabel = computed(() => isSettledOf(unpaid.value, sale.value.settle) ? '结清' : '挂账')
 const settleAction = computed(() => settleActionOf(sale.value, 'receivable'))
 
-// 结算按钮三个动作（与列表页同口径）：
+// 结算状态改账按钮三个动作（与列表页同口径）：
 //   settle：仍未收 → 收款结清（差额记实收，生成收款单）或差额记优惠（无资金单据）
 //   unrest：金额已平但有抹零优惠 → 改挂账＝撤销优惠、未收恢复
 //   none：不显示按钮
@@ -208,7 +208,7 @@ async function toggleSettle() {
     try {
       await ElMessageBox.confirm(
         `本单应收已结清，其中抹零优惠 ¥${discount.toFixed(2)} 未实际收款。\n` +
-        `改挂账将撤销这笔优惠，未收恢复为 ¥${discount.toFixed(2)}，结算回到「挂账」。\n` +
+        `改挂账将撤销这笔优惠，未收恢复为 ¥${discount.toFixed(2)}，结算状态回到「挂账」。\n` +
         `如果钱其实已经收到，请用「记录收款」补登记，而不是改挂账。`,
         '确认改挂账', { type: 'warning', confirmButtonText: '确认改挂账', cancelButtonText: '取消' })
     } catch { return }
@@ -239,7 +239,7 @@ async function toggleSettle() {
       `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${gap.toFixed(2)}。\n` +
       `· 「收款结清」：把 ¥${gap.toFixed(2)} 记为一笔实际收款，并生成收款单（现金增加）\n` +
       `· 「差额记优惠」：¥${gap.toFixed(2)} 作为抹零优惠核销，钱未收到，因此不生成收款单`,
-      '标记结清', {
+      '确认改结清', {
         type: 'warning',
         confirmButtonText: '收款结清',
         cancelButtonText: '差额记优惠',
@@ -347,7 +347,7 @@ const exportColumns = computed(() => {
 })
 // 打印页副标题：商品行数摘要（完整单头信息见下方 fields 字段区，避免重复）
 const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品`)
-// 单头信息：客户档案全量信息 + 单据关键字段（客户/日期/合计/优惠/应收/实收/未收/结算/备注，有折扣显示折扣）。
+// 单头信息：客户档案全量信息 + 单据关键字段（客户/日期/合计/优惠/应收/实收/未收/结算状态/备注，有折扣显示折扣）。
 // 「隐藏单价与金额」勾选时同步剔除金额类字段，与明细列保持同一脱敏口径
 const AMOUNT_FIELD_LABELS = ['合计', '原价合计', '整单折扣', '优惠', '应收', '实收', '未收']
 const docHeaderFields = computed(() => {
