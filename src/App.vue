@@ -427,6 +427,8 @@ body {
 
 .link { color: var(--color-primary); cursor: pointer; text-decoration: none; }
 .link:hover { text-decoration: underline; }
+/* 退款单（销售 XT- / 采购 CT-）单号全局红字：列表、详情、往来账、资金单据明细统一生效 */
+.return-code { color: var(--color-danger) !important; font-weight: 600; }
 
 @media (max-width: 768px) {
   .desktop-only { display: none; }

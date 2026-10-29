@@ -62,7 +62,7 @@
           <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
               <template #default="{ row }">
-                <router-link :to="`${L.detailPath}${row.id}`" class="link">{{ row.id }}</router-link>
+                <router-link :to="`${L.detailPath}${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link>
               </template>
             </el-table-column>
             <el-table-column :label="L.party" min-width="150" show-overflow-tooltip>
@@ -166,6 +166,7 @@ import { matchText } from '../utils/search'
 import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2 } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
+import { isReturn } from '../utils/refunds.js'
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 import TableToolbar from './TableToolbar.vue'
 import PaymentDialog from './PaymentDialog.vue'

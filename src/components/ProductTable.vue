@@ -16,7 +16,7 @@
               <el-table :data="sortedHistory(purchaseHistoryOf(row))" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="采购单" width="190" show-overflow-tooltip>
-                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
+                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/purchase/${h.id}`" class="link" :class="{ 'return-code': isReturnId(h.id) }">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
                 <el-table-column label="供应商" width="150" show-overflow-tooltip>
                   <template #default="{ row: h }">{{ h.supplierName || (supplierMap[h.supplier] || h.supplier || '') }}</template>
@@ -29,7 +29,7 @@
               <el-table :data="sortedHistory(saleHistoryOf(row))" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="销售单" width="190" show-overflow-tooltip>
-                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
+                  <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link" :class="{ 'return-code': isReturnId(h.id) }">{{ h.id }}</router-link><span v-else>—</span></template>
                 </el-table-column>
                 <el-table-column prop="customer" label="客户" width="150" show-overflow-tooltip />
                 <el-table-column prop="qty" label="数量" width="80"  align="right"/>
@@ -90,6 +90,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import PhotoThumbs from './PhotoThumbs.vue'
+import { isReturnId } from '../utils/refunds.js'
 
 const props = defineProps({
   items: { type: Array, default: () => [] },

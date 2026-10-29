@@ -50,7 +50,7 @@
       <div class="table-wrap">
         <el-table :data="pagedPurchases" stripe show-summary :summary-method="purchaseSummary">
           <el-table-column label="单号" width="180">
-            <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
+            <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
           </el-table-column>
           <el-table-column prop="supplier" label="供应商" min-width="180" show-overflow-tooltip />
           <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
@@ -88,7 +88,7 @@
       <div class="table-wrap">
         <el-table :data="pagedSales" stripe show-summary :summary-method="saleSummary">
           <el-table-column label="单号" width="180">
-            <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
+            <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
           </el-table-column>
           <el-table-column prop="customer" label="客户" min-width="160" show-overflow-tooltip />
           <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
@@ -153,6 +153,7 @@ import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderTimeOf } from '../utils/time.js'
+import { isReturn } from '../utils/refunds.js'
 
 const PAGE_SIZE = 20
 

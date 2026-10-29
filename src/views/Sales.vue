@@ -519,7 +519,6 @@ async function remove(row) {
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .debt{color:var(--color-danger);font-weight:600;}
-.return-code{color:var(--color-danger);font-weight:600;}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}
 .calc-hint{color:var(--text-secondary);font-weight:400;}
 .lines-scroll{overflow-x:auto;}

@@ -115,8 +115,8 @@
         <el-table :data="current.items || []" stripe border size="small" class="v-items">
           <el-table-column label="关联采购 / 销售单" min-width="210" show-overflow-tooltip>
             <template #default="{ row }">
-              <router-link v-if="row.orderId && ['sale', 'purchase'].includes(row.orderType)" :to="{ path: `${row.orderType === 'sale' ? '/sale/' : '/purchase/'}${encodeURIComponent(row.orderId)}` }" class="link">{{ row.orderType === 'sale' ? '销售单' : '采购单' }} · {{ row.orderId }}</router-link>
-              <span v-else class="none">{{ row.orderId || row.note || '无关联采购 / 销售单（纯资金业务）' }}</span>
+              <router-link v-if="row.orderId && ['sale', 'purchase'].includes(row.orderType)" :to="{ path: `${row.orderType === 'sale' ? '/sale/' : '/purchase/'}${encodeURIComponent(row.orderId)}` }" class="link" :class="{ 'return-code': isReturnId(row.orderId) }">{{ row.orderType === 'sale' ? '销售单' : '采购单' }} · {{ row.orderId }}</router-link>
+              <span v-else class="none" :class="{ 'return-code': isReturnId(row.orderId) }">{{ row.orderId || row.note || '无关联采购 / 销售单（纯资金业务）' }}</span>
             </template>
           </el-table-column>
           <el-table-column label="时间" width="170">
@@ -152,6 +152,7 @@ import TableToolbar from '../components/TableToolbar.vue'
 import { downloadCSV } from '../utils/export'
 import { VOUCHER_CATEGORY } from '../utils/voucherFlow'
 import { fmtCNTime, orderTimeOf } from '../utils/time.js'
+import { isReturnId } from '../utils/refunds.js'
 
 const loading = ref(true)
 const tab = ref('receipts')

@@ -2,6 +2,8 @@ import { grossOf, netOf, ensurePayments, syncPayments, round2, depositSumOf } fr
 import { genVoucherCode } from './voucher.js'
 
 export const isReturn = o => Number(o?.total) < 0 || ['sale-return', 'purchase-return'].includes(o?.type)
+// 按单号识别退款单（历史数据已统一迁移为 XT-/CT- 前缀）：用于只有单号、没有单据对象的场合
+export const isReturnId = id => /^(XT|CT)-/.test(String(id || ''))
 const fail = message => { const error = new Error(message); error.status = 400; throw error }
 const cents = n => Math.round(Number(n) * 100)
 const byDate = (a, b) => String(a.date).localeCompare(String(b.date)) || a.id.localeCompare(b.id)

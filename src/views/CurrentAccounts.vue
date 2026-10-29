@@ -201,7 +201,7 @@
                 </template>
               </el-table-column>
               <el-table-column label="单号" width="180">
-                <template #default="{ row }"><router-link :to="`${row._detail}${row.id}`" class="link">{{ row.id }}</router-link></template>
+                <template #default="{ row }"><router-link :to="`${row._detail}${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
               </el-table-column>
               <el-table-column label="往来单位" min-width="150" show-overflow-tooltip>
                 <template #default="{ row }">
@@ -256,6 +256,7 @@ import { applyDepositFlows } from '../utils/deposit'
 import { genVoucherCode } from '../utils/voucher'
 import { appendVouchers, savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
 import { matchText } from '../utils/search'
+import { isReturn } from '../utils/refunds.js'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import BatchPayDialog from '../components/BatchPayDialog.vue'

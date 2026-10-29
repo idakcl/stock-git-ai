@@ -13,7 +13,7 @@
     <el-alert v-if="error" :title="error" type="error" :closable="false" />
     <el-table :data="returns" row-key="id" @selection-change="selected = $event" ref="table">
       <el-table-column type="selection" width="45" />
-      <el-table-column label="退货单号" min-width="190"><template #default="{ row }"><router-link :to="`${kind === 'sale' ? '/sale/' : '/purchase/'}${row.id}`">{{ row.id }}</router-link></template></el-table-column>
+      <el-table-column label="退货单号" min-width="190"><template #default="{ row }"><router-link :to="`${kind === 'sale' ? '/sale/' : '/purchase/'}${row.id}`" :class="{ 'return-code': isReturnId(row.id) }">{{ row.id }}</router-link></template></el-table-column>
       <el-table-column :prop="partyKey" label="往来单位" min-width="160" />
       <el-table-column prop="date" label="日期" width="110" />
       <el-table-column label="退货金额" width="110"><template #default="{ row }">{{ Math.abs(grossOf(row)).toFixed(2) }}</template></el-table-column>
@@ -55,7 +55,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
-import { isReturn, returnableLines } from '../utils/refunds.js'
+import { isReturn, isReturnId, returnableLines } from '../utils/refunds.js'
 import { grossOf, netOf, round2 } from '../utils/account.js'
 import { todayCN } from '../utils/time.js'
 const route = useRoute()

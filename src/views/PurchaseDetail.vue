@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <div class="title">
-            <b>{{ isReturn(purchase) ? '采购退款单' : '采购单' }}：{{ purchase.id }}</b>
+            <b>{{ isReturn(purchase) ? '采购退款单' : '采购单' }}：<span :class="{ 'return-code': isReturn(purchase) }">{{ purchase.id }}</span></b>
           </div>
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">

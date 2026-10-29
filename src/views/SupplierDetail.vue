@@ -46,7 +46,7 @@
           <div class="table-wrap">
           <el-table :data="filteredPurchases" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
-              <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
+              <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
             <el-table-column label="金额" width="110" align="right">
@@ -85,7 +85,7 @@
           <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column prop="id" label="单号" width="180">
-              <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
+              <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link" :class="{ 'return-code': isReturnId(row.id) }">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="summary" label="摘要" width="120" />
             <el-table-column prop="amount" label="应付金额" width="120" align="right">
@@ -151,7 +151,7 @@
             </el-table-column>
             <el-table-column label="关联单据" width="180">
               <template #default="{ row }">
-                <router-link v-if="row.order" :to="`/purchase/${row.order}`" class="link">{{ row.order }}</router-link>
+                <router-link v-if="row.order" :to="`/purchase/${row.order}`" class="link" :class="{ 'return-code': isReturnId(row.order) }">{{ row.order }}</router-link>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -239,6 +239,7 @@ import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { todayCN, orderTimeOf } from '../utils/time.js'
+import { isReturn, isReturnId } from '../utils/refunds.js'
 
 const route = useRoute()
 const suppliers = ref([])

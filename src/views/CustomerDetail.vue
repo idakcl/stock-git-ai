@@ -44,7 +44,7 @@
           <div class="table-wrap">
           <el-table :data="filteredSales" stripe show-summary :summary-method="summaryAmount">
             <el-table-column label="单号" width="180">
-              <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
+              <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
             <el-table-column label="商品数量" width="100" align="right">
@@ -86,7 +86,7 @@
           <el-table :data="ledgerRows" stripe show-summary :summary-method="ledgerSummary">
             <el-table-column prop="date" label="日期" width="120" />
             <el-table-column prop="id" label="单号" width="180">
-              <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
+              <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturnId(row.id) }">{{ row.id }}</router-link></template>
             </el-table-column>
             <el-table-column prop="summary" label="摘要" width="120" />
             <el-table-column prop="amount" label="应收金额" width="120" align="right">
@@ -152,7 +152,7 @@
             </el-table-column>
             <el-table-column label="关联单据" width="180">
               <template #default="{ row }">
-                <router-link v-if="row.order" :to="`/sale/${row.order}`" class="link">{{ row.order }}</router-link>
+                <router-link v-if="row.order" :to="`/sale/${row.order}`" class="link" :class="{ 'return-code': isReturnId(row.order) }">{{ row.order }}</router-link>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -209,6 +209,7 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
+import { isReturn, isReturnId } from '../utils/refunds.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const route = useRoute()
