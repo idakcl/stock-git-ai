@@ -17,6 +17,7 @@ import DataManager from './views/DataManager.vue'
 import ClearData from './views/ClearData.vue'
 import CurrentAccounts from './views/CurrentAccounts.vue'
 import Vouchers from './views/Vouchers.vue'
+import Returns from './views/Returns.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -37,7 +38,7 @@ const routes = [
   { path: '/clear', component: ClearData },
   { path: '/current', component: CurrentAccounts },
   { path: '/vouchers', component: Vouchers },
-  { path: '/returns', component: () => import('./views/Returns.vue') }
+  { path: '/returns', component: Returns }
 ]
 
 export default createRouter({
