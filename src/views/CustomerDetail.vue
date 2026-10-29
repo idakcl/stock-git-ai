@@ -210,6 +210,7 @@ import ProductTable from '../components/ProductTable.vue'
 import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 import { isReturn, isReturnId } from '../utils/refunds.js'
+import { appendVouchers } from '../utils/voucherFlow'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const route = useRoute()
@@ -243,8 +244,9 @@ async function saveDeposit() {
     const list = customers.value.map(c => ({ ...c }))
     const c = list.find(x => x.code === customer.value.code)
     if (!c) return ElMessage.error('客户档案未找到，请刷新页面重试')
+    const date = depDraft.value.date || todayCN()
     c.deposits = [...(c.deposits || []), {
-      date: depDraft.value.date || todayCN(),
+      date,
       amount,
       remark: depDraft.value.remark || '',
       time: new Date().toISOString()
@@ -253,6 +255,21 @@ async function saveDeposit() {
     customers.value = list
     depositDialog.value = false
     ElMessage.success('已存入预存款')
+    // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的收款单
+    const note = '存入客户预存款'
+    try {
+      const { created } = await appendVouchers(api, 'receivable', [{
+        category: 'deposit-recharge',
+        party: customer.value.name,
+        date,
+        remark: depDraft.value.remark || note,
+        items: [{ orderId: '', orderType: '', amount, note }]
+      }])
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`已生成收款单：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+    }
   } catch (e) {
     ElMessage.error(`保存失败：${e.message || e}`)
   } finally { depSaving.value = false }

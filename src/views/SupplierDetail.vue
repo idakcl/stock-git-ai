@@ -240,6 +240,7 @@ import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import { isReturn, isReturnId } from '../utils/refunds.js'
+import { appendVouchers } from '../utils/voucherFlow'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -270,8 +271,9 @@ async function saveAdvance() {
     const list = suppliers.value.map(s => ({ ...s }))
     const s = list.find(x => x.code === supplier.value.code)
     if (!s) return ElMessage.error('供应商档案未找到，请刷新页面重试')
+    const date = advDraft.value.date || todayCN()
     s.advances = [...(s.advances || []), {
-      date: advDraft.value.date || todayCN(),
+      date,
       amount,
       remark: advDraft.value.remark || '',
       time: new Date().toISOString()
@@ -280,6 +282,21 @@ async function saveAdvance() {
     suppliers.value = list
     advanceDialog.value = false
     ElMessage.success('已存入预付款')
+    // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的付款单
+    const note = '存入供应商预付款'
+    try {
+      const { created } = await appendVouchers(api, 'payable', [{
+        category: 'deposit-recharge',
+        party: supplier.value.name,
+        date,
+        remark: advDraft.value.remark || note,
+        items: [{ orderId: '', orderType: '', amount, note }]
+      }])
+      const codes = created.map(v => v.code).filter(Boolean)
+      if (codes.length) ElMessage.success(`已生成付款单：${codes.join('、')}`)
+    } catch (e) {
+      ElMessage.error(`资金单据生成失败：${e.message || '网络异常'}`)
+    }
   } catch (e) {
     ElMessage.error(`保存失败：${e.message || e}`)
   } finally { advSaving.value = false }
