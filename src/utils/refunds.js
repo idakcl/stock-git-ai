@@ -64,7 +64,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
     const entry = { id, type: `${input.kind}-return`, sourceOrderId: source.id, no: source.no || '',
       [partyKey]: source[partyKey], date: input.date, items: lines, total, discount: 0,
       returnReason: String(input.reason).trim(), refundMode: mode, remark: String(input.remark || ''),
-      payments: [], [field]: 0, settle: total === 0 ? '结清' : '挂账', requestId: input.requestId }
+      payments: [], [field]: 0, settle: total === 0 ? '结清' : '挂账', requestId: input.requestId, createdAt: now }
     orders.push(entry)
     returns = [entry]
   } else if (input.action === 'settle') {
@@ -84,7 +84,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
   const code = genVoucherCode(mode === 'cash' ? 'TK' : 'HX', input.date, state.refunds)
   const voucher = { code, requestId: input.requestId, kind: 'refund', category: mode === 'cash' ? 'refund' : mode === 'offset' ? 'return-offset' : 'return-deposit',
     direction: input.kind === 'sale' ? 'to_customer' : 'from_supplier', party, date: input.date,
-    total: mode === 'cash' ? amount : 0, settlementTotal: amount, remark: String(input.remark || ''), items: [] }
+    total: mode === 'cash' ? amount : 0, settlementTotal: amount, remark: String(input.remark || ''), items: [], createdAt: now }
   const settle = (o, value, targetOrderId) => {
     o.settlements = [...(o.settlements || []), { date: input.date, amount: value, voucher: code, mode, targetOrderId, time: now }]
   }

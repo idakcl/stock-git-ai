@@ -22,7 +22,7 @@
       </div>
       <el-table :data="g.orders" stripe size="small" max-height="240">
         <el-table-column prop="id" label="单号" width="180" />
-        <el-table-column prop="date" label="日期" width="120" />
+        <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
         <el-table-column label="未收/未付" width="120" align="right">
           <template #default="{ row }">{{ netOf(row, row._kind).toFixed(2) }}</template>
         </el-table-column>
@@ -48,7 +48,7 @@
 import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { netOf, round2 } from '../utils/account'
-import { todayCN } from '../utils/time.js'
+import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

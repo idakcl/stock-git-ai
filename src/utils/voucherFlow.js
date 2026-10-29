@@ -62,7 +62,9 @@ export async function appendVouchers(api, kind, bases) {
       date: base.date || todayCN(),
       remark: base.remark || '',
       total: round2(items.reduce((s, it) => s + Number(it.amount || 0), 0)),
-      items
+      items,
+      // 记录时间（精确到秒）：资金单据列表按它排序与展示；旧数据仓缺少该字段时由迁移脚本按流水 time 回填
+      createdAt: base.createdAt || new Date().toISOString()
     }
     working.push(voucher)
     created.push(voucher)

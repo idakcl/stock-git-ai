@@ -23,6 +23,31 @@ export function cnDateTime(ms = Date.now()) {
   return `${d.toISOString().slice(0, 10)} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
 }
 
+// 统一时间展示：ISO / 北京时间 / 仅日期 → YYYY-MM-DD HH:mm:ss
+// 仅日期（YYYY-MM-DD）原样返回，避免把「无具体时刻」的旧记录伪造成 08:00:00。
+export function fmtCNTime(value) {
+  if (!value) return ''
+  const s = String(value).trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/.test(s)) {
+    return s.length === 16 ? `${s}:00` : s
+  }
+  const ms = Date.parse(s)
+  return Number.isNaN(ms) ? s : cnDateTime(ms)
+}
+
+// 单据记录时间（精确到秒）：单号 = 前缀 + YYYYMMDDHHmmss + 流水，优先从单号解析；
+// 退货单等非时间戳编号回退 createdAt，再回退业务日期。
+export function orderTimeOf(order) {
+  const id = String(order?.id || '')
+  const m = /^[A-Z](\d{14})\d+$/.exec(id)
+  if (m) {
+    const s = m[1]
+    return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} ${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}`
+  }
+  return fmtCNTime(order?.createdAt) || order?.date || ''
+}
+
 // 北京时间时分秒 HHmmss，用于单据编号
 export function cnHMS(ms = Date.now()) {
   const d = cnShift(ms)

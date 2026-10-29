@@ -209,7 +209,9 @@
                   <span v-else>{{ row._party }}</span>
                 </template>
               </el-table-column>
-              <el-table-column prop="date" label="日期" width="120" />
+              <el-table-column label="时间" width="170">
+                <template #default="{ row }">{{ orderTimeOf(row) }}</template>
+              </el-table-column>
               <el-table-column :label="orderDueLabel" width="120" align="right">
                 <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
               </el-table-column>
@@ -259,7 +261,7 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import BatchPayDialog from '../components/BatchPayDialog.vue'
 import DepositRechargeDialog from '../components/DepositRechargeDialog.vue'
 import RecordPaymentDialog from '../components/RecordPaymentDialog.vue'
-import { todayCN } from '../utils/time.js'
+import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const PAGE_SIZE = 60
 const salesList = ref([])
@@ -341,9 +343,10 @@ const orderFiltered = computed(() => (ordersAll.value || []).filter(o => {
   if (dateEnd.value && (o.date || '') > dateEnd.value) return false
   if (typeFilter.value && o._kind !== typeFilter.value) return false
   if (onlyOpen.value && isSettledOf(netOf(o, o._kind))) return false
-  if (!matchText(keyword.value, o.id, o._party, o.date, o.remark)) return false
+  if (!matchText(keyword.value, o.id, o._party, o.date, orderTimeOf(o), o.remark)) return false
   return true
-}))
+})
+  .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 const orderPaged = computed(() => orderFiltered.value.slice((orderPage.value - 1) * PAGE_SIZE, orderPage.value * PAGE_SIZE))
 watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen], () => { orderPage.value = 1 })
 
@@ -726,7 +729,9 @@ async function onBatchApplied(groups) {
         date: g.date,
         remark: voucherRemark,
         total,
-        items: voucherItems
+        items: voucherItems,
+        // 记录时间（精确到秒）：资金单据列表的排序与「时间」列
+        createdAt: new Date().toISOString()
       }
       if (isRecv) { newReceipts.push(voucher); receiptsSoFar.push(voucher) }
       else { newVouchers.push(voucher); vouchersSoFar.push(voucher) }

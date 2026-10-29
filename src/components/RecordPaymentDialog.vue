@@ -59,7 +59,7 @@
       <el-table ref="orderTable" :data="displayOrders" stripe size="small" max-height="300" row-key="id" :reserve-selection="true" @selection-change="onSelChange">
         <el-table-column type="selection" width="42" />
         <el-table-column prop="id" label="单号" width="170" />
-        <el-table-column prop="date" label="日期" width="110" />
+        <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
         <el-table-column label="未收/未付" width="108" align="right">
           <template #default="{ row }">{{ netOf(row, type).toFixed(2) }}</template>
         </el-table-column>
@@ -96,7 +96,7 @@
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { netOf, round2 } from '../utils/account'
-import { todayCN } from '../utils/time.js'
+import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

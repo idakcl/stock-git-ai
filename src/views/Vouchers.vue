@@ -56,7 +56,7 @@
         :rows="filteredList"
       />
       <div class="table-wrap">
-        <el-table :data="pagedList" stripe @row-click="openDrawer">
+        <el-table :data="pagedList" stripe>
           <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip>
             <template #default="{ row }"><router-link :to="{ path: '/vouchers', query: { code: row.code } }" class="link" @click.stop>{{ row.code }}</router-link></template>
           </el-table-column>
@@ -67,7 +67,9 @@
           </el-table-column>
           <el-table-column v-if="tab === 'refunds' || tab === 'settlements'" label="方向" width="145"><template #default="{ row }">{{ row.direction === 'to_customer' ? '退给客户' : '收供应商退款' }}</template></el-table-column>
           <el-table-column prop="party" label="往来单位" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="date" label="日期" width="130" />
+          <el-table-column label="时间" width="170">
+            <template #default="{ row }">{{ row._time || fmtCNTime(row.createdAt) || row.date }}</template>
+          </el-table-column>
           <el-table-column label="本次金额" width="130" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -107,7 +109,8 @@
           <el-descriptions-item v-if="current.kind === 'refund'" label="核销金额">{{ Number(current.settlementTotal || 0).toFixed(2) }}（非现金核销不计入资金净额）</el-descriptions-item>
           <el-descriptions-item label="类别">{{ categoryLabel(current) }}</el-descriptions-item>
           <el-descriptions-item label="往来单位">{{ current.party }}</el-descriptions-item>
-          <el-descriptions-item label="日期">{{ current.date }}</el-descriptions-item>
+          <el-descriptions-item label="业务日期">{{ current.date }}</el-descriptions-item>
+          <el-descriptions-item label="记录时间">{{ fmtCNTime(current.createdAt) || current.date }}</el-descriptions-item>
           <el-descriptions-item label="本次金额">¥ {{ Number(current.total || 0).toFixed(2) }}</el-descriptions-item>
           <el-descriptions-item label="备注">{{ current.remark || '—' }}</el-descriptions-item>
         </el-descriptions>
@@ -121,7 +124,9 @@
               <span v-else class="none">{{ row.orderId || row.note || '无关联采购 / 销售单（纯资金业务）' }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="date" label="日期" width="120" />
+          <el-table-column label="时间" width="170">
+            <template #default="{ row }">{{ row.time || row.date }}</template>
+          </el-table-column>
           <el-table-column label="本次金额" width="110" align="right">
             <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -151,6 +156,7 @@ import { api } from '../api'
 import TableToolbar from '../components/TableToolbar.vue'
 import { downloadCSV } from '../utils/export'
 import { VOUCHER_CATEGORY } from '../utils/voucherFlow'
+import { fmtCNTime, orderTimeOf } from '../utils/time.js'
 
 const loading = ref(true)
 const tab = ref('receipts')
@@ -195,8 +201,11 @@ const filteredList = computed(() => {
     out = out.filter(v => v.date >= s && v.date <= e)
   }
   if (partyFilter.value) out = out.filter(v => v.party === partyFilter.value)
-  // 默认按单据日期倒序（最新在前），同日按单据编码倒序
-  return [...out].sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.code || '').localeCompare(a.code || ''))
+  // 按记录时间（精确到秒）倒序，最新在最上面；同一秒按单据编号倒序。
+  // createdAt 由各开单入口写入，旧数据仓记录已在数据迁移中按流水 time 回填。
+  return [...out]
+    .map(v => ({ ...v, _time: fmtCNTime(v.createdAt) || v.date || '' }))
+    .sort((a, b) => (b._time || '').localeCompare(a._time || '') || (b.code || '').localeCompare(a.code || ''))
 })
 const page = ref(1), pageSize = ref(20)
 const pagedList = computed(() => filteredList.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
@@ -219,18 +228,18 @@ const listColumns = [
   { label: '资金单据编号', prop: 'code' },
   { label: '类别', value: r => categoryLabel(r) },
   { label: '往来单位', prop: 'party' },
-  { label: '日期', prop: 'date' },
+  { label: '时间', value: r => r._time || fmtCNTime(r.createdAt) || r.date },
   { label: '本次金额', value: r => Number(r.total || 0).toFixed(2) },
   { label: '备注', prop: 'remark' }
 ]
 const subtitle = computed(() => `${tabLabel.value}共 ${filteredList.value.length} 张 · 合计 ¥${sumTotal.value.toFixed(2)}`)
 
-// 抽屉明细行：补上源单据的日期与备注（与 Vouchers 单据模型一致，remark 置末列）
+// 抽屉明细行：补上源单据的记录时间与备注（remark 置末列）
 function enrichedItems(voucher) {
   return (voucher.items || []).map(it => {
     const orderType = it.orderType || (voucher.kind === 'receivable' || voucher.code.startsWith('SK-') || voucher.direction === 'to_customer' ? 'sale' : 'purchase')
     const meta = orderMeta.value[`${orderType}:${it.orderId}`] || {}
-    return { ...it, orderType, date: meta.date || it.date || '', remark: it.remark || meta.remark || '' }
+    return { ...it, orderType, date: meta.date || it.date || '', time: meta.time || fmtCNTime(it.date), remark: it.remark || meta.remark || '' }
   })
 }
 
@@ -255,7 +264,7 @@ function categoryTagType(cat) {
 // 导出当前查看的单据明细（单号 / 日期 / 本次金额 / 本次优惠 / 结算 / 备注）
 const voucherColumns = [
   { label: '单号', prop: 'orderId' },
-  { label: '日期', prop: 'date' },
+  { label: '时间', value: r => r.time || r.date || '' },
   { label: '本次金额', value: r => Number(r.amount || 0).toFixed(2) },
   { label: '本次优惠', value: r => Number(r.discount || 0) > 0 ? Number(r.discount).toFixed(2) : '' },
   { label: '结算', value: r => r.settle ? '结清' : '挂账' },
@@ -289,8 +298,8 @@ onMounted(async () => {
   try {
     const [sales, purchases] = await Promise.all([api.getSales(), api.getPurchases()])
     const meta = {}
-    ;(sales || []).forEach(s => { meta[`sale:${s.id}`] = { date: s.date, remark: s.remark } })
-    ;(purchases || []).forEach(p => { meta[`purchase:${p.id}`] = { date: p.date, remark: p.remark } })
+    ;(sales || []).forEach(s => { meta[`sale:${s.id}`] = { date: s.date, time: orderTimeOf(s), remark: s.remark } })
+    ;(purchases || []).forEach(p => { meta[`purchase:${p.id}`] = { date: p.date, time: orderTimeOf(p), remark: p.remark } })
     orderMeta.value = meta
   } catch (e) {
     ElMessage.warning({ message: `关联单据信息读取失败（${(e && e.message) || '网络异常'}），明细里的日期/备注可能显示为空`, duration: 6000 })

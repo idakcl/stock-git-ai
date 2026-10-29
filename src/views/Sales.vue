@@ -30,7 +30,9 @@
             <span v-else>{{ row.customer }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="date" label="日期" width="120" />
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ orderTimeOf(row) }}</template>
+        </el-table-column>
         <el-table-column label="商品数量" width="100" align="right">
           <template #default="{ row }">{{ orderKindCount(row) }}</template>
         </el-table-column>
@@ -125,7 +127,7 @@ import OrderEditDialog from '../components/OrderEditDialog.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { todayCN } from '../utils/time.js'
+import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const PAGE_SIZE = 60
 // 客户类别 → 商品上的对应分级售价字段
@@ -154,16 +156,16 @@ const photoOrder = ref(null)
 
 // 商品编码 → 主数据当前名（搜索按编码解析，单据快照名过期也能命中）
 const nameMap = computed(() => itemNameMap(itemOptions.value))
-// 列表排序：最新的排最前面。先按日期倒序，同日再按单号倒序（单号内含录入时间 hhmmss+流水），
-// 保证同日多单按开单先后正确排列，而非依赖后端存储顺序
+// 列表排序：按记录时间（精确到秒）倒序，最新在最上面；同一秒再按单号倒序。
+// 记录时间优先从单号解析（单号内含 YYYYMMDDHHmmss），退货单等回退 createdAt。
 const byNewest = (a, b) => {
-  const d = String(b.date || '').localeCompare(String(a.date || ''))
-  return d !== 0 ? d : String(b.id || '').localeCompare(String(a.id || ''))
+  const t = String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a)))
+  return t !== 0 ? t : String(b.id || '').localeCompare(String(a.id || ''))
 }
 const filtered = computed(() => list.value
   .filter(row => {
     // 搜索商品名按编码解析为当前名：单据快照名过期（商品改名前）也能命中
-    if (!matchText(keyword.value, row.id, row.customer, row.date, row.remark,
+    if (!matchText(keyword.value, row.id, row.customer, row.date, orderTimeOf(row), row.remark,
       ...(row.items || []).map(i => lineDisplayName(i, nameMap.value)), ...(row.items || []).map(i => i.code))) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
@@ -207,7 +209,7 @@ const subtitle = computed(() => {
 const exportColumns = [
   { label: '单号', prop: 'id' },
   { label: '客户', prop: 'customer' },
-  { label: '日期', prop: 'date' },
+  { label: '时间', value: r => orderTimeOf(r) },
   { label: '商品数量', value: r => orderKindCount(r) },
   { label: '商品编码', value: r => itemCodesOf(r).join('、') },
   { label: '应收', value: r => grossOf(r).toFixed(2) },

@@ -48,7 +48,7 @@
             <el-table-column label="单号" width="180">
               <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
             </el-table-column>
-            <el-table-column prop="date" label="日期" width="120" />
+            <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
             <el-table-column label="金额" width="110" align="right">
               <template #default="{ row }">{{ grossOf(row).toFixed(2) }}</template>
             </el-table-column>
@@ -238,7 +238,7 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
 import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
-import { todayCN } from '../utils/time.js'
+import { todayCN, orderTimeOf } from '../utils/time.js'
 
 const route = useRoute()
 const suppliers = ref([])
@@ -424,7 +424,7 @@ const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateStart.value && (p.date || '') < dateStart.value) return false
   if (dateEnd.value && (p.date || '') > dateEnd.value) return false
   return true
-}))
+}).sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 
 // 展示层结算口径：未付金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
 const settleLabelOf = (row) => isSettledOf(payableOf(row), row.settle) ? '结清' : '挂账'

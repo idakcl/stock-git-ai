@@ -53,7 +53,7 @@
             <template #default="{ row }"><router-link :to="`/purchase/${row.id}`" class="link">{{ row.id }}</router-link></template>
           </el-table-column>
           <el-table-column prop="supplier" label="供应商" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="date" label="日期" width="120" />
+          <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
           <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -91,7 +91,7 @@
             <template #default="{ row }"><router-link :to="`/sale/${row.id}`" class="link">{{ row.id }}</router-link></template>
           </el-table-column>
           <el-table-column prop="customer" label="客户" min-width="160" show-overflow-tooltip />
-          <el-table-column prop="date" label="日期" width="120" />
+          <el-table-column label="时间" width="170"><template #default="{ row }">{{ orderTimeOf(row) }}</template></el-table-column>
           <el-table-column prop="total" label="金额" width="120" align="right">
             <template #default="{ row }">{{ Number(row.total || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -152,6 +152,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
+import { orderTimeOf } from '../utils/time.js'
 
 const PAGE_SIZE = 20
 
@@ -217,9 +218,11 @@ function inRange(date) {
 }
 
 const filteredPurchases = computed(() => (purchases.value || []).filter(p =>
-  inRange(p.date) && (!supplierFilter.value || (p.supplier || '') === supplierFilter.value)))
+  inRange(p.date) && (!supplierFilter.value || (p.supplier || '') === supplierFilter.value))
+  .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 const filteredSales = computed(() => (sales.value || []).filter(s =>
-  inRange(s.date) && (!customerFilter.value || (s.customer || '') === customerFilter.value)))
+  inRange(s.date) && (!customerFilter.value || (s.customer || '') === customerFilter.value))
+  .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 
 // 供应商 / 客户下拉选项（本期范围内出现过的）
 const supplierOptions = computed(() => [...new Set((purchases.value || []).filter(p => inRange(p.date)).map(p => p.supplier).filter(Boolean))].sort())

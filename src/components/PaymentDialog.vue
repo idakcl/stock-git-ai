@@ -10,7 +10,9 @@
 
     <el-table :data="rows" stripe max-height="280" empty-text="暂无收付款记录">
       <el-table-column type="index" label="#" width="46" />
-      <el-table-column prop="date" label="日期" width="130" />
+      <el-table-column label="时间" width="170">
+        <template #default="{ row }">{{ fmtCNTime(row.time) || orderTimeOf(order) }}</template>
+      </el-table-column>
       <el-table-column prop="amount" label="金额" width="120" align="right">
         <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
       </el-table-column>
@@ -71,7 +73,7 @@
 import { ref, computed, watch, h } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ensurePayments, grossOf, syncPayments } from '../utils/account'
-import { todayCN } from '../utils/time.js'
+import { todayCN, fmtCNTime, orderTimeOf } from '../utils/time.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

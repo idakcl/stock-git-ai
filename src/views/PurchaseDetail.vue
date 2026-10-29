@@ -27,7 +27,7 @@
           <router-link v-if="supplierCodeMap[purchase.supplier]" :to="`/supplier/${supplierCodeMap[purchase.supplier]}`" class="link">{{ purchase.supplier }}</router-link>
           <span v-else>{{ purchase.supplier }}</span>
         </span>
-        <span>日期：{{ purchase.date }}</span>
+        <span>记录时间：{{ orderTimeOf(purchase) }}</span>
         <span>合计：¥ {{ Number(purchase.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
         <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
@@ -87,7 +87,9 @@
       <div class="table-wrap">
       <el-table :data="payments" stripe empty-text="暂无付款记录，可点右上角「记录付款」分多笔登记">
         <el-table-column type="index" label="#" width="46" />
-        <el-table-column prop="date" label="日期" width="140" />
+        <el-table-column label="时间" width="170">
+          <template #default="{ row }">{{ fmtCNTime(row.time) || orderTimeOf(purchase) }}</template>
+        </el-table-column>
         <el-table-column label="金额" width="130" align="right">
           <template #default="{ row }">{{ Number(row.amount || 0).toFixed(2) }}</template>
         </el-table-column>
@@ -101,7 +103,7 @@
 
     <el-card v-if="(purchase.settlements || []).length" class="pay-card">
       <template #header>退货核销（不计现金实付或优惠）</template>
-      <el-table :data="purchase.settlements"><el-table-column prop="date" label="日期" /><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
+      <el-table :data="purchase.settlements"><el-table-column label="时间" width="170"><template #default="{ row }">{{ fmtCNTime(row.time) || row.date }}</template></el-table-column><el-table-column prop="amount" label="核销金额" /><el-table-column prop="voucher" label="核销凭证编号"><template #default="{ row }"><router-link v-if="row.voucher" :to="{ path: '/vouchers', query: { code: row.voucher } }" class="link">{{ row.voucher }}</router-link><span v-else>—</span></template></el-table-column></el-table>
     </el-card>
     <PaymentDialog v-model="payDialog" :order="purchase" kind="payable" :deposit-balance="supplierAdvanceBalance" @saved="onPaySaved" />
 
@@ -138,7 +140,7 @@ import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
-import { todayCN } from '../utils/time.js'
+import { todayCN, fmtCNTime, orderTimeOf } from '../utils/time.js'
 
 const route = useRoute()
 const router = useRouter()
