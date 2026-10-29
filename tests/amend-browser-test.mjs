@@ -334,6 +334,17 @@ await t('没有可清空的草稿时按钮禁用', async () => {
   } finally { await context.close() }
 })
 
+await t('菜单：订单排在采购上方（业务链起点优先）', async () => {
+  const { page, context, errors } = await open('/', seed())
+  try {
+    const texts = await page.locator('.el-menu-item').allInnerTexts()
+    const at = (name) => texts.findIndex(t => t.includes(name))
+    assert.ok(at('订单') >= 0 && at('采购') >= 0, `业务菜单里应同时有订单和采购：${texts.join(' | ')}`)
+    assert.ok(at('订单') < at('采购'), `订单应排在采购上方：${texts.join(' | ')}`)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

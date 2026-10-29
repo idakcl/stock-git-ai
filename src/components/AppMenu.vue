@@ -27,6 +27,12 @@
     </el-menu-item-group>
 
     <el-menu-item-group title="业务">
+      <!-- 订单排在最前：它是业务链的起点（先谈单、再收订金、过账后才生成采购/销售单） -->
+      <el-menu-item index="/orders">
+        <el-icon><Tickets /></el-icon>
+        <span>订单</span>
+        <el-badge v-if="draftOrders" :value="draftOrders" type="warning" :max="99" class="menu-badge" />
+      </el-menu-item>
       <el-menu-item index="/purchases">
         <el-icon><Download /></el-icon>
         <span>采购</span>
@@ -34,11 +40,6 @@
       <el-menu-item index="/sales">
         <el-icon><Sell /></el-icon>
         <span>销售</span>
-      </el-menu-item>
-      <el-menu-item index="/orders">
-        <el-icon><Tickets /></el-icon>
-        <span>订单</span>
-        <el-badge v-if="draftOrders" :value="draftOrders" type="warning" :max="99" class="menu-badge" />
       </el-menu-item>
       <el-menu-item index="/stock">
         <el-icon><Box /></el-icon>
