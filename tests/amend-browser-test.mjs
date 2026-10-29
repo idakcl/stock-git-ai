@@ -292,6 +292,48 @@ await t('看板显示待过账订单数并带订金', async () => {
   } finally { await context.close() }
 })
 
+await t('清空草稿：按钮只算纯草稿，确认后提交一次 clearDrafts', async () => {
+  const s = seed()
+  const base = { kind: 'sale', customer: '客户甲', date: '2026-10-29', discount: 0, discountRates: [],
+    items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }] }
+  s.orders = [
+    { ...base, id: 'D20261029000000011', status: '草稿', deposits: [] },
+    { ...base, id: 'D20261029000000012', status: '草稿', deposits: [] },
+    // 收过订金：凭证已开，不能被批量清掉
+    { ...base, id: 'D20261029000000013', status: '草稿', deposits: [{ date: '2026-10-29', amount: 10, voucher: 'SK-20261029-0001' }] },
+    // 已过账：连着一条正式单据，要先撤销
+    { ...base, id: 'D20261029000000014', status: '已过账', postedOrderId: 'X2', deposits: [] }
+  ]
+  const { page, context, errors, state } = await open('/orders', s)
+  try {
+    const btn = page.getByRole('button', { name: /清空草稿/ })
+    assert.match((await btn.innerText()).replace(/\s+/g, ''), /清空草稿（2）/, '只数得出真会删掉的那两张')
+    await btn.click()
+    const box = page.locator('.el-message-box')
+    const text = (await box.innerText()).replace(/\s+/g, ' ')
+    assert.match(text, /删除 2 张草稿/, `确认框要报清张数：${text}`)
+    assert.match(text, /另有 2 张不会被删/, '要说清哪些不删')
+    await box.getByRole('button', { name: '全部删除' }).click()
+    await page.waitForTimeout(400)
+    const posts = (state.posts || []).filter(p => p.key === 'orders')
+    assert.equal(posts.length, 1, '清空草稿只应发一次请求（不是每张一次）')
+    assert.equal(posts[0].body.action, 'clearDrafts')
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+await t('没有可清空的草稿时按钮禁用', async () => {
+  const s = seed()
+  s.orders = [{ id: 'D20261029000000015', kind: 'sale', status: '已过账', postedOrderId: 'X2', customer: '客户甲',
+    date: '2026-10-29', discount: 0, discountRates: [], deposits: [],
+    items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }] }]
+  const { page, context, errors } = await open('/orders', s)
+  try {
+    assert.equal(await page.getByRole('button', { name: /清空草稿/ }).isDisabled(), true, '全是已过账单时不能清空')
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

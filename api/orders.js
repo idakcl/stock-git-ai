@@ -25,17 +25,19 @@ export async function orderTransaction(env, input, derive, rebuildStock) {
 
   const r = await commitTransaction(tx, {
     next,
-    message: `order: ${input.action} ${result.code || input.orderId || ''}`,
-    logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId }
+    message: `order: ${input.action} ${result.code || input.orderId || (result.removed != null ? `${result.removed} drafts` : '')}`.trim(),
+    logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed }
   })
-  if (r.unchanged) return { ok: true, code: result.code, unchanged: true }
+  if (r.unchanged) return { ok: true, code: result.code, unchanged: true, removed: result.removed || 0, skipped: result.skipped || 0 }
   // code 按操作含义不同：save/post/delete = 订单号，post 时 result.orderId 也是订单号、code 是新单据号，
-  // deposit = 凭证号。前端只用它做提示，落库结果一律以重新拉取为准。
+  // deposit = 凭证号，clearDrafts = 空串（数量看 removed/skipped）。前端只用它做提示，落库结果一律以重新拉取为准。
   return {
     ok: true,
     code: result.code,
     orderId: result.orderId || input.orderId,
     removedDocId: result.removedDocId,
+    removed: result.removed,
+    skipped: result.skipped,
     commit: r.sha
   }
 }

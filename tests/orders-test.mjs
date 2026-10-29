@@ -157,6 +157,31 @@ test('孤儿订单（过账生成的单据已被删掉）：撤销退回草稿�
   assert.throws(() => applyOrderOperation(posted, { action: 'delete', orderId: id }), /撤销过账/)
 })
 
+test('清空草稿：一次请求删掉全部纯草稿，已过账与已收订金的一张不动', () => {
+  let s = fixture()
+  for (let i = 0; i < 3; i++) s = saveOrder(s, draft()).state
+  const withDeposit = saveOrder(s, draft({ customer: '客户甲' }))
+  s = applyOrderOperation(withDeposit.state, { action: 'deposit', orderId: withDeposit.code, amount: 5, date: '2026-10-29' }).state
+  const posted = saveOrder(s, draft())
+  s = applyOrderOperation(posted.state, { action: 'post', orderId: posted.code }).state
+  assert.equal(s.orders.length, 5)
+
+  const r = applyOrderOperation(s, { action: 'clearDrafts' })
+  // 3 张纯草稿被删，收过订金的（凭证已开）与已过账的（连着正式单据）都保留
+  assert.equal(r.removed, 3)
+  assert.equal(r.skipped, 2)
+  assert.equal(r.state.orders.length, 2)
+  assert.deepEqual(r.state.orders.map(o => o.id).sort(), [withDeposit.code, posted.code].sort())
+  // 单据集合没被牵连：清草稿不产生也不删除任何正式单据
+  assert.deepEqual(r.state.sales.map(o => o.id), s.sales.map(o => o.id))
+  // 幂等：再清一次没有可删的
+  const again = applyOrderOperation(r.state, { action: 'clearDrafts' })
+  assert.equal(again.removed, 0)
+  assert.equal(again.state.orders.length, 2)
+  // 快照不被就地修改
+  assert.equal(s.orders.length, 5)
+})
+
 test('orderToOrderDoc 与 canUnpost 单独可用（前端预览同一份实现）', () => {
   const doc = orderToOrderDoc({ kind: 'sale', customer: '客户甲', date: '2026-10-29', no: 'DD-01', items: [line('P00001', '管件', 2, 10)], deposits: [{ date: '2026-10-29', amount: 20, voucher: 'SK-20261029-0009' }] }, 'X9')
   assert.equal(doc.no, 'DD-01')                  // 订单填过业务单号就沿用

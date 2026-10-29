@@ -4,7 +4,14 @@
       <template #header>
         <div class="card-header">
           <b>订单（未过账）</b>
-          <el-button type="primary" @click="openCreate">新建订单</el-button>
+          <div class="header-ops">
+            <!-- 清空草稿：一次请求删干净，避免几十张草稿各写一次 git 提交；
+                 已过账与已收订金的订单不在其中（前者连着正式单据、后者凭证已开） -->
+            <el-button type="danger" :disabled="!draftCount || busy || loading" @click="clearDrafts">
+              清空草稿{{ draftCount ? `（${draftCount}）` : '' }}
+            </el-button>
+            <el-button type="primary" @click="openCreate">新建订单</el-button>
+          </div>
         </div>
       </template>
       <el-alert type="info" :closable="false" show-icon
@@ -179,6 +186,8 @@ const filtered = computed(() => list.value
   .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || '')))
 )
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
+// 可清空的草稿数：与后端 clearDrafts 的判据一一对应（未过账 + 没收过订金），按钮上的数字就是「真会删掉的张数」
+const draftCount = computed(() => list.value.filter(o => o.status !== POSTED && orderDepositSum(o) === 0).length)
 const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
 watch([keyword, status, kind, dateStart, dateEnd], () => { page.value = 1 })
 
@@ -302,11 +311,31 @@ async function remove(row) {
   } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
 }
 
+// 清空草稿：只删「未过账 + 没收过订金」的单，数量在按钮上已经写清楚，确认框再报一次保留了多少张
+async function clearDrafts() {
+  const n = draftCount.value
+  if (!n) return
+  const kept = list.value.length - n
+  try {
+    await ElMessageBox.confirm(
+      `将删除 ${n} 张草稿订单，删除后不可恢复。${kept ? `另有 ${kept} 张不会被删（已过账 / 已收订金的订单）。` : ''}`,
+      '清空草稿', { type: 'warning', confirmButtonText: '全部删除' }
+    )
+  } catch { return }
+  busy.value = true
+  try {
+    const r = await api.orderOperation({ action: 'clearDrafts' })
+    ElMessage.success(`已清空 ${r.removed || 0} 张草稿${r.skipped ? `，保留 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    await load()
+  } catch (e) { fail(e, '清空草稿失败') } finally { busy.value = false }
+}
+
 onMounted(load)
 </script>
 
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.header-ops{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .search-input{margin:12px 0 12px;max-width:360px;}
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
 .filter-label{color:var(--text-regular);font-size:var(--fs-base);}

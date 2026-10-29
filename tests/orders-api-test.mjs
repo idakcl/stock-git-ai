@@ -274,5 +274,19 @@ await t('未分片库上的变更同样一次提交搞定', async () => {
   assert.ok(read('sales.json').some(o => o.id === r.code && o.total === -10))
 })
 
+await t('清空草稿：一次提交删完纯草稿，已过账的留着（removed/skipped 原样回前端）', async () => {
+  const a = await call('/orders', 'POST', { action: 'save', order: { kind: 'sale', customer: '客户甲', date: '2026-10-29', items: [line('P00003', '弯头', 1, 6)] } })
+  const b = await call('/orders', 'POST', { action: 'save', order: { kind: 'purchase', supplier: '供应商甲', date: '2026-10-29', items: [line('P00003', '弯头', 2, 6)] } })
+  const before = commits()
+  const r = await call('/orders', 'POST', { action: 'clearDrafts' })
+  assert.equal(r.removed, 2)
+  assert.equal(r.skipped, 1, '上一条用例过账的那张订单不能被清掉')
+  assert.equal(commits() - before, 1, '删干净只应有一次提交')
+  const orders = read('orders.json')
+  assert.equal(orders.length, 1)
+  assert.equal(orders[0].status, '已过账')
+  assert.ok(!orders.some(o => o.id === a.code || o.id === b.code))
+})
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

@@ -194,5 +194,17 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     return { state, code: order.id }
   }
 
+  // 清空草稿：一次请求删掉全部「纯草稿」，避免几十张草稿各发一次请求、各写一次 git 提交。
+  // 两条不删的硬约束与单张删除完全一致，不能让批量入口绕过它们：
+  //   ① 已过账的要先撤销过账（它连着一条正式单据）；
+  //   ② 收过订金的不删（订金凭证已经开了，删了订单凭证就成孤儿）。
+  if (action === 'clearDrafts') {
+    const droppable = o => o.status !== POSTED && orderDepositSum(o) === 0
+    const kept = state.orders.filter(o => !droppable(o))
+    const removed = state.orders.length - kept.length
+    state.orders = kept
+    return { state, code: '', removed, skipped: kept.length }
+  }
+
   fail('不支持的订单操作')
 }

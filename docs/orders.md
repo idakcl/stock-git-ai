@@ -42,7 +42,7 @@
 
 ### 接口
 `GET /api/orders` → 订单数组（**文件不存在返回 `[]`**，首次保存订单由事务自动建文件）。
-`POST /api/orders` → **操作接口，不是整表覆盖**，`action` 取 `save` / `deposit` / `post` / `unpost` / `delete`：
+`POST /api/orders` → **操作接口，不是整表覆盖**，`action` 取 `save` / `deposit` / `post` / `unpost` / `delete` / `clearDrafts`：
 
 ```json
 { "action": "save",   "order": { "kind": "sale", "customer": "客户甲", "date": "2026-10-29",
@@ -53,7 +53,13 @@
 { "action": "post",    "orderId": "D20261029…" }
 { "action": "unpost",  "orderId": "D20261029…" }
 { "action": "delete",  "orderId": "D20261029…" }
+{ "action": "clearDrafts" }
 ```
+
+- `clearDrafts`：一次请求删掉**全部纯草稿**，返回 `{ removed, skipped }`（`skipped` = 保留下来的张数）。
+  它不绕过单张删除的两条硬约束——**已过账的不删**（要先撤销过账，否则那条正式单据会变成孤儿）、
+  **收过订金的不删**（订金凭证已开）。因此它是幂等的：再调一次 `removed` 为 0、不会产生空提交。
+  设计动机：给「清空草稿」按钮用，几十张草稿各发一次请求就是几十次 git 提交，既慢又会刷屏提交历史。
 
 服务端返回 `{ ok, code, orderId?, removedDocId? }`；`code` 按操作含义不同（存草稿/删 = 订单号，过账 = 新单据号，收订金 = 凭证号），前端只用它做提示，落库结果一律以重新拉取为准。
 校验函数 `validateOrder(order, { items })` 前后端共用（同一份 `src/utils/orders.js`），杜绝「界面能提交、服务端拒」；
@@ -133,13 +139,13 @@
 
 ## 四、测试
 纯 Node（不碰线上仓）：
-- `node tests/orders-test.mjs`（10 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、
-  订金开凭证 + 过账搬成首笔流水、孤儿订单两个兜底分支。
+- `node tests/orders-test.mjs`（11 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、
+  订金开凭证 + 过账搬成首笔流水、孤儿订单两个兜底分支、清空草稿的保留规则。
 - `node tests/amend-test.mjs`（9 项）`diffOrderLines` / `refundPreview` / `applyAmendOperation`：
   退货行按行索引分摊、改价拒绝、混合单价拒绝、幂等 `requestId`、补差沿用原单价。
-- `node tests/orders-api-test.mjs`（14 项）以 `tests/fake-github.mjs` 为底跑 `/api/orders`、`/api/amends` 全链路，
+- `node tests/orders-api-test.mjs`（15 项）以 `tests/fake-github.mjs` 为底跑 `/api/orders`、`/api/amends` 全链路，
   校验一次请求的子请求数与「失败不重放」。
 
 真浏览器（先 `npx vite --port 5173 --strictPort --host 127.0.0.1` 起 dev server）：
-- `node tests/amend-browser-test.mjs`（10 项）锁定态与变更弹窗的可见行为：锁定条文案、明细无输入框、
-  退货预览金额与提交体形状、单价锁定、原因必填、订单页只提交 `save` 不碰销售单、看板待过账卡片。
+- `node tests/amend-browser-test.mjs`（12 项）锁定态与变更弹窗的可见行为：锁定条文案、明细无输入框、
+  退货预览金额与提交体形状、单价锁定、原因必填、订单页只提交 `save` 不碰销售单、看板待过账卡片、清空草稿只发一次请求。
