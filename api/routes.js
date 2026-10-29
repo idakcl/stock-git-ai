@@ -122,7 +122,6 @@ export function derive(items, suppliers, purchases, sales, customers) {
       items.push(it)
     }
     it.suppliers = it.suppliers || []
-    it.saleHistory = []
     if (code) itemByCode[code] = it
     if (name) itemByName[name] = it
     return it
@@ -131,6 +130,9 @@ export function derive(items, suppliers, purchases, sales, customers) {
   // 历史由单据「重建」（幂等），不从已有 history 追加
   const purchaseHist = {}
   const saleHist = {}
+  // 每个商品只保留去重后的成交客户名，供商品页「按客户筛选」；完整销售历史改由
+  // GET /api/sale-history 按需返回，避免 items.json 随累计销售行数无限增长。
+  const saleCustomerMap = {}
   // 数值清洗：非数字（空串/乱码）统一归 0，金额统一保留 2 位，
   // 消除 5×1.91=9.549999999999999 这类浮点残留在数据仓里沉淀
   const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
@@ -174,6 +176,7 @@ export function derive(items, suppliers, purchases, sales, customers) {
         qty: num(l.qty), price: money2(l.price), total: money2(l.total),
         return: num(l.qty) < 0 || undefined
       })
+      if (s.customer) (saleCustomerMap[it.code] = saleCustomerMap[it.code] || new Set()).add(s.customer)
       // 退货行（红字）不更新商品档案售价：退货价≠原单成交价时会污染售价档案
       if (l.price != null && Number.isFinite(Number(l.price)) && num(l.qty) >= 0) it.price = money2(l.price)
     }
@@ -193,7 +196,14 @@ export function derive(items, suppliers, purchases, sales, customers) {
       if (!Number(it.price) && retail) it.price = retail
       delete it.priceRetail
     }
-    it.saleHistory = saleHist[it.code] || []
+    // 销售历史不再内嵌 items.json：只保留去重后的成交客户名供筛选，
+    // 完整明细由 GET /api/sale-history 按需返回，避免文件随累计销售行数增长。
+    delete it.saleHistory
+    if (saleCustomerMap[it.code] && saleCustomerMap[it.code].size) {
+      it.saleCustomers = [...saleCustomerMap[it.code]]
+    } else {
+      delete it.saleCustomers
+    }
     // 历史采购价不再内嵌进 items.json：它 100% 可由 purchases.json 重建，且只有商品行「展开历史价」才用得到。
     // 实测 1559 个商品 / 2492 行历史 ≈ 390KB，占整个 items.json 的 41%——过去每存一张单都要整表重写这 390KB，
     // 纯属浪费（一次存单要顺序重写 items/suppliers/stock/purchases/sales 五个文件）。
@@ -206,7 +216,8 @@ export function derive(items, suppliers, purchases, sales, customers) {
     s.products = items.filter(i => (i.suppliers || []).includes(s.code)).map(i => i.code)
   }
   // history：{ 商品编码: [历史采购行] }，供 GET /api/purchase-history 按需返回
-  return { items, suppliers, customers, purchases, sales, history: purchaseHist }
+  // saleHistory：{ 商品编码: [历史销售行] }，供 GET /api/sale-history 按需返回
+  return { items, suppliers, customers, purchases, sales, history: purchaseHist, saleHistory: saleHist }
 }
 
 export function rebuildStock(purchases, sales, items) {
@@ -346,6 +357,17 @@ export async function handleApi(req, url, env) {
         readJSON(env, 'customers.json')
       ])
       return json(req, env, derive(items, suppliers, purchases, sales, customers).history)
+    }
+    // 历史销售价：商品行展开时按需返回，口径与 derive 一致
+    if (path === '/sale-history' && method === 'GET') {
+      const [items, suppliers, purchases, sales, customers] = await Promise.all([
+        readJSON(env, 'items.json'),
+        readJSON(env, 'suppliers.json'),
+        readJSON(env, 'purchases.json'),
+        readJSON(env, 'sales.json'),
+        readJSON(env, 'customers.json')
+      ])
+      return json(req, env, derive(items, suppliers, purchases, sales, customers).saleHistory)
     }
     if (path === '/suppliers' && method === 'GET') return json(req, env, await readJSON(env, 'suppliers.json'))
     if (path === '/customers' && method === 'GET') return json(req, env, await readJSON(env, 'customers.json'))

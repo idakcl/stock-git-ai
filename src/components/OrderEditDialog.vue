@@ -184,6 +184,7 @@ import { resolveLine, normalizeRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
+import { api } from '../api'
 import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
@@ -230,10 +231,20 @@ const editingId = ref('')
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
 const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRates:[], paidNow:0, depositPay:0, lines:[] })
+// 历史销售价改为按需接口，不再随 items.json 下发；打开弹窗时取一次，
+// 用于「该客户最近一次成交价」带出单价（未取到则退回分级售价/当前售价）
+const saleHistoryMap = ref(null)
+// 每次打开都取一次：接口层有 15 秒内存缓存，连续开单开销很小；
+// 保存单据后缓存会失效，必须重新取，否则「该客户最近成交价」会一直用旧数据。
+async function loadSaleHistory() {
+  try { saleHistoryMap.value = (await api.getSaleHistory()) || {} }
+  catch { if (!saleHistoryMap.value) saleHistoryMap.value = {} }
+}
 
 // 打开时整体重建表单：编辑回填原单（行折扣走 normalizeRate，兼容早期金额口径的旧数据）
-watch(() => props.modelValue, (open) => {
+watch(() => props.modelValue, async (open) => {
   if (!open) return
+  await loadSaleHistory()
   photoKey.value += 1
   const row = props.order
   if (row && row.id) {
@@ -420,7 +431,7 @@ function customerPriceFor(code) {
   if (!form.party || !code) return null
   const item = (props.items || []).find(i => i.code === code)
   if (!item) return null
-  const hist = (item.saleHistory || []).filter(h => h.customer === form.party)
+  const hist = ((saleHistoryMap.value && saleHistoryMap.value[code]) || []).filter(h => h.customer === form.party)
   if (!hist.length) return null
   const latest = hist.reduce((a, b) => ((a.date || '') > (b.date || '') ? a : b))
   return latest.price

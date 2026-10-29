@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <div class="title">
-            <b>销售单：{{ sale.id }}</b>
+            <b>{{ isReturn(sale) ? '销售退款单' : '销售单' }}：{{ sale.id }}</b>
           </div>
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
@@ -28,6 +28,11 @@
           <span v-else>{{ sale.customer }}</span>
         </span>
         <span>记录时间：{{ orderTimeOf(sale) }}</span>
+        <!-- 退款单必须能回到原销售单：以后所有退款单都带 sourceOrderId -->
+        <span v-if="isReturn(sale)">原销售单：
+          <router-link v-if="sale.sourceOrderId" :to="`/sale/${sale.sourceOrderId}`" class="link">{{ sale.sourceOrderId }}</router-link>
+          <span v-else>—</span>
+        </span>
         <span>合计：¥ {{ Number(sale.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
         <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
         <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
@@ -43,12 +48,11 @@
           <el-tag :type="settleLabel === '结清' ? 'success' : 'danger'" size="small" disable-transitions>
             {{ settleLabel }}
           </el-tag>
-          <!-- 标记结清：未收差额记为抹零优惠，未收自动归 0（与列表页、编辑弹窗同口径） -->
-          <el-button link size="small" type="primary" class="settle-btn"
-            :disabled="!found || autoSettled || isReturn(sale)"
-            :title="autoSettled ? '未收金额为 0，按金额自动结清' : ''"
+          <!-- 结清：未收差额记实收或记抹零；改挂账：撤销抹零优惠、恢复未收（未收 0 且无优惠时不显示） -->
+          <el-button v-if="!isReturn(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
+            :disabled="!found"
             @click="toggleSettle">
-            {{ settleLabel === '结清' ? '改挂账' : '结清' }}
+            {{ settleAction === 'settle' ? '结清' : '改挂账' }}
           </el-button>
         </span>
         <span v-if="sale.remark">备注：{{ sale.remark }}</span>
@@ -135,7 +139,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -182,72 +186,84 @@ const dueAmount = computed(() => grossOf(sale.value))
 const unpaid = computed(() => receivableOf(sale.value))
 const receivedSum = computed(() => receivedSumOf(sale.value))
 const payments = computed(() => ensurePayments(sale.value, 'received'))
-// 展示层结算口径：未收金额为 0 即显示结清（无需打开编辑弹窗，旧单也生效）
+// 未收金额为 0 即显示结清；结算按钮动作由 settleActionOf 统一判定（结清 / 改挂账 / 不显示）
 const settleLabel = computed(() => isSettledOf(unpaid.value, sale.value.settle) ? '结清' : '挂账')
-// 未收金额为 0 时按金额已自动结清：无需再点「结清」（与列表页 autoSettled 同口径）
-const autoSettled = computed(() => unpaid.value <= 0 && (sale.value.settle || '挂账') !== '结清')
+const settleAction = computed(() => settleActionOf(sale.value, 'receivable'))
 
-// 点「结清」有两条真实路径，必须由用户当场选，并如实反映在资金单据上：
-//   收款结清：差额记为一笔实际收款 → 生成收款单（SK-），现金增加
-//   差额记优惠：差额记入抹零优惠（无资金变动）→ 按口径不开任何资金单据；应收随之减少、未收归 0
-// syncPayments 按金额自动判定结清，状态与金额始终一致。与销售列表页 toggleSettle 同口径。
+// 结算按钮三个动作（与列表页同口径）：
+//   settle：仍未收 → 收款结清（差额记实收，生成收款单）或差额记优惠（无资金单据）
+//   unrest：金额已平但有抹零优惠 → 改挂账＝撤销优惠、未收恢复
+//   none：不显示按钮
 async function toggleSettle() {
-  const willSettle = settleLabel.value !== '结清'
-  if (willSettle && unpaid.value > 0) {
-    const due = dueAmount.value
-    const received = receivedSum.value
-    const gap = unpaid.value
-    let mode = 'cash'
+  const action = settleAction.value
+  if (action === 'none') return
+  if (action === 'unrest') {
+    const discount = round2(Number(sale.value.discount || 0))
     try {
       await ElMessageBox.confirm(
-        `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${gap.toFixed(2)}。\n` +
-        `· 「收款结清」：把 ¥${gap.toFixed(2)} 记为一笔实际收款，并生成收款单（现金增加）\n` +
-        `· 「差额记优惠」：¥${gap.toFixed(2)} 作为抹零优惠核销，钱未收到，因此不生成收款单`,
-        '标记结清', {
-          type: 'warning',
-          confirmButtonText: '收款结清',
-          cancelButtonText: '差额记优惠',
-          distinguishCancelAndClose: true
-        })
-    } catch (e) {
-      // close（点 X / ESC）= 放弃操作；cancel = 明确选择「差额记优惠」
-      if (e !== 'cancel') return
-      mode = 'discount'
-    }
-    if (mode === 'cash') {
-      const payments = ensurePayments(sale.value, 'received')
-      const row = { date: todayCN(), amount: gap, remark: '结清收款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
-      payments.push(row)
-      const updated = syncPayments({ ...sale.value, payments }, 'receivable')
-      const r = await savePaymentWithVouchers(api, 'receivable', sales.value, updated, [row], null)
-      if (r.stage === 'orders') {
-        ElMessage.error(`操作失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
-        const fresh = await api.getSales().catch(() => null)
-        if (fresh) sales.value = fresh
-        return
-      }
-      sales.value = r.merged
-      ElMessage.success(`已收款结清：¥${gap.toFixed(2)} 已入账`)
-      voucherNotices('receivable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
-      return
-    }
-    const updated = syncPayments({ ...sale.value, discount: round2(Number(sale.value.discount || 0) + gap) }, 'receivable')
+        `本单应收已结清，其中抹零优惠 ¥${discount.toFixed(2)} 未实际收款。\n` +
+        `改挂账将撤销这笔优惠，未收恢复为 ¥${discount.toFixed(2)}，结算回到「挂账」。\n` +
+        `如果钱其实已经收到，请用「记录收款」补登记，而不是改挂账。`,
+        '确认改挂账', { type: 'warning', confirmButtonText: '确认改挂账', cancelButtonText: '取消' })
+    } catch { return }
+    const updated = syncPayments({ ...sale.value, discount: 0 }, 'receivable')
     const idx = sales.value.findIndex(x => x.id === updated.id)
-    if (idx >= 0) sales.value[idx] = updated
+    if (idx < 0) return
+    const origin = sales.value[idx]
+    sales.value[idx] = updated
     try {
       await api.saveSales(sales.value)
     } catch (e) {
+      sales.value[idx] = origin
       ElMessage.error(`操作失败：${e.message || '网络异常'}，本地改动已回滚，请重试`)
       const fresh = await api.getSales().catch(() => null)
       if (fresh) sales.value = fresh
       return
     }
-    ElMessage.success(`已按抹零优惠结清 ¥${gap.toFixed(2)}（无资金变动，未生成收款单）`)
+    ElMessage.success(`已改回挂账：未收恢复 ¥${discount.toFixed(2)}`)
     return
   }
-  // 未收已为 0：直接标记结清；或从「结清」改回「挂账」
-  const idx = sales.value.findIndex(x => x.id === sale.value.id)
-  if (idx >= 0) sales.value[idx] = { ...sales.value[idx], settle: willSettle ? '结清' : '挂账' }
+  // action === 'settle'：未收 > 0
+  const due = dueAmount.value
+  const received = receivedSum.value
+  const gap = unpaid.value
+  let mode = 'cash'
+  try {
+    await ElMessageBox.confirm(
+      `该单应收 ¥${due.toFixed(2)}，已实收 ¥${received.toFixed(2)}，未收 ¥${gap.toFixed(2)}。\n` +
+      `· 「收款结清」：把 ¥${gap.toFixed(2)} 记为一笔实际收款，并生成收款单（现金增加）\n` +
+      `· 「差额记优惠」：¥${gap.toFixed(2)} 作为抹零优惠核销，钱未收到，因此不生成收款单`,
+      '标记结清', {
+        type: 'warning',
+        confirmButtonText: '收款结清',
+        cancelButtonText: '差额记优惠',
+        distinguishCancelAndClose: true
+      })
+  } catch (e) {
+    // close（点 X / ESC）= 放弃操作；cancel = 明确选择「差额记优惠」
+    if (e !== 'cancel') return
+    mode = 'discount'
+  }
+  if (mode === 'cash') {
+    const payments = ensurePayments(sale.value, 'received')
+    const row = { date: todayCN(), amount: gap, remark: '结清收款', time: new Date().toISOString(), mid: `n${Date.now().toString(36)}` }
+    payments.push(row)
+    const updated = syncPayments({ ...sale.value, payments }, 'receivable')
+    const r = await savePaymentWithVouchers(api, 'receivable', sales.value, updated, [row], null)
+    if (r.stage === 'orders') {
+      ElMessage.error(`操作失败：${(r.error && r.error.message) || '网络异常'}，本地改动已回滚，请重试`)
+      const fresh = await api.getSales().catch(() => null)
+      if (fresh) sales.value = fresh
+      return
+    }
+    sales.value = r.merged
+    ElMessage.success(`已收款结清：¥${gap.toFixed(2)} 已入账`)
+    voucherNotices('receivable', r).forEach(n => ElMessage[n.type]({ message: n.text, duration: n.duration }))
+    return
+  }
+  const updated = syncPayments({ ...sale.value, discount: round2(Number(sale.value.discount || 0) + gap) }, 'receivable')
+  const idx = sales.value.findIndex(x => x.id === updated.id)
+  if (idx >= 0) sales.value[idx] = updated
   try {
     await api.saveSales(sales.value)
   } catch (e) {
@@ -256,7 +272,7 @@ async function toggleSettle() {
     if (fresh) sales.value = fresh
     return
   }
-  ElMessage.success(willSettle ? '已标记为结清，未收已清零' : '已改回挂账')
+  ElMessage.success(`已按抹零优惠结清 ¥${gap.toFixed(2)}（无资金变动，未生成收款单）`)
 }
 
 // 明细行原价合计与单项折扣合计（合计字段为折后金额）
@@ -272,7 +288,6 @@ const detailItems = computed(() => {
       code: line.code,
       name: lineDisplayName(line, nameMap),
       suppliers: base.suppliers || [],
-      saleHistory: base.saleHistory || [],
       package: base.package,
       unit: base.unit || '',
       price: line.price,

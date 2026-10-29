@@ -5,6 +5,7 @@
     <div class="toolbar">
       <el-radio-group v-model="kind" @change="resetSelection"><el-radio-button value="sale">销售退货 / 退给客户</el-radio-button><el-radio-button value="purchase">采购退货 / 收供应商退款</el-radio-button></el-radio-group>
       <el-button type="primary" :disabled="!ready" @click="openCreate">新增退货</el-button>
+      <el-button :disabled="!ready || !returns.length" @click="toggleSelectAll">{{ allSelected ? '取消全选' : '全选' }}</el-button>
       <el-button :disabled="!ready || !selected.length" @click="openSettle">所选退货单退款</el-button>
       <el-button @click="$router.push('/vouchers')">查看退款凭证</el-button>
       <el-button :disabled="loading" @click="load">刷新</el-button>
@@ -17,7 +18,9 @@
       <el-table-column prop="date" label="日期" width="110" />
       <el-table-column label="退货金额" width="110"><template #default="{ row }">{{ Math.abs(grossOf(row)).toFixed(2) }}</template></el-table-column>
       <el-table-column label="待退 / 待抵扣" width="120"><template #default="{ row }">{{ Math.max(0, -netOf(row, accountKind)).toFixed(2) }}</template></el-table-column>
-      <el-table-column prop="sourceOrderId" label="原单号" min-width="180" />
+      <el-table-column label="原单号" min-width="180">
+        <template #default="{ row }"><router-link v-if="row.sourceOrderId" :to="`${kind === 'sale' ? '/sale/' : '/purchase/'}${row.sourceOrderId}`">{{ row.sourceOrderId }}</router-link><span v-else>—</span></template>
+      </el-table-column>
       <el-table-column prop="returnReason" label="原因" min-width="120" />
     </el-table>
     <el-empty v-if="ready && !returns.length" description="暂无退货单" />
@@ -26,6 +29,10 @@
     <el-form label-width="100px" :disabled="saving || retryLocked">
       <template v-if="action === 'create'">
         <el-form-item label="原单" required><el-select v-model="sourceId" filterable style="width:100%" @change="chooseSource"><el-option v-for="o in sources" :key="o.id" :value="o.id" :label="`${o.id} · ${o[partyKey]} · ${o.date}`" /></el-select></el-form-item>
+        <div class="lines-head">
+          <span>退货明细</span>
+          <el-button size="small" :disabled="!lines.length" @click="fillFullReturn">本单全退</el-button>
+        </div>
         <el-table :data="lines" max-height="320">
           <el-table-column prop="name" label="商品" min-width="160" /><el-table-column prop="available" label="可退数量" width="100" />
           <el-table-column label="本次退货数量" width="160"><template #default="{ row }"><el-input-number v-model="row.returnQty" :min="0" :max="row.available" :controls="false" style="width:135px" /></template></el-table-column>
@@ -34,7 +41,7 @@
         <el-form-item label="退货原因" required><el-input v-model="reason" maxlength="500" /></el-form-item>
         <el-form-item label="本次退货额">¥ {{ previewAmount.toFixed(2) }}（按原单折后净额计算）</el-form-item>
       </template>
-      <template v-else><p>所选 {{ selected.length }} 张，待退合计 ¥ {{ selectedDue.toFixed(2) }}</p><el-form-item label="本次金额" required><el-input-number v-model="amount" :min="0.01" :max="selectedDue" :precision="2" :controls="false" /></el-form-item></template>
+      <template v-else><p>所选 {{ selected.length }} 张，待退合计 ¥ {{ selectedDue.toFixed(2) }}</p><el-form-item label="本次金额" required><el-input-number v-model="amount" :min="0.01" :max="selectedDue" :precision="2" :controls="false" /><el-button link type="primary" style="margin-left:8px" @click="amount = selectedDue">全额退款</el-button></el-form-item></template>
       <el-form-item label="处理方式"><el-select v-model="mode"><el-option label="退现金（实际收付）" value="cash" /><el-option label="冲抵同单位欠款（先旧单）" value="offset" /><el-option label="转预存款 / 预付款" value="deposit" /><el-option v-if="action === 'create'" label="先退货，暂不退款" value="pending" /></el-select></el-form-item>
       <el-form-item label="日期" required><el-date-picker v-model="date" value-format="YYYY-MM-DD" /></el-form-item>
       <el-form-item label="备注"><el-input v-model="remark" maxlength="1000" /></el-form-item>
@@ -64,6 +71,7 @@ const accountKind = computed(() => kind.value === 'sale' ? 'receivable' : 'payab
 const returns = computed(() => orders.value.filter(isReturn))
 const sources = computed(() => orders.value.filter(o => !isReturn(o)))
 const selectedDue = computed(() => round2(selected.value.reduce((s, o) => s + Math.max(0, -netOf(o, accountKind.value)), 0)))
+const allSelected = computed(() => returns.value.length > 0 && selected.value.length === returns.value.length)
 const previewAmount = computed(() => round2(lines.value.reduce((s, l) => s + (Number(l.returnQty) > 0 ? (Math.abs(l.returnQty - l.available) < 1e-8 ? l.remainingMoney : round2(l.lineNet * l.returnQty / l.qty)) : 0), 0)))
 async function load() {
   loading.value = true; ready.value = false; error.value = ''
@@ -72,6 +80,16 @@ async function load() {
   finally { loading.value = false }
 }
 function resetSelection() { selected.value = []; table.value?.clearSelection() }
+// 全选/取消全选当前类型的退货单；只作用于表格里实际展示的退货单，避免误选正常销售/采购单
+function toggleSelectAll() {
+  if (!table.value) return
+  if (allSelected.value) { table.value.clearSelection(); return }
+  returns.value.forEach(row => table.value.toggleRowSelection(row, true))
+}
+// 本单全退：把原单每一行的剩余可退数量一次填满，金额仍按原单折后净额计算
+function fillFullReturn() {
+  lines.value = lines.value.map(l => ({ ...l, returnQty: Number(l.available) > 0 ? l.available : 0 }))
+}
 function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '' }
 function chooseSource() { const o = orders.value.find(o => o.id === sourceId.value); lines.value = o ? returnableLines(o, orders.value).map(l => ({ ...l, returnQty: 0 })) : [] }
 function openCreate() { resetForm(); action.value = 'create'; sourceId.value = ''; lines.value = []; dialog.value = true }
@@ -120,4 +138,4 @@ onMounted(async () => {
   } else if (ready.value && route.query.source) { openCreate(); sourceId.value = String(route.query.source); chooseSource() }
 })
 </script>
-<style scoped>.toolbar { display:flex; flex-wrap:wrap; gap:12px; margin:18px 0; } .el-form-item { margin-top:16px; }</style>
+<style scoped>.toolbar { display:flex; flex-wrap:wrap; gap:12px; margin:18px 0; } .el-form-item { margin-top:16px; } .lines-head { display:flex; align-items:center; justify-content:space-between; margin:-4px 0 8px; font-size:13px; color:var(--text-regular); }</style>

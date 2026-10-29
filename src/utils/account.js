@@ -159,6 +159,18 @@ export function isSettledOf(unpaid, settle) {
   return Math.abs(Number(unpaid || 0)) <= 1e-6
 }
 
+// 结算按钮的动作（列表页/详情页共用，保证口径一致）：
+//   'settle' —— 还有未收/未付：点「结清」按差额记实收或记为抹零优惠
+//   'unrest' —— 金额已平但含抹零优惠：点「改挂账」撤销优惠、恢复欠款
+//   'none'   —— 金额已平且无抹零优惠：没有可恢复的欠款，不显示按钮
+//               （钱其实已收到又需要恢复欠款，应修改/删除收付款记录，而不是改挂账）
+export function settleActionOf(order, kind) {
+  const unpaid = netOf(order, kind)
+  if (unpaid > 1e-6) return 'settle'
+  if (Math.abs(unpaid) <= 1e-6 && Number(order?.discount || 0) > 0) return 'unrest'
+  return 'none'
+}
+
 // 累计收付字段名：销售单 received / 采购单 paid
 export function sumFieldOf(kind) {
   return kind === 'payable' ? 'paid' : 'received'

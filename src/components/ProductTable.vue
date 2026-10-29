@@ -26,7 +26,7 @@
                 <el-table-column prop="total" label="金额" width="100" :formatter="fmtMoney"  align="right"/>
               </el-table>
               <div class="history-title" style="margin-top:12px">历史销售价</div>
-              <el-table :data="sortedHistory(row.saleHistory)" border :fit="false">
+              <el-table :data="sortedHistory(saleHistoryOf(row))" border :fit="false">
                 <el-table-column prop="date" label="日期" width="120" />
                 <el-table-column label="销售单" width="190" show-overflow-tooltip>
                   <template #default="{ row: h }"><router-link v-if="h.id" :to="`/sale/${h.id}`" class="link">{{ h.id }}</router-link><span v-else>—</span></template>
@@ -141,15 +141,27 @@ const byTimeDesc = (a, b) => String(b.date || '').localeCompare(String(a.date ||
 const sortedHistory = (arr) => [...(arr || [])].sort(byTimeDesc)
 // 金额显示去除浮点精度残留（如 5×1.91=9.549999...→9.55）
 const fmtMoney = (row, col, val) => (val == null || val === '' ? '—' : Math.round(Number(val) * 100) / 100)
-// 历史采购价已不再内嵌 items.json（占文件 41%、每存一张单都要整表重写），改为按需接口。
-// 首次展开任意商品行时才取一次（api 层 15 秒内存缓存 + 边缘缓存），未取到前展开区显示「加载中」。
+// 历史采购价/销售价已不再内嵌 items.json（避免文件随单据行数增长），改为按需接口。
+// 首次展开任意商品行时才各取一次（api 层 15 秒内存缓存 + 边缘缓存）。
 const purchaseHistory = ref(null)
+const saleHistory = ref(null)
 async function onExpand(row, expanded) {
-  if (!expanded || purchaseHistory.value) return
-  try { purchaseHistory.value = (await api.getPurchaseHistory()) || {} }
-  catch { purchaseHistory.value = {}; ElMessage.warning('历史采购价加载失败，收起再展开可重试') }
+  if (!expanded) return
+  const jobs = []
+  if (!purchaseHistory.value) {
+    jobs.push(api.getPurchaseHistory()
+      .then(data => { purchaseHistory.value = data || {} })
+      .catch(() => { purchaseHistory.value = {}; ElMessage.warning('历史采购价加载失败，收起再展开可重试') }))
+  }
+  if (!saleHistory.value) {
+    jobs.push(api.getSaleHistory()
+      .then(data => { saleHistory.value = data || {} })
+      .catch(() => { saleHistory.value = {}; ElMessage.warning('历史销售价加载失败，收起再展开可重试') }))
+  }
+  await Promise.all(jobs)
 }
 const purchaseHistoryOf = (row) => (purchaseHistory.value && purchaseHistory.value[row.code]) || []
+const saleHistoryOf = (row) => (saleHistory.value && saleHistory.value[row.code]) || []
 
 // 供应商列显示：按名称去重后再拼接（档案中存在同名不同码的重复建档），
 // 避免同一家供应商在商品行里重复出现、把列撑得过长

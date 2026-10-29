@@ -95,6 +95,8 @@ function invalidateAfterOrderSave() {
   invalidate('/items')
   invalidate('/stock')
   invalidate('/suppliers')
+  invalidate('/purchase-history')
+  invalidate('/sale-history')
 }
 
 export const api = {
@@ -106,6 +108,8 @@ export const api = {
   getItems: () => cachedGet('/items'),
   // 历史采购价（{ 商品编码: [行] }）：服务端按采购单实时派生，只在展开历史价时取一次
   getPurchaseHistory: () => cachedGet('/purchase-history'),
+  // 历史销售价：同上，按销售单实时派生，不落 items.json
+  getSaleHistory: () => cachedGet('/sale-history'),
   saveItems: async (items) => {
     const r = await request('/items', { method: 'POST', body: JSON.stringify({ items }) })
     invalidate('/items')
@@ -141,7 +145,7 @@ export const api = {
   getRefunds: () => cachedGet('/refunds'),
   saveRefundOperation: async (operation) => {
     const result = await request('/refunds', { method: 'POST', body: JSON.stringify(operation) })
-    for (const path of ['/refunds', '/sales', '/purchases', '/customers', '/suppliers', '/items', '/stock', '/purchase-history']) invalidate(path)
+    for (const path of ['/refunds', '/sales', '/purchases', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
     return result
   },
   getPurchases: () => cachedGet('/purchases'),
@@ -170,6 +174,8 @@ export const api = {
     invalidate('/purchases')
     invalidate('/sales')
     invalidate('/stock')
+    invalidate('/purchase-history')
+    invalidate('/sale-history')
     return r
   },
   // 分类合并导入：与库内现有数据按主键比对去重后追加（不覆盖）。

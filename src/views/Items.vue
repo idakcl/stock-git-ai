@@ -133,7 +133,7 @@ const byNewest = (a, b) => {
 const filteredItems = computed(() => items.value
   .filter(i => {
     if (filterSupplier.value && !(i.suppliers || []).includes(filterSupplier.value)) return false
-    if (filterCustomer.value && !(i.saleHistory || []).some(h => (h.customer || '') === filterCustomer.value)) return false
+    if (filterCustomer.value && !(i.saleCustomers || []).includes(filterCustomer.value) && !(i.saleHistory || []).some(h => (h.customer || '') === filterCustomer.value)) return false
     return true
   })
   .sort(byNewest)
@@ -143,7 +143,10 @@ function clearFilter() { filterSupplier.value = ''; filterCustomer.value = '' }
 const customerOptions = computed(() => {
   const set = new Set()
   ;(customers.value || []).forEach(c => { if (c.name) set.add(c.name) })
-  items.value.forEach(i => (i.saleHistory || []).forEach(h => { if (h.customer) set.add(h.customer) }))
+  items.value.forEach(i => {
+    ;(i.saleCustomers || []).forEach(name => { if (name) set.add(name) })
+    ;(i.saleHistory || []).forEach(h => { if (h.customer) set.add(h.customer) })
+  })
   return [...set].sort((a, b) => String(a).localeCompare(String(b), 'zh'))
 })
 
