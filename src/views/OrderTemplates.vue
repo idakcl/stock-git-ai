@@ -11,6 +11,8 @@
         <div class="actions">
           <el-button :loading="loading" @click="load">刷新</el-button>
           <el-button type="primary" @click="openCreate">新建模板</el-button>
+          <!-- 行上的 打印 / 打印(A5) / 空表 / 空表(A5) 共用这一个跨页表头开关 -->
+          <PrintHeaderToggle />
         </div>
       </div>
     </template>
@@ -103,6 +105,8 @@ import { normalizeRate } from '../utils/catalog'
 import { orderAmount } from '../utils/orders'
 import { fmtCNTime, todayCN } from '../utils/time'
 import { printA4 } from '../utils/export'
+import { repeatHeaderPref } from '../utils/printPrefs'
+import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
 import TemplateFormDialog from '../components/TemplateFormDialog.vue'
 
 const router = useRouter()
@@ -287,7 +291,7 @@ function printTemplate(tpl, empty = false, paper = 'A4') {
       { prop: 'unit', label: '单位' }
     ]
     const rows = items.map(it => ({ code: it.code || '', name: it.name || '', unit: it.unit || '' }))
-    printA4(title, columns, rows, subtitle, [], [], paper)
+    printA4(title, columns, rows, subtitle, [], [], paper, repeatHeaderPref.value)
   } else {
     // 正常打印：带数量、单价、折扣、小计
     const columns = [
@@ -315,7 +319,7 @@ function printTemplate(tpl, empty = false, paper = 'A4') {
       }
     })
     const headerFields = [['合计', `¥ ${templateAmount(tpl).toFixed(2)}`, 'xl']]
-    printA4(title, columns, rows, subtitle, headerFields, [], paper)
+    printA4(title, columns, rows, subtitle, headerFields, [], paper, repeatHeaderPref.value)
   }
 }
 

@@ -18,6 +18,7 @@
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
             <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
+            <PrintHeaderToggle />
             <el-button v-if="found && !externalView && !isVoided(sale)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || isVoided(sale)" @click="editDialog = true">编辑</el-button>
             <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || isVoided(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
@@ -223,6 +224,8 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import ShareDialog from '../components/ShareDialog.vue'
 import { receivableOf, grossOf, netOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, isVoided, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, effectiveRateOf, allocateUnitOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
+import { repeatHeaderPref } from '../utils/printPrefs'
+import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
@@ -503,7 +506,7 @@ function doExport() {
 }
 function doPrint(paper = 'A4') {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper)
+  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper, repeatHeaderPref.value)
 }
 
 async function onPaySaved(updated, payload) {

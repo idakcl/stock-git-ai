@@ -51,6 +51,8 @@
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
           删除勾选{{ selected.length ? `（${selected.length}）` : '' }}
         </el-button>
+        <!-- 跨页是否重复商品表头：行打印、列表打印、批量详情打印都用这一个选择 -->
+        <PrintHeaderToggle />
         <span class="sel-hint">已勾选 {{ selected.length }} 单 / 本页 {{ paged.length }} 单</span>
       </div>
       <div class="table-wrap">
@@ -165,7 +167,7 @@
     <!-- 打印勾选订单详情页：直接打印 or 隐藏金额打印（单价、折扣、合计、订金等全部金额都不出现） -->
     <el-dialog v-model="detailPrintDialog" title="打印勾选订单详情页" width="420" :close-on-click-modal="false">
       <div class="print-choice">
-        <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独起一页（明细超过一页时自动续页并重复表头）。</p>
+        <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独起一页{{ repeatHeaderPref ? '（明细超过一页时自动续页并重复表头）' : '（明细不切片，商品表头只印在每张单据的第一页）' }}。</p>
         <!-- 纸张在这里选一次，两个打印按钮共用：批量打印时没人想为同一批单点两遍 -->
         <div class="print-paper">
           <span class="filter-label">纸张</span>
@@ -173,6 +175,8 @@
             <el-radio-button value="A4">A4</el-radio-button>
             <el-radio-button value="A5">A5</el-radio-button>
           </el-radio-group>
+          <!-- 与工具栏那个开关是同一个全局偏好，这里改一下两边一起变 -->
+          <PrintHeaderToggle />
         </div>
         <el-button type="primary" class="print-btn" @click="printSelectedDetails(false)">直接打印</el-button>
         <el-button class="print-btn" @click="printSelectedDetails(true)">隐藏金额打印</el-button>
@@ -229,6 +233,8 @@ import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
 import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '../utils/account'
 import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
+import { repeatHeaderPref } from '../utils/printPrefs'
+import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
@@ -418,7 +424,7 @@ function printOrder(row, paper = 'A4') {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row), [], paper)
+  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row), [], paper, repeatHeaderPref.value)
 }
 
 // ---- 勾选后的批量操作 ----
@@ -437,7 +443,7 @@ function printSelectedList(paper = 'A4') {
   const rows = selectedSorted.value
   if (!rows.length) return ElMessage.warning('请先勾选订单')
   const total = round2(rows.reduce((s, r) => s + orderAmount(r), 0))
-  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`, [], [], paper)
+  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`, [], [], paper, repeatHeaderPref.value)
 }
 
 function openDetailPrint() {
@@ -479,7 +485,7 @@ function printSelectedDetails(masked) {
     }
   })
   detailPrintDialog.value = false
-  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', printPaper.value)
+  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', printPaper.value, repeatHeaderPref.value)
 }
 
 // 批量删除：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量

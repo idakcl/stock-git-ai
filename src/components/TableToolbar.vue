@@ -5,12 +5,16 @@
     <el-button size="small" :disabled="!rows.length" @click="doPrint('A4')">打印(A4)</el-button>
     <!-- A5 小票/小单纸张：同一份内容按 A5 版面重新排（字号与每页行数都另算一套） -->
     <el-button size="small" :disabled="!rows.length" @click="doPrint('A5')">打印(A5)</el-button>
+    <!-- 跨页是否重复商品表头（A4/A5 都受这个开关控制，选择会被记住） -->
+    <PrintHeaderToggle />
   </div>
 </template>
 
 <script setup>
 import { ElMessage } from 'element-plus'
 import { downloadCSV, printA4 } from '../utils/export'
+import { repeatHeaderPref } from '../utils/printPrefs'
+import PrintHeaderToggle from './PrintHeaderToggle.vue'
 
 const props = defineProps({
   // 导出文件名（不含扩展名）
@@ -36,7 +40,7 @@ function doExport() {
 function doPrint(paper = 'A4') {
   const cols = props.printColumns || props.columns
   if (!cols.length) return ElMessage.warning('未定义导出列')
-  printA4(props.title, cols, props.rows, props.subtitle, [], [], paper)
+  printA4(props.title, cols, props.rows, props.subtitle, [], [], paper, repeatHeaderPref.value)
 }
 </script>
 

@@ -18,6 +18,7 @@
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
             <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
+            <PrintHeaderToggle />
             <el-button v-if="found && !externalView && !isVoided(purchase)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(purchase) || isVoided(purchase)" @click="editDialog = true">编辑</el-button>
             <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(purchase) || isVoided(purchase) || purchases.some(o => o.sourceOrderId === purchase.id)" @click="removeOrder">删除</el-button>
@@ -222,6 +223,8 @@ import PaymentDialog from '../components/PaymentDialog.vue'
 import ShareDialog from '../components/ShareDialog.vue'
 import { payableOf, grossOf, netOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, effectiveRateOf, allocateUnitOf, isVoided } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
+import { repeatHeaderPref } from '../utils/printPrefs'
+import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
 import { savePaymentWithVouchers, voucherNotices } from '../utils/voucherFlow'
@@ -504,7 +507,7 @@ function doExport() {
 }
 function doPrint(paper = 'A4') {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`采购单 ${purchase.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper)
+  printA4(`采购单 ${purchase.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper, repeatHeaderPref.value)
 }
 
 async function onPaySaved(updated, payload) {

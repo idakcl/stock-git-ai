@@ -11,7 +11,7 @@ import fs from 'node:fs/promises'
 import cp from 'node:child_process'
 const { chromium } = createRequire(import.meta.url)('playwright')
 // 纯函数直接 import：版面参数（字号、每页行数、分片算法）不依赖浏览器，能在 node 里算清楚
-import { buildPrintHtml, pageCapacities, paperSpec, PAPER_SPECS } from '../src/utils/export.js'
+import { buildPrintHtml, pageCapacities, paperSpec, columnWidths, PAPER_SPECS } from '../src/utils/export.js'
 
 const line = (code, name, qty, price, discountRate = 1) => ({
   code, name, qty, price, discountRate,
@@ -107,7 +107,9 @@ async function toPdfPages(html, file) {
   const size = (/Page size:\s+(.+)/.exec(info) || [])[1] || ''
   // 横竖与纸张由 pdfinfo 的「宽 x 高 (标签)」判断，不写死小数：Chromium 的输出会随版本四舍五入
   const [w, h] = (size.match(/([\d.]+)\s*x\s*([\d.]+)/) || []).slice(1).map(Number)
-  const textOf = (i) => cp.execSync(`pdftotext -f ${i} -l ${i} ${file} -`).toString()
+  // -layout：按版面网格还原，列宽固定后原始输出顺序会跟视觉顺序不一致（窄列的单元格会被打散），
+  // 断言要的是「这一页第一行是第几号」，必须按视觉行序读。
+  const textOf = (i) => cp.execSync(`pdftotext -layout -f ${i} -l ${i} ${file} -`).toString()
   return { pages, size, landscape: w > h, textOf }
 }
 
@@ -293,6 +295,140 @@ await t('订单详情打印：订单金额用 xl（1.2 倍）而不是 24px', as
     const html = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
     assert.match(html, /class="f xl"><b>订单金额：/, '订单金额应带 xl 样式')
     assert.match(html, /\.fields \.f\.xl \{ font-size: 13\.2px/, 'xl 应为正文 1.2 倍')
+  } finally { await context.close() }
+})
+
+
+console.log('\n跨页列宽一致 + 跨页表头开关')
+
+// 真机截图那 8 列（长名称 + 两个超长表头），列宽错开就是在这类表上暴露的
+const realCols = () => ([
+  { label: '编码', prop: 'code' },
+  { label: '名称', prop: 'name' },
+  { label: '单位', prop: 'unit' },
+  { label: '本次数量', prop: 'qty' },
+  { label: '本次单价', prop: 'price' },
+  { label: '本次金额', prop: 'total' },
+  { label: '折后单价（含整单折扣）', prop: 'netUnit' },
+  { label: '折后金额（含整单折扣）', prop: 'netAmount' }
+])
+const realRows = (n) => Array.from({ length: n }, (_, i) => ({
+  code: 'P00001', unit: '个', qty: 1, price: '1.50', total: '1.50', netUnit: '1.24', netAmount: '1.24',
+  // 长名称故意只放在最后几行：列宽若按「每片各自的内容」算，第一页就会比最后一页窄
+  name: i >= n - 3 ? 'PE管外牙直接50*112M' : 'TH内丝国标25*20'
+}))
+
+await t('分片之间列宽必须一致：同一份 <colgroup> 写进每一片，表格 fixed 布局', () => {
+  const columns = realCols(), rows = realRows(140)
+  const html = buildPrintHtml({ title: '销售订单 X1', columns, rows, headerFields: [['订单金额', '¥ 753.85', 'xl']] })
+  assert.match(html, /table \{[^}]*table-layout: fixed/, '必须 fixed 布局，列宽才完全由 colgroup 说了算')
+  const groups = html.match(/<colgroup>.*?<\/colgroup>/g) || []
+  const tables = html.match(/<table class="pg/g) || []
+  assert.equal(groups.length, tables.length, '每一片都要带一份 colgroup')
+  assert.ok(groups.length >= 4, `140 行应切成多片，实际 ${tables.length}`)
+  assert.ok(groups.every(g => g === groups[0]), '各片列宽必须一模一样（跨页不错位）')
+  // 宽度按整份明细算：长名称在末页，首页也要给它留出同样的宽度
+  assert.deepEqual(JSON.parse(JSON.stringify(groups[0].match(/[\d.]+(?=%)/g).map(Number))),
+    columnWidths(columns, rows).map(Number),
+    'colgroup 必须等于按全量 rows 算出的 columnWidths')
+  // 每列百分比合计 100，且都留出内边距（否则文字换行会把每页 40 行的预算挤崩）
+  const sum = columnWidths(columns, rows).reduce((a, b) => a + b, 0)
+  assert.equal(Math.round(sum * 100) / 100, 100, '列宽百分比合计必须 100%')
+})
+
+await t('真机渲染：各分片表的列起点像素完全一致（Chromium 布局实测）', async () => {
+  const columns = realCols(), rows = realRows(140)
+  const html = buildPrintHtml({ title: '销售订单 X1', columns, rows, headerFields: [['订单金额', '¥ 753.85', 'xl']] })
+  const probe = await browser.newPage({ viewport: { width: 1100, height: 800 } })
+  try {
+    await probe.setContent(html)
+    const xs = await probe.evaluate(() => [...document.querySelectorAll('table')].map(t =>
+      [...t.querySelectorAll('thead th')].map(th => Math.round(th.getBoundingClientRect().x))))
+    assert.ok(xs.length >= 4, `140 行应渲染出 4 张分片表，实际 ${xs.length}`)
+    assert.ok(xs.every(x => JSON.stringify(x) === JSON.stringify(xs[0])),
+      `跨页列位置必须完全一致：\n${JSON.stringify(xs)}`)
+  } finally { await probe.close() }
+})
+
+await t('跨页表头关闭：整份明细一张连续大表，表头只有一份、不强制换页', () => {
+  const columns = realCols(), rows = realRows(140)
+  const html = buildPrintHtml({ title: '销售订单 X1', columns, rows, repeatHeader: false })
+  assert.equal((html.match(/<table/g) || []).length, 1, '关闭后不该切片，只能有一张表')
+  assert.equal((html.match(/<thead>/g) || []).length, 1, '表头只印一次')
+  assert.doesNotMatch(html, /class="pg brk"/, '不该再有强制换页')
+  assert.match(html, /<td class="idx">140<\/td>/, '行不能少')
+  // 列宽仍然按全量算，保持与开启时同一套版面
+  assert.deepEqual(columnWidths(columns, rows), columnWidths(columns, rows))
+})
+
+await t('真机 PDF：关闭跨页表头后只有第 1 页有表头，开启时每页都有', async () => {
+  const columns = realCols(), rows = realRows(140)
+  const on = buildPrintHtml({ title: '销售订单 X1', columns, rows, headerFields: [['订单金额', '¥ 753.85', 'xl']] })
+  const off = buildPrintHtml({ title: '销售订单 X1', columns, rows, headerFields: [['订单金额', '¥ 753.85', 'xl']], repeatHeader: false })
+  const a = await toPdfPages(on, '/tmp/print-layout-hdr-on.pdf')
+  const b = await toPdfPages(off, '/tmp/print-layout-hdr-off.pdf')
+  assert.equal(a.pages, (on.match(/<table class="pg/g) || []).length, '开启时页数＝分片数（fixed 布局没把行挤到换页）')
+  for (let i = 1; i <= a.pages; i++) assert.match(a.textOf(i), /序号/, `开启时第 ${i} 页应有表头`)
+  assert.ok(b.pages >= 3, `140 行连续表至少要 3 页，实际 ${b.pages}`)
+  assert.match(b.textOf(1), /序号/, '关闭时第 1 页仍有表头')
+  assert.doesNotMatch(b.textOf(b.pages), /折后金额（含整单折扣）/, '关闭后续页不再重复表头')
+})
+
+await t('A5 同样受跨页表头开关控制（切片 28 行 / 关闭后一张表）', () => {
+  const columns = realCols(), rows = realRows(90)
+  const on = buildPrintHtml({ title: '销售订单 X1', columns, rows, paper: 'A5' })
+  const off = buildPrintHtml({ title: '销售订单 X1', columns, rows, paper: 'A5', repeatHeader: false })
+  assert.match(on, /@page \{ size: A5 landscape/)
+  assert.equal((on.match(/<thead>/g) || []).length, 4, 'A5 每页 28 行：90 行应切 4 片')
+  assert.match(off, /@page \{ size: A5 landscape/, 'A5 关闭开关后仍是 A5')
+  assert.equal((off.match(/<thead>/g) || []).length, 1, 'A5 关闭后表头只有一份')
+})
+
+await t('列表页工具栏：取消「跨页表头」后打印只有一份表头（A4/A5 同一开关）', async () => {
+  const { page, context } = await open('/items', seed({
+    items: Array.from({ length: 90 }, (_, i) => ({ code: `P${String(i + 1).padStart(5, '0')}`, name: `管件${i + 1}`, unit: '个', price: 10, cost: 5 }))
+  }))
+  try {
+    const cb = page.locator('.el-checkbox', { hasText: '跨页表头' })
+    assert.equal(await cb.count(), 1, '工具栏要有「跨页表头」开关')
+    assert.match((await cb.first().getAttribute('class')) || '', /is-checked/, '默认开启')
+    await capturePrint(page)
+    const on4 = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
+    // 商品库列表按 60 行分页，工具栏打的是「当前页」→ 60 行切成 34 + 26 两片
+    assert.ok((on4.match(/<thead>/g) || []).length >= 2, '默认应切片重复表头')
+    await cb.first().click()
+    const off4 = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
+    assert.equal((off4.match(/<thead>/g) || []).length, 1, '取消后表头只有一份')
+    const off5 = await printed(page, page.getByRole('button', { name: '打印(A5)' }))
+    assert.match(off5, /@page \{ size: A5 landscape/, '开关对 A5 同样生效')
+    assert.equal((off5.match(/<thead>/g) || []).length, 1, 'A5 取消后也只有一份表头')
+    // 偏好要能被记住（同一浏览器换页面不用再点一遍）
+    assert.equal(await page.evaluate(() => localStorage.getItem('stock.print.repeatHeader')), '0')
+  } finally { await context.close() }
+})
+
+await t('订单列表、订单详情、模板页都提供「跨页表头」开关', async () => {
+  for (const [path, state] of [
+    ['/orders', seed({ orders: [orderDoc(2)], items: [{ code: 'P00001', name: '管件', unit: '个', price: 10, cost: 5 }] })],
+    [`/order/${ORDER_ID}`, seed({ orders: [orderDoc(2)] })],
+    ['/templates', seed({ templates: [{ id: 'T1', name: '常用组合', kind: 'sale', createdAt: '2026-10-20T02:00:00.000Z', items: [{ code: 'P00001', name: '管件', unit: '个', qty: 1, price: 10, discountRate: 1 }] }] })],
+    [`/sale/${SALE_ID}`, seed({ sales: [saleDoc(2)] })]
+  ]) {
+    const { page, context } = await open(path, state)
+    try {
+      assert.equal(await page.locator('.el-checkbox', { hasText: '跨页表头' }).count(), 1, `${path} 应有「跨页表头」开关`)
+    } finally { await context.close() }
+  }
+})
+
+await t('开关状态跨页面保持（localStorage 记住上次选择）', async () => {
+  const { page, context } = await open('/items', seed({ items: [{ code: 'P00001', name: '管件', unit: '个', price: 10, cost: 5 }] }))
+  try {
+    const cb = page.locator('.el-checkbox', { hasText: '跨页表头' })
+    await cb.first().click()
+    await page.goto(`${BASE}/items`, { waitUntil: 'networkidle' })
+    const cls = (await page.locator('.el-checkbox', { hasText: '跨页表头' }).first().getAttribute('class')) || ''
+    assert.doesNotMatch(cls, /is-checked/, '刷新后应仍是关闭状态')
   } finally { await context.close() }
 })
 

@@ -77,7 +77,10 @@ export const PAPER_SPECS = {
 export const paperSpec = (paper) => PAPER_SPECS[String(paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
 
 // 字号一律由 base 推导：换纸张时整套版式等比缩放，「金额 = 其他字体的 1.2 倍」这条比例不会走样
-const printStyle = (p) => {
+// repeatHeader=false 时必须把 thead 的 table-header-group 一起关掉：
+// 只关掉我们的分片还不够，Chromium 自己会按这条声明在续页顶上重排表头，
+// 结果「不重复表头」的选项名不副实。
+const printStyle = (p, repeatHeader = true) => {
   // 只保留两位小数、去掉无意义的尾 0：产出 11px / 13.2px / 15.4px 这种可读值，
   // 免得 11*1.4 的浮点尾巴（15.399999…）写进样式里
   const fs = (n) => `${Math.round(p.base * n * 100) / 100}px`
@@ -95,18 +98,18 @@ const printStyle = (p) => {
     .fields .f.xl { font-size: ${fs(1.2)}; font-weight: 800; line-height: 1.3; }
     .foot { margin-top: 4px; padding-top: 3px; border-top: 1px solid #666; display: flex; flex-wrap: wrap; gap: 1px 18px; font-size: ${fs(1)}; }
     .foot .fi { min-width: 170px; line-height: 1.5; }
-    table { width: 100%; border-collapse: collapse; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     /* 跨页表头：主要靠下面 pageCapacities 把明细切成「每片自带表头」的多张表，
        这条声明只是兜底 —— 万一某片在真机上多溢出几像素，浏览器仍会给续页补表头。
        （以前只有这条声明，明细表是一整张表，部分浏览器/打印驱动并不重复表头，等于没实现。） */
-    thead { display: table-header-group; }
+    thead { display: ${repeatHeader ? 'table-header-group' : 'table-row-group'}; }
     tfoot { display: table-footer-group; }
     /* 行高写死 1.25：每页 40 行这条预算必须靠「行高可预测」才成立。
        用默认 line-height 时行高跟随字体（雅黑 / 宋体 / 系统 CJK 回退各不相同，实测能差 4px/行），
        40 行就会在某些机器上溢到第二页，把「一片一页」的分片变成「一片两页」。 */
-    th, td { border: 1px solid #666; padding: ${p.pad}; text-align: left; vertical-align: top; line-height: 1.25; }
+    th, td { border: 1px solid #666; padding: ${p.pad}; text-align: left; vertical-align: top; line-height: 1.25; overflow-wrap: anywhere; }
     th { background: #eee; }
-    .idx { width: 36px; text-align: center; }
+    .idx { text-align: center; }
     tr { page-break-inside: avoid; }
     tfoot td { font-weight: 700; }
     /* 每一片明细表（除全文最后一片）后强制换页：切片数 = 实际页数 */
@@ -114,15 +117,52 @@ const printStyle = (p) => {
   `
 }
 
+/**
+ * 列宽：按「整份明细」算一次，写进每张分片表的 <colgroup>。
+ *
+ * 为什么必须显式给宽：分片之后每页是一张独立的 <table>，默认自动布局会各自按
+ * 「本页内容」定宽 —— 第 1 页有「PE管外牙直接50*112M」这种长名称，第 2 页只有短行，
+ * 两页的列宽就错开了（真机打印看到的正是这个）。table-layout:fixed + 同一份 colgroup
+ * 才能让所有分页的列对齐。
+ *
+ * 权重按显示宽度取（中日韩与全角符号算 2，其余算 1），并夹在 4~44 之间：
+ * 下限防止「单位」这种两字列被压到换行，上限防止一个超长名称列吞掉其它列。
+ */
+const dispWidth = (v) => {
+  let n = 0
+  for (const ch of String(v ?? '')) n += /[^\x00-\xff]/.test(ch) ? 2 : 1
+  return n
+}
+// 每列都要额外留出单元格内边距 + 边框（约 2 个半角字符宽），
+// 否则「编码」这种刚好等于文字宽度的列会在打印时换行，一行变两行、每页 40 行的预算就崩了。
+const PAD = 2
+export function columnWidths(columns = [], rows = []) {
+  const IDX = 4 // 序号列：表头「序号」4 个半角宽，加上留白刚好容得下三位数
+  const weights = [IDX + PAD, ...columns.map(c => {
+    let w = dispWidth(c.label)
+    for (const r of rows || []) w = Math.max(w, dispWidth(pick(c, r)))
+    return Math.min(Math.max(w, 4), 44) + PAD
+  })]
+  const sum = weights.reduce((a, b) => a + b, 0) || 1
+  const pct = weights.map(w => Math.round((w / sum) * 10000) / 100)
+  // 四舍五入后凑整到 100%，否则 fixed 布局下最后一列会差出零点几个百分点
+  pct[pct.length - 1] = Math.round((100 - pct.slice(0, -1).reduce((a, b) => a + b, 0)) * 100) / 100
+  return pct
+}
+const colgroupHtml = (widths) => '<colgroup>' + widths.map(w => `<col style="width:${w}%">`).join('') + '</colgroup>'
+
 // 所有打印单据的明细表统一在最前面加「序号」列，从 1 顺排；列表类打印同样适用。
 // offset 是分片起始下标：第 2 页的序号必须接着第 1 页排，不能从 1 重来。
-const tableHtml = (columns = [], rows = [], offset = 0, cls = '') => {
+// widths 是分页之间共用的列宽（见 columnWidths），不传就退回自动布局。
+const tableHtml = (columns = [], rows = [], offset = 0, cls = '', widths = null) => {
   const head = '<th class="idx">序号</th>' + columns.map(c => `<th>${escHtml(c.label)}</th>`).join('')
   const body = (rows || [])
     .map((r, i) => '<tr><td class="idx">' + (offset + i + 1) + '</td>' +
       columns.map(c => `<td>${escHtml(pick(c, r))}</td>`).join('') + '</tr>')
     .join('')
-  return '<table' + (cls ? ' class="' + cls + '"' : '') + '><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+  return '<table' + (cls ? ' class="' + cls + '"' : '') + '>' +
+    (widths ? colgroupHtml(widths) : '') +
+    '<thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
 }
 
 /**
@@ -154,42 +194,47 @@ export function pageCapacities(total, rowsPerPage, headReserve, footReserve) {
   return caps
 }
 
-// 明细分片渲染：每片一张完整表格（各自带 <thead>），除最后一片外强制换页
-const pagedTables = (columns, rows, p, opts) => {
+// 明细分片渲染：每片一张完整表格（各自带 <thead>），除最后一片外强制换页。
+// repeatHeader=false 时不切片：整份明细就是一张表，表头只出现在第 1 页，
+// 后面由浏览器自然续页（有人就要这种「一张连续的大表」）。
+const pagedTables = (columns, rows, p, opts, repeatHeader = true) => {
   const list = rows || []
+  const widths = columnWidths(columns, list)
+  if (!repeatHeader) return tableHtml(columns, list, 0, 'pg', widths)
   const caps = pageCapacities(list.length, p.rowsPerPage, opts.head ? p.headReserve : 0, opts.foot ? p.footReserve : 0)
   let offset = 0
   return caps.map((n, i) => {
     const slice = list.slice(offset, offset + n)
     offset += n
-    return tableHtml(columns, slice, offset - n, 'pg' + (i < caps.length - 1 ? ' brk' : ''))
+    return tableHtml(columns, slice, offset - n, 'pg' + (i < caps.length - 1 ? ' brk' : ''), widths)
   }).join('')
 }
 
 // 一节（一张单据）的打印内容：单头信息只在首页出现，落款只在末页出现
-const sectionHtml = (sec, p, withFooter) => {
+const sectionHtml = (sec, p, withFooter, repeatHeader = true) => {
   const fieldsHtml = normFields(sec.headerFields).map(fieldHtml).join('')
   return (sec.title ? '<h2>' + escHtml(sec.title) + '</h2>' : '') +
     (sec.subtitle ? '<div class="sub">' + escHtml(sec.subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    pagedTables(sec.columns, sec.rows, p, { head: !!(sec.title || sec.subtitle || fieldsHtml), foot: withFooter }) +
+    pagedTables(sec.columns, sec.rows, p, { head: !!(sec.title || sec.subtitle || fieldsHtml) && repeatHeader, foot: withFooter }, repeatHeader) +
     (withFooter ? footerHtml(sec.footerFields) : '')
 }
 
 /** 生成完整打印文档 HTML（纯函数：不发窗口、不打扰用户，方便测试直接断言版面结构） */
-export function buildPrintHtml({ title, subtitle, headerFields, columns, rows, footerFields, sections, docTitle, paper } = {}) {
+export function buildPrintHtml({ title, subtitle, headerFields, columns, rows, footerFields, sections, docTitle, paper, repeatHeader = true } = {}) {
   const p = paperSpec(paper)
+  const style = printStyle(p, repeatHeader)
   const list = sections && sections.length
     ? sections.filter(Boolean)
     : [{ title, subtitle, headerFields, columns, rows, footerFields }]
   const body = list.map((sec, i) => {
-    const html = sectionHtml(sec, p, !!(sec.footerFields || []).length)
+    const html = sectionHtml(sec, p, !!(sec.footerFields || []).length, repeatHeader)
     // 多张单据批量打印：每张单独占一页（最后一张不加换页）
     return list.length > 1 ? '<div class="doc' + (i < list.length - 1 ? ' brk' : '') + '">' + html + '</div>' : html
   }).join('')
   const head = docTitle || title || (list[0] && list[0].title) || '打印'
   return '<!doctype html><html><head><meta charset="utf-8"><title>' + escHtml(head) +
-    '</title><style>' + printStyle(p) + '</style></head><body>' + body + '</body></html>'
+    '</title><style>' + style + '</style></head><body>' + body + '</body></html>'
 }
 
 function openPrintWindow(html, title) {
@@ -204,21 +249,23 @@ function openPrintWindow(html, title) {
 
 /**
  * 多节打印：sections = [{ title, subtitle, headerFields, columns, rows }]，
- * 每一节单独占一页（批量打印多张订单详情用）；paper='A4' | 'A5'。
+ * 每一节单独占一页（批量打印多张订单详情用）；paper='A4' | 'A5'；
+ * repeatHeader=false 时明细不切片、表头只在每张单据第一页出现一次。
  */
-export function printA4Sections(sections, docTitle = '', paper = 'A4') {
+export function printA4Sections(sections, docTitle = '', paper = 'A4', repeatHeader = true) {
   const list = (sections || []).filter(Boolean)
   if (!list.length) return
-  openPrintWindow(buildPrintHtml({ sections: list, docTitle, paper }), docTitle || list[0].title || '打印')
+  openPrintWindow(buildPrintHtml({ sections: list, docTitle, paper, repeatHeader }), docTitle || list[0].title || '打印')
 }
 
 /**
  * 打开排版好的新窗口并调用打印；headerFields 为单头信息 [[标签,值],...]，footerFields 打印在明细表下方。
  * paper：'A4'（默认）或 'A5'；函数名保留 printA4 是历史叫法，实际纸张由参数决定。
+ * repeatHeader：默认 true（每页都重复商品表头）；false＝整份明细一张连续大表，表头只印一次。
  */
-export function printA4(title, columns, rows, subtitle = '', headerFields = [], footerFields = [], paper = 'A4') {
+export function printA4(title, columns, rows, subtitle = '', headerFields = [], footerFields = [], paper = 'A4', repeatHeader = true) {
   openPrintWindow(
-    buildPrintHtml({ title, subtitle, headerFields, columns, rows, footerFields, paper }),
+    buildPrintHtml({ title, subtitle, headerFields, columns, rows, footerFields, paper, repeatHeader }),
     title
   )
 }
