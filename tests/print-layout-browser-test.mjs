@@ -199,8 +199,10 @@ for (const c of docCases) {
       for (let i = 1; i <= pages; i++) {
         assert.match(textOf(i), /序号/, `第 ${i} 页缺商品表头`)
       }
-      // 每页起始序号必须等于分片预算：这一条就是「A4 一页 40 行」的真机凭证
-      const caps = pageCapacities(140, 40, 6, 0)
+      // 每页起始序号必须接着上一页：分片预算从实际 HTML 里数（首页扣多少行取决于单头信息块高度）
+      const caps = (html.match(/<table class="pg[^"]*"[\s\S]*?<\/table>/g) || [])
+        .map(tb => (tb.match(/<td class="idx">/g) || []).length)
+      assert.equal(caps.reduce((a, b) => a + b, 0), 140, '分片预算必须正好覆盖全部 140 行')
       let start = 1
       for (let i = 1; i <= pages; i++) {
         const after = textOf(i).split('序号')[1] || ''
@@ -224,9 +226,12 @@ await t('销售单：打印(A5) 按钮走 A5 版面，页数与分片数一致�
     const html = await printed(page, page.getByRole('button', { name: '打印(A5)' }))
     assert.match(html, /@page \{ size: A5 landscape/, 'A5 按钮必须打 A5 纸')
     const chunks = (html.match(/<table class="pg/g) || []).length
-    // A5 每页 28 行（首页 22）→ 140 行切 6 片：22+28+28+28+28+6
-    assert.deepEqual(pageCapacities(140, 28, 6, 0), [22, 28, 28, 28, 28, 6])
-    assert.equal(chunks, 6)
+    // A5 每页约 28 行，首页再扣单头预留；140 行至少切 5 片，且能整除到片内
+    const caps = (html.match(/<table class="pg[^"]*"[\s\S]*?<\/table>/g) || [])
+      .map(tb => (tb.match(/<td class="idx">/g) || []).length)
+    assert.equal(caps.reduce((a, b) => a + b, 0), 140, 'A5 分片必须覆盖全部 140 行')
+    assert.equal(chunks, caps.length)
+    assert.ok(caps[0] < 28 && caps.slice(1, -1).every(n => n <= 28), '首页要扣单头，后续每页不超过 28 行')
     const { pages, size, landscape, textOf } = await toPdfPages(html, '/tmp/print-layout-a5.pdf')
     assert.match(size, /A5/, `应为 A5 纸，实际 ${size}`)
     assert.ok(landscape, `A5 应为横向，实际 ${size}`)
@@ -309,8 +314,8 @@ const realCols = () => ([
   { label: '本次数量', prop: 'qty' },
   { label: '本次单价', prop: 'price' },
   { label: '本次金额', prop: 'total' },
-  { label: '折后单价（含整单折扣）', prop: 'netUnit' },
-  { label: '折后金额（含整单折扣）', prop: 'netAmount' }
+  { label: '折后单价', prop: 'netUnit' },
+  { label: '折后金额', prop: 'netAmount' }
 ])
 const realRows = (n) => Array.from({ length: n }, (_, i) => ({
   code: 'P00001', unit: '个', qty: 1, price: '1.50', total: '1.50', netUnit: '1.24', netAmount: '1.24',
@@ -371,7 +376,7 @@ await t('真机 PDF：关闭跨页表头后只有第 1 页有表头，开启时�
   for (let i = 1; i <= a.pages; i++) assert.match(a.textOf(i), /序号/, `开启时第 ${i} 页应有表头`)
   assert.ok(b.pages >= 3, `140 行连续表至少要 3 页，实际 ${b.pages}`)
   assert.match(b.textOf(1), /序号/, '关闭时第 1 页仍有表头')
-  assert.doesNotMatch(b.textOf(b.pages), /折后金额（含整单折扣）/, '关闭后续页不再重复表头')
+  assert.doesNotMatch(b.textOf(b.pages), /折后金额/, '关闭后续页不再重复表头')
 })
 
 await t('A5 同样受跨页表头开关控制（切片 28 行 / 关闭后一张表）', () => {

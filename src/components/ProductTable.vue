@@ -46,6 +46,8 @@
             </div>
           </template>
         </el-table-column>
+        <!-- 序号列：单据明细（销售/采购/订单详情）打开即带，历史单据无需迁移；分页时按全表序号续排 -->
+        <el-table-column v-if="numbered" type="index" label="序号" width="58" align="center" :index="idxOf" />
         <el-table-column prop="code" label="编码" width="120" />
         <el-table-column label="名称" min-width="220" show-overflow-tooltip>
           <template #default="{ row }">
@@ -110,7 +112,9 @@ const props = defineProps({
   // 是否显示「展开行」（历史采购价 / 历史销售价 / 规格包装 / 分级售价 / 备注 / 商品照片）。
   // 单据详情页默认只看「本次数据」：那里的售价/进价列与本次单价重复、历史价属于商品档案而非本单，
   // 需要时由页面顶部的「展开历史价与商品档案」勾选开启，商品库/客户/供应商页保持默认展示
-  showHistory: { type: Boolean, default: true }
+  showHistory: { type: Boolean, default: true },
+  // 是否在最前面显示「序号」列：单据明细页开启，商品档案/客户/供应商的商品列表不需要
+  numbered: { type: Boolean, default: false }
 })
 
 const keyword = ref('')
@@ -135,6 +139,8 @@ const pagedRows = computed(() => {
 // 筛选条件变化后回到第一页
 watch(keyword, () => { page.value = 1 })
 watch(() => props.items, () => { page.value = 1 })
+// 序号：分页时接着上一页排，避免每页都从 1 开始
+const idxOf = (i) => (props.pageSize ? (page.value - 1) * props.pageSize + i + 1 : i + 1)
 const fmt = (v) => (v === '' || v == null ? '—' : Number(v))
 // 历史价按时间倒序（最近优先）；同日按单号倒序（单号内含录入时间）。
 // 后端 derive 已排序，这里前端兜底：存量数据在重建前也按时间展示

@@ -94,7 +94,7 @@
         </div>
         <PhotoThumbs v-if="(purchase.photos || []).length" :value="purchase.photos" />
       </div>
-      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :price-columns="tablePriceColumns" :show-cost="showCostCol && !priceHidden" :remark-last="true" :show-history="showHistory && !priceHidden">
+      <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :price-columns="tablePriceColumns" :show-cost="showCostCol && !priceHidden" :remark-last="true" :show-history="showHistory && !priceHidden" numbered>
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column v-if="!priceHidden" prop="_price" label="本次单价" width="100"  align="right"/>
@@ -105,10 +105,10 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100"  align="right"/>
-          <el-table-column v-if="!priceHidden && orderRate" label="折后单价（含整单折扣）" width="180" align="right">
+          <el-table-column v-if="!priceHidden && orderRate" label="折后单价" width="180" align="right">
             <template #default="{ row }">{{ Number(row._unitNet || 0).toFixed(2) }}</template>
           </el-table-column>
-          <el-table-column v-if="!priceHidden && orderRate" label="折后金额（含整单折扣）" width="180" align="right">
+          <el-table-column v-if="!priceHidden && orderRate" label="折后金额" width="180" align="right">
             <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
           </el-table-column>
         </template>
@@ -446,7 +446,7 @@ const externalView = ref(false)
 // 页面上的单价/折扣/金额列、单头金额、付款金额同步隐藏（导出与打印沿用同一规则）
 const priceHidden = computed(() => hidePrice.value || externalView.value)
 const tablePriceColumns = computed(() => (priceHidden.value || !showSellPrice.value) ? [] : [{ prop: 'price', label: '售价' }])
-const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额', '折后单价（含整单折扣）', '折后金额（含整单折扣）']
+const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额', '折后单价', '折后金额']
 const exportColumns = computed(() => {
   let cols = [
     { label: '编码', prop: 'code' },
@@ -459,8 +459,8 @@ const exportColumns = computed(() => {
     { label: '本次单价', value: r => (r._price == null || r._price === '' ? '' : Number(r._price).toFixed(2)) },
     ...(hasLineDiscount.value ? [{ label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') }] : []),
     { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) },
-    ...(orderRate.value ? [{ label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) }] : []),
-    ...(orderRate.value ? [{ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }] : []),
+    ...(orderRate.value ? [{ label: '折后单价', value: r => Number(r._unitNet || 0).toFixed(2) }] : []),
+    ...(orderRate.value ? [{ label: '折后金额', value: r => Number(r._net || 0).toFixed(2) }] : []),
     { label: '备注', prop: 'remark' }
   ]
   // 与页面表格同步：未勾选「显示售价 / 显示进价」时，导出/打印一律不带该档案价列（本单价看「本次单价」）

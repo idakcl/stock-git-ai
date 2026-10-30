@@ -4,7 +4,16 @@
        所以这里直接复用 utils/orders.js 的 orderAmount，绝不在弹窗里另算一套。 -->
   <!-- standalone＝整页开单（路由 /orders/new）：同一份表单铺满屏幕，明细表能拿到近两倍高度；
        关掉由父组件回列表，所以整页模式不显示右上角 ×，只留「返回」一个出口 -->
-  <el-dialog v-model="visible" :title="title" width="620" :fullscreen="standalone" :show-close="!standalone" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+  <el-dialog v-model="visible" :title="title" width="620" :fullscreen="standalone || maximized" :show-close="!standalone" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+    <!-- 左上角最大化角标：整页铺满屏幕看长明细；再点一次还原。整页开单模式不显示 -->
+    <template v-if="!standalone" #header="{ titleId, titleClass }">
+      <div class="dlg-header">
+        <el-button class="dlg-max" text :title="maximized ? '还原窗口' : '最大化窗口'" :aria-label="maximized ? '还原窗口' : '最大化窗口'" @click="maximized = !maximized">
+          <el-icon :size="15"><ScaleToOriginal v-if="maximized" /><FullScreen v-else /></el-icon>
+        </el-button>
+        <span :id="titleId" :class="titleClass">{{ title }}</span>
+      </div>
+    </template>
     <el-alert class="draft-alert" type="info" :closable="false" show-icon
       title="订单是未过账单据：不占库存、不计应收/应付，可以随便改、随便删。点「过账」才会生成正式单据。" />
     <el-form :model="form" label-width="110px">
@@ -58,6 +67,8 @@
         <el-table ref="linesTable" :data="form.lines" stripe :max-height="standalone ? 480 : 320" @selection-change="onSelectionChange">
           <!-- 勾选框列 -->
           <el-table-column type="selection" width="42" />
+          <!-- 序号列：按行号实时生成，历史单据自动带上 -->
+          <el-table-column type="index" label="序号" width="58" align="center" />
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select v-model="row.code" filterable placeholder="选择商品" style="width:100%" @change="onItemChange(row)">
@@ -141,6 +152,7 @@ import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PhotoUpload from './PhotoUpload.vue'
 import LineDiscountDialog from './LineDiscountDialog.vue'
+import { FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { round2, discountRatesTextOf } from '../utils/account.js'
 import { normalizeRate, lineEffectiveRate } from '../utils/catalog.js'
 import { orderAmount, orderDepositSum, validateOrder, isUnposted, DRAFT } from '../utils/orders.js'
@@ -167,6 +179,8 @@ const quickItem = ref('')
 const linesTable = ref(null)
 const emitting = ref(false)
 const editingId = ref('')
+// 弹窗最大化（左上角角标切换）
+const maximized = ref(false)
 const posted = ref(false)
 const form = reactive({ kind:'sale', party:'', date:'', no:'', remark:'', photos:[], discount:0, discountRates:[], lines:[] })
 
@@ -198,7 +212,7 @@ const mapLine = (l) => ({
 
 // 打开时整表重建：草稿回填，新建给一行空明细
 watch(() => props.modelValue, (open) => {
-  if (!open) return
+  if (!open) { maximized.value = false; return }
   photoKey.value += 1
   quickItem.value = ''
   const row = props.order
@@ -361,6 +375,10 @@ async function save() {
 :deep(.el-form-item__label){white-space:nowrap;}
 /* 顶部灰底提示条与下方表单之间留出呼吸：紧贴「订单类型」那一行时，整块看起来像被压扁了 */
 .draft-alert{margin-bottom:14px;}
+/* 弹窗标题栏：最大化角标在最左侧，标题紧随其后 */
+.dlg-header{display:flex;align-items:center;gap:6px;min-width:0;}
+.dlg-max{padding:2px 4px;color:var(--text-regular);}
+.dlg-max:hover{color:var(--color-primary);background:var(--bg-hover);}
 .quick-add-select{width:100%;max-width:100%;}
 .calc-hint{color:var(--text-secondary);font-weight:400;font-size:var(--fs-sub);line-height:1.5;}
 .lines-scroll{overflow-x:auto;}

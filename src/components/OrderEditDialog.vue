@@ -5,7 +5,16 @@
   <!-- 保存中禁止误关：点遮罩/按 ESC 不会中断保存（关闭由保存结果驱动） -->
   <!-- standalone＝整页开单（路由 /sales/new、/purchases/new）：同一份表单铺满屏幕，
        明细表能拿到近两倍高度。关掉即由父组件回列表，所以不显示右上角 ×，避免「×」和「返回」两个出口 -->
-  <el-dialog v-model="visible" :title="title" width="620" :fullscreen="standalone" :show-close="!standalone" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+  <el-dialog v-model="visible" :title="title" width="620" :fullscreen="standalone || maximized" :show-close="!standalone" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+    <!-- 左上角最大化角标：整页铺满屏幕看长明细；再点一次还原。整页开单模式本身就是全屏，不显示该角标 -->
+    <template v-if="!standalone" #header="{ titleId, titleClass }">
+      <div class="dlg-header">
+        <el-button class="dlg-max" text :title="maximized ? '还原窗口' : '最大化窗口'" :aria-label="maximized ? '还原窗口' : '最大化窗口'" @click="maximized = !maximized">
+          <el-icon :size="15"><ScaleToOriginal v-if="maximized" /><FullScreen v-else /></el-icon>
+        </el-button>
+        <span :id="titleId" :class="titleClass">{{ title }}</span>
+      </div>
+    </template>
     <!-- 已动过钱的单：明细/折扣/优惠/结算状态全部锁定（表单级 disabled 会连按钮一起禁用，
          所以这块放在 el-form 外面），要增减商品改走「变更明细」生成退货单/补差单 -->
     <div v-if="moneyLocked" class="lock-bar">
@@ -93,6 +102,8 @@
         <el-table ref="linesTable" :data="form.lines" stripe :max-height="standalone ? 480 : 320" @selection-change="onSelectionChange">
           <!-- 勾选框列：非锁定态才显示，锁定态不显示（已动过钱的单不允许批量操作） -->
           <el-table-column v-if="!moneyLocked" type="selection" width="42" />
+          <!-- 序号列：按行号实时生成，历史单据打开即自动带上，无需迁移数据 -->
+          <el-table-column type="index" label="序号" width="58" align="center" />
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select
@@ -251,6 +262,7 @@ import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf,
 import PhotoUpload from './PhotoUpload.vue'
 import OrderAmendDialog from './OrderAmendDialog.vue'
 import LineDiscountDialog from './LineDiscountDialog.vue'
+import { FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { moneyTouched } from '../utils/amend.js'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
@@ -302,6 +314,8 @@ const linesTable = ref(null)
 // 每次打开自增：强制重建上传区，避免残留上一单的照片
 const photoKey = ref(0)
 const editingId = ref('')
+// 弹窗最大化（左上角角标切换）；整页开单模式不用它
+const maximized = ref(false)
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
 // 变更明细弹窗：原单已动过钱时，明细只能走它生成退货单/补差单
@@ -388,7 +402,8 @@ async function loadSaleHistory() {
 
 // 打开时整体重建表单：编辑回填原单（行折扣走 normalizeRate，兼容早期金额口径的旧数据）
 watch(() => props.modelValue, async (open) => {
-  if (!open) return
+  // 每次关闭都还原窗口大小，下次打开按普通弹窗呈现
+  if (!open) { maximized.value = false; return }
   await loadSaleHistory()
   photoKey.value += 1
   const row = props.order
@@ -848,6 +863,10 @@ async function save() {
 :deep(.el-form-item__label){white-space:nowrap;}
 /* 资金锁定提示条：置于 el-form 之外，否则表单级禁用会连带「变更明细」按钮一起灰掉 */
 .lock-bar{margin:-8px 0 14px;}
+/* 弹窗标题栏：最大化角标在最左侧，标题紧随其后 */
+.dlg-header{display:flex;align-items:center;gap:6px;min-width:0;}
+.dlg-max{padding:2px 4px;color:var(--text-regular);}
+.dlg-max:hover{color:var(--color-primary);background:var(--bg-hover);}
 .lock-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;}
 .locked-value{color:var(--text-regular);font-size:var(--fs-table);}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}

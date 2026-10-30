@@ -364,7 +364,7 @@ const lineRowsWithNet = (row) => {
 }
 
 // 单张订单的明细列：订单行没有单位/备注，只打真实的字段；
-// 没有行折扣时隐藏「折扣率 / 折扣金额」，有整单折扣时追加「折后单价 / 折后金额（含整单折扣）」
+// 没有行折扣时隐藏「折扣率 / 折扣金额」，有整单折扣时追加「折后单价 / 折后金额」
 const orderLineColumnsFor = (row) => {
   const cols = [
     { label: '编码', prop: 'code' },
@@ -381,8 +381,8 @@ const orderLineColumnsFor = (row) => {
   cols.push({ label: '本次金额', value: r => lineTotal(r).toFixed(2) })
   if (discountRatesTextOf(row)) {
     cols.push(
-      { label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) },
-      { label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }
+      { label: '折后单价', value: r => Number(r._unitNet || 0).toFixed(2) },
+      { label: '折后金额', value: r => Number(r._net || 0).toFixed(2) }
     )
   }
   return cols

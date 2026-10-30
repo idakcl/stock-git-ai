@@ -168,7 +168,7 @@ await t('整单折扣按行摊开：各行净额合计恰等于整单折后金�
   assert.deepEqual(allocateNetOf([], 0.9), [])
 })
 
-await t('折后单价（含整单折扣）：单价由行折后金额换算，且绝不改动金额口径', () => {
+await t('折后单价：单价由行折后金额换算，且绝不改动金额口径', () => {
   // 常规：单价 × 数量 正好乘得回去
   const a = allocateUnitOf([18, 5], [2, 1], 0.95)
   assert.deepEqual(a.units, [8.55, 4.75])

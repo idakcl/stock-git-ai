@@ -226,7 +226,7 @@ await t('直接打印：每张订单一页，金额与单价都在', async () =>
     // 这些单没有行折扣，也没有整单折扣：折扣率/折扣金额列与折后金额列都不打印
     assert.doesNotMatch(html, /折扣率/)
     assert.doesNotMatch(html, /折扣金额/)
-    assert.doesNotMatch(html, /折后金额（含整单折扣）/)
+    assert.doesNotMatch(html, /折后金额/)
     assert.match(html, /本次金额/)
     assert.match(html, /订单金额：<\/b>¥20\.00/)
     assert.match(html, /¥/)

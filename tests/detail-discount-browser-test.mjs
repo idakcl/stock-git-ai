@@ -1,4 +1,4 @@
-// 销售单 / 采购单详情：整单折扣醒目、明细「折后金额（含整单折扣）」列、无行折扣时隐藏折扣列。
+// 销售单 / 采购单详情：整单折扣醒目、明细「折后金额」列、无行折扣时隐藏折扣列。
 // 跑法：先起 dev server（npx vite --port 5173 --strictPort --host 127.0.0.1），再 node tests/detail-discount-browser-test.mjs
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -85,12 +85,12 @@ const captureBlob = (page) => page.evaluate(() => {
 
 console.log('\n销售单详情：整单折扣醒目 + 明细折后金额')
 
-await t('有行折扣与整单折扣：页面多一列「折后金额（含整单折扣）」，打印/CSV 同步', async () => {
+await t('有行折扣与整单折扣：页面多一列「折后金额」，打印/CSV 同步', async () => {
   const { page, context, errors } = await open('/sale/X202610281000000001', seed({ sales: [saleOrder()] }))
   try {
     const head = await headers(page)
     assert.match(head, /本次折扣/)
-    assert.match(head, /折后金额（含整单折扣）/)
+    assert.match(head, /折后金额/)
     const row = (await page.locator('.el-table').first().locator('.el-table__row').first().innerText()).replace(/\s+/g, ' ')
     assert.match(row, /17\.10/)
     // 单头折扣用醒目样式包裹
@@ -101,7 +101,7 @@ await t('有行折扣与整单折扣：页面多一列「折后金额（含整�
     assert.match(html, /<div class="f hl"><b>整单折扣：<\/b>/)
     assert.match(html, /整单折扣：<\/b>×0\.95（减 ¥1\.15）/)
     assert.match(html, /<th>本次折扣<\/th>/)
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
     assert.match(html, /17\.10/)
     assert.match(html, /4\.75/)
 
@@ -109,7 +109,7 @@ await t('有行折扣与整单折扣：页面多一列「折后金额（含整�
     await page.getByRole('button', { name: '导出CSV' }).click()
     await page.waitForFunction(() => !!window.__csv, null, { timeout: 5000 })
     const csv = (await page.evaluate(() => window.__csv)).replace(/^\uFEFF/, '')
-    assert.match(csv, /本次单价,本次折扣,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /本次单价,本次折扣,本次金额,折后单价,折后金额/)
     assert.match(csv, /18\.00,8\.55,17\.10/)
     assert.match(csv, /5\.00,4\.75/)
     assert.deepEqual(errors, [], '页面不得报错')
@@ -125,7 +125,7 @@ await t('没有行折扣：页面与打印都隐藏「本次折扣」，但保�
   try {
     const head = await headers(page)
     assert.doesNotMatch(head, /本次折扣/)
-    assert.match(head, /折后金额（含整单折扣）/)
+    assert.match(head, /折后金额/)
     const row = (await page.locator('.el-table').first().locator('.el-table__row').first().innerText()).replace(/\s+/g, ' ')
     assert.match(row, /18\.00/)
 
@@ -133,7 +133,7 @@ await t('没有行折扣：页面与打印都隐藏「本次折扣」，但保�
     const html = await printed(page)
     assert.doesNotMatch(html, /本次折扣/)
     assert.doesNotMatch(html, /<th>折扣率<\/th>/)
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
     assert.match(html, /18\.00/)
     assert.match(html, /4\.50/)
 
@@ -157,7 +157,7 @@ await t('采购单：整单折扣高亮、折后金额列与打印一致', async
   try {
     const head = await headers(page)
     assert.match(head, /本次折扣/)
-    assert.match(head, /折后金额（含整单折扣）/)
+    assert.match(head, /折后金额/)
     const row = (await page.locator('.el-table').first().locator('.el-table__row').first().innerText()).replace(/\s+/g, ' ')
     assert.match(row, /17\.10/)
     assert.match((await page.locator('.order-discount').innerText()).replace(/\s+/g, ' '), /整单折扣：×0\.95（减 ¥1\.15）/)
@@ -166,7 +166,7 @@ await t('采购单：整单折扣高亮、折后金额列与打印一致', async
     const html = await printed(page)
     assert.match(html, /采购单 C202610281000000001/)
     assert.match(html, /<div class="f hl"><b>整单折扣：<\/b>/)
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
     assert.match(html, /17\.10/)
     assert.match(html, /4\.75/)
     assert.deepEqual(errors, [], '页面不得报错')

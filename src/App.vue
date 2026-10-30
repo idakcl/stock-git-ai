@@ -467,6 +467,8 @@ body {
 /* 弹窗宽度自适应：各弹窗写死的 width（420~660px）在手机上会左右溢出屏幕，
    用 max-width 统一钳制在视口内（max-width 天然优先于 width），桌面端不受影响 */
 .el-dialog { max-width: 94vw; }
+/* 最大化 / 整页开单：这里必须放开上面那条 94vw，否则「最大化」只到屏宽的 94%、右侧留一条缝 */
+.el-dialog.is-fullscreen { max-width: 100vw; width: 100%; }
 /* 列表操作列（ops-col）：按钮收紧间距并强制单行，删除与照片同排不换行 */
 .el-table .ops-col .cell { white-space: nowrap; }
 /* 单据号列（id-col）：退货单号形如 XT-20261028-0001，允许在连字符处折行会把单号拆成两行，

@@ -34,6 +34,7 @@
           <el-button size="small" :disabled="!lines.length" @click="fillFullReturn">本单全退</el-button>
         </div>
         <el-table :data="lines" max-height="320">
+          <el-table-column type="index" label="序号" width="58" align="center" />
           <el-table-column prop="name" label="商品" min-width="160" /><el-table-column prop="available" label="可退数量" width="100" />
           <el-table-column label="本次退货数量" width="160"><template #default="{ row }"><el-input-number v-model="row.returnQty" :min="0" :max="row.available" :controls="false" style="width:135px" /></template></el-table-column>
           <el-table-column label="折后可退金额" width="130"><template #default="{ row }">{{ row.remainingMoney.toFixed(2) }}</template></el-table-column>

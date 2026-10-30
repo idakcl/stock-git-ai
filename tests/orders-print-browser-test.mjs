@@ -115,7 +115,7 @@ await t('打印单头 / 明细 / 折扣链 / 合计与未收金额', async () =>
     // 整单折扣字段高亮（打印样式 .f.hl），让单头折扣一眼可见
     assert.match(html, /<div class="f hl"><b>整单折扣：<\/b>/)
     // 明细摊完整单折扣后的金额：18×0.95=17.10，5×0.95=4.75
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
     assert.match(html, /17\.10/)
     assert.match(html, /4\.75/)
     assert.match(html, /整单优惠：<\/b>¥1\.00/)
@@ -147,7 +147,7 @@ await t('CSV 文件名与内容：单头 + 明细行，折扣与折后金额同�
     const csv = (await page.evaluate(() => window.__csv)).replace(/^\uFEFF/, '')
     assert.match(csv, /业务单号,HT-2026-001/)
     assert.match(csv, /订单金额,¥20\.85/)
-    assert.match(csv, /编码,名称,数量,单价,折扣率,折扣金额,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /编码,名称,数量,单价,折扣率,折扣金额,本次金额,折后单价,折后金额/)
     assert.match(csv, /P00001,管件,2,10\.00,0\.90,2\.00,18\.00,8\.55,17\.10/)
     assert.match(csv, /P00002,弯头,1,5\.00,1\.00,0\.00,5\.00,4\.75,4\.75/)
     // 文件名在下载时确定，这里只确认这条路径没发写请求（纯前端导出）

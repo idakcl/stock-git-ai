@@ -1,4 +1,4 @@
-// 折后单价（含整单折扣）：销售单 / 采购单 / 订单详情页的列 + 单张打印 + CSV 全部同步；
+// 折后单价：销售单 / 采购单 / 订单详情页的列 + 单张打印 + CSV 全部同步；
 // 以及打印跨页时商品表头必须重复（thead display: table-header-group）。
 // 跑法：先起 dev server（npx vite --port 5173 --strictPort --host 127.0.0.1），再 node tests/unit-net-discount-browser-test.mjs
 import assert from 'node:assert/strict'
@@ -104,14 +104,14 @@ const firstRow = async (page) => (await page.locator('.el-table').first().locato
 // 管件 2×10×0.9=18、弯头 5；整单 ×0.95 → 累计取整行金额 17.10 / 4.75，单价 8.55 / 4.75
 const NET_A = '17.10', NET_B = '4.75', UNIT_A = '8.55'
 
-console.log('\n折后单价（含整单折扣）：销售单 / 采购单 / 订单')
+console.log('\n折后单价：销售单 / 采购单 / 订单')
 
 await t('销售单详情：页面出现折后单价列，单价×数量乘得回行金额', async () => {
   const { page, context, errors } = await open(`/sale/${SALE_ID}`, seed({ sales: [saleDoc()] }))
   try {
     const head = await headers(page)
-    assert.match(head, /折后单价（含整单折扣）/)
-    assert.match(head, /折后金额（含整单折扣）/)
+    assert.match(head, /折后单价/)
+    assert.match(head, /折后金额/)
     // 列顺序：折后单价在折后金额左边
     assert.ok(head.indexOf('折后单价') < head.indexOf('折后金额'), '单价列在金额列之前')
     const row = await firstRow(page)
@@ -126,16 +126,16 @@ await t('销售单：打印与 CSV 都带折后单价，行金额合计仍＝单
   try {
     await capturePrint(page)
     const html = await printed(page)
-    assert.match(html, /<th>折后单价（含整单折扣）<\/th>/)
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
-    // 表头顺序：折后单价在折后金额之前
-    assert.ok(html.indexOf('折后单价（含整单折扣）') < html.indexOf('折后金额（含整单折扣）'))
+    assert.match(html, /<th>折后单价<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
+    // 表头顺序：折后单价列在折后金额列之前（按 <th> 定位，避免命中单头信息里的同名文字）
+    assert.ok(html.indexOf('<th>折后单价</th>') < html.indexOf('<th>折后金额</th>'))
     assert.match(html, new RegExp(UNIT_A))
     // 两行折后金额合计 = 21.85 = 23×0.95（口径不能被单价列带偏）
     assert.match(html, /21\.85/)
 
     const c = await csv(page)
-    assert.match(c, /本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(c, /本次金额,折后单价,折后金额/)
     assert.match(c, new RegExp(`18\\.00,${UNIT_A.replace('.', '\\.')},${NET_A.replace('.', '\\.')}`))
     assert.deepEqual((c.match(/4\.75/g) || []).length >= 2, true, '弯头行金额与单价同为 4.75')
   } finally { await context.close() }
@@ -159,11 +159,11 @@ await t('采购单详情：折后单价列与打印同步', async () => {
   const { page, context, errors } = await open(`/purchase/${PURCHASE_ID}`, seed({ purchases: [purchaseDoc()] }))
   try {
     const head = await headers(page)
-    assert.match(head, /折后单价（含整单折扣）/)
+    assert.match(head, /折后单价/)
     assert.match(await firstRow(page), new RegExp(UNIT_A))
     await capturePrint(page)
     const html = await printed(page)
-    assert.match(html, /<th>折后单价（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后单价<\/th>/)
     assert.match(html, new RegExp(UNIT_A))
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
@@ -173,14 +173,14 @@ await t('订单详情：折后单价列与打印 / CSV 同步（订单口径现�
   const { page, context, errors } = await open(`/order/${ORDER_ID}`, seed({ orders: [orderDoc()] }))
   try {
     const head = await headers(page)
-    assert.match(head, /折后单价（含整单折扣）/)
+    assert.match(head, /折后单价/)
     assert.match(await firstRow(page), new RegExp(UNIT_A))
     await capturePrint(page)
     const html = await printed(page)
-    assert.match(html, /<th>折后单价（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后单价<\/th>/)
     assert.match(html, new RegExp(UNIT_A))
     const c = await csv(page)
-    assert.match(c, /折后单价（含整单折扣）/)
+    assert.match(c, /折后单价/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })
@@ -192,7 +192,7 @@ await t('订单列表：单张打印与批量详情页都带折后单价', async
     await row.waitFor({ timeout: 5000 })
     await capturePrint(page)
     const html = await printed(page, row.getByRole('button', { name: '打印', exact: true }))
-    assert.match(html, /<th>折后单价（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后单价<\/th>/)
     assert.match(html, new RegExp(UNIT_A))
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }

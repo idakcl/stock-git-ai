@@ -1,3 +1,5 @@
+import { paperPref } from './printPrefs.js'
+
 const escCsv = (v) => {
   const s = String(v ?? '')
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
@@ -65,16 +67,70 @@ export function downloadCSV(filename, columns, rows, headerFields = []) {
 export const PAPER_SPECS = {
   A4: {
     key: 'A4', page: 'A4 landscape', margin: '8mm',
+    // w/h 为横向时的纸宽/纸高（mm）；纵向＝两者对调，每页行数按纵向纸高重算
+    w: 297, h: 210, marginMm: 8,
     base: 11, pad: '1px 4px',
     rowsPerPage: 40, headReserve: 6, footReserve: 2
   },
   A5: {
     key: 'A5', page: 'A5 landscape', margin: '5mm',
+    w: 210, h: 148, marginMm: 5,
     base: 9.5, pad: '1px 3px',
     rowsPerPage: 28, headReserve: 6, footReserve: 2
   }
 }
-export const paperSpec = (paper) => PAPER_SPECS[String(paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
+
+// ---- 纸张换算：mm → CSS px（96dpi），行高与每页行数都从这里推导 ----
+const MM_PX = 96 / 25.4
+// 明细行高：正文行高 1.25 + 上下留白 2px + 边框 1px（与 printStyle 里的 CSS 一一对应）
+const rowPxOf = (base) => base * 1.25 + 3
+// 每页能装几行：扣掉表头行与 1 行安全余量，保证「一片＝一张纸」，不会因为差几像素
+// 把最后一行挤到下一页（那一页就只剩光秃秃的一行，看起来像「跨页表头失败」）
+export function rowsPerPageOf(heightMm, marginMm, base) {
+  const contentPx = Math.max(60, heightMm - marginMm * 2) * MM_PX
+  const rows = Math.floor((contentPx - rowPxOf(base)) / rowPxOf(base)) - 1
+  return Math.max(5, rows)
+}
+
+// 自定义纸张：宽高单位 mm，字号按纸宽等比缩放（A4 横向 281mm 内容宽对应正文 11px），
+// 每页行数按纸高推算，保证小票纸、B5、二等分纸都能打出完整版面
+export function customSpec(width, height, rowsPerPage = 0) {
+  const w = Math.min(1000, Math.max(40, Number(width) || 210))
+  const h = Math.min(1000, Math.max(40, Number(height) || 297))
+  const marginMm = Math.max(3, Math.min(10, Math.round(Math.min(w, h) * 0.04)))
+  // 字号只分两档：常规纸（A5 及以上）与 A4 同档 11px，小票/窄纸用 9.5px。
+  // 不按纸宽连续缩放——纸窄了字号也跟着缩会小到看不清，窄纸的关键是列少、字别小。
+  const base = Math.min(w, h) >= 148 ? 11 : 9.5
+  const rows = Number(rowsPerPage) > 0 ? Math.round(Number(rowsPerPage)) : rowsPerPageOf(h, marginMm, base)
+  return {
+    key: 'custom', page: `${w}mm ${h}mm`, margin: `${marginMm}mm`,
+    w, h, marginMm, base, pad: base < 10 ? '1px 3px' : '1px 4px',
+    rowsPerPage: rows, headReserve: 6, footReserve: 2
+  }
+}
+
+/**
+ * 解析纸张：paper 来自页面按钮（'A4' / 'A5'），用户可在「打印设置」里改成纵向或自定义纸张。
+ * 自定义纸优先（此时 A4/A5 按钮不再区分）；每页行数手动填了就用它，否则按纸高自动推算。
+ */
+export const paperSpec = (paper) => {
+  const cfg = paperPref || {}
+  const preset = PAPER_SPECS[String(paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
+  let spec = preset
+  if (cfg.mode === 'custom') {
+    // 自定义：宽高即最终出纸方向（宽 < 高＝纵向），不再额外换算
+    spec = customSpec(cfg.width, cfg.height, cfg.rowsPerPage)
+  } else if (cfg.orientation === 'portrait') {
+    const w = preset.h, h = preset.w
+    spec = {
+      ...preset, page: `${preset.key} portrait`, w, h,
+      rowsPerPage: rowsPerPageOf(h, preset.marginMm, preset.base)
+    }
+  }
+  // 手动行数覆盖（0＝自动）：纸高推算偏保守时也能用，遇到真机溢出就调小
+  const manual = Number(cfg.rowsPerPage) > 0 ? Math.round(Number(cfg.rowsPerPage)) : 0
+  return manual ? { ...spec, rowsPerPage: manual } : spec
+}
 
 // 字号一律由 base 推导：换纸张时整套版式等比缩放，「金额 = 其他字体的 1.2 倍」这条比例不会走样
 // repeatHeader=false 时必须把 thead 的 table-header-group 一起关掉：
@@ -110,10 +166,10 @@ const printStyle = (p, repeatHeader = true) => {
     th, td { border: 1px solid #666; padding: ${p.pad}; text-align: left; vertical-align: top; line-height: 1.25; overflow-wrap: anywhere; }
     th { background: #eee; }
     .idx { text-align: center; }
-    tr { page-break-inside: avoid; }
+    tr { page-break-inside: avoid; break-inside: avoid; }
     tfoot td { font-weight: 700; }
     /* 每一片明细表（除全文最后一片）后强制换页：切片数 = 实际页数 */
-    table.pg.brk, .doc.brk { page-break-after: always; }
+    table.pg.brk, .doc.brk { page-break-after: always; break-after: page; }
   `
 }
 
@@ -201,7 +257,7 @@ const pagedTables = (columns, rows, p, opts, repeatHeader = true) => {
   const list = rows || []
   const widths = columnWidths(columns, list)
   if (!repeatHeader) return tableHtml(columns, list, 0, 'pg', widths)
-  const caps = pageCapacities(list.length, p.rowsPerPage, opts.head ? p.headReserve : 0, opts.foot ? p.footReserve : 0)
+  const caps = pageCapacities(list.length, p.rowsPerPage, opts.headRows || 0, opts.foot ? p.footReserve : 0)
   let offset = 0
   return caps.map((n, i) => {
     const slice = list.slice(offset, offset + n)
@@ -210,13 +266,41 @@ const pagedTables = (columns, rows, p, opts, repeatHeader = true) => {
   }).join('')
 }
 
+/**
+ * 首页要为单头信息（标题 / 副标题 / 信息块）预留几行。
+ *
+ * 以前所有纸张都写死 6 行（A4 够用），但自定义纸张（尤其窄纸）里信息块会折成好几行，
+ * 6 行不够 → 首页多溢出几像素 → 浏览器把最后一行挤到下一张纸，那张纸看着就像「表头丢了」。
+ * 这里按纸宽算信息块会折几行、再按行高折成「行数」，并多留 1 行安全余量。
+ */
+const headReserveOf = (sec, p) => {
+  const fields = normFields(sec.headerFields)
+  if (!sec.title && !sec.subtitle && !fields.length) return 0
+  const rowPx = rowPxOf(p.base)
+  const contentW = Math.max(120, (p.w - p.marginMm * 2) * MM_PX)
+  let px = 0
+  if (sec.title) px += p.base * 2.2
+  if (sec.subtitle) px += p.base * 1.8
+  if (fields.length) {
+    // .fields 里的 .f 有 min-width:180px，一行能放几个按内容宽算
+    const perRow = Math.max(1, Math.floor(contentW / 190))
+    px += Math.ceil(fields.length / perRow) * (p.base * 1.9) + 12
+  }
+  return Math.max(1, Math.ceil(px / rowPx) + 1)
+}
+
 // 一节（一张单据）的打印内容：单头信息只在首页出现，落款只在末页出现
 const sectionHtml = (sec, p, withFooter, repeatHeader = true) => {
   const fieldsHtml = normFields(sec.headerFields).map(fieldHtml).join('')
+  const hasHead = !!(sec.title || sec.subtitle || fieldsHtml)
   return (sec.title ? '<h2>' + escHtml(sec.title) + '</h2>' : '') +
     (sec.subtitle ? '<div class="sub">' + escHtml(sec.subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    pagedTables(sec.columns, sec.rows, p, { head: !!(sec.title || sec.subtitle || fieldsHtml) && repeatHeader, foot: withFooter }, repeatHeader) +
+    pagedTables(sec.columns, sec.rows, p, {
+      // 首页扣除单头占用的行数；无单头时不需要预留
+      headRows: hasHead ? headReserveOf(sec, p) : 0,
+      foot: withFooter
+    }, repeatHeader) +
     (withFooter ? footerHtml(sec.footerFields) : '')
 }
 

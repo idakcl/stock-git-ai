@@ -103,8 +103,8 @@ await t('默认只看本次数据：不显示档案售价/进价，金额与订�
     const head = await headers(page)
     assert.match(head, /本次单价/)
     assert.match(head, /本次金额/)
-    // 有整单折扣时，明细多一列「折后金额（含整单折扣）」
-    assert.match(head, /折后金额（含整单折扣）/)
+    // 有整单折扣时，明细多一列「折后金额」
+    assert.match(head, /折后金额/)
     assert.doesNotMatch(head, /售价/)
     assert.doesNotMatch(head, /进价/)
     assert.deepEqual(errors, [], '页面不得报错')
@@ -223,7 +223,7 @@ await t('正常模式打印：单头 + 业务单号 + 折扣链 + 明细与合�
     assert.match(html, /整单折扣：<\/b>×0\.95（减 ¥1\.15）/)
     // 整单折扣高亮 + 明细折后金额列
     assert.match(html, /<div class="f hl"><b>整单折扣：<\/b>/)
-    assert.match(html, /<th>折后金额（含整单折扣）<\/th>/)
+    assert.match(html, /<th>折后金额<\/th>/)
     assert.match(html, /17\.10/)
     assert.match(html, /订单金额：<\/b>¥20\.85/)
     assert.match(html, /已收订金：<\/b>¥5\.00/)
@@ -282,7 +282,7 @@ await t('正常模式 CSV：档案价按开关出现，单头含业务单号与�
     assert.match(csv, /业务单号,HT-2026-001/)
     assert.match(csv, /订单金额,¥20\.85/)
     assert.match(csv, /已收订金,¥5\.00/)
-    assert.match(csv, /编码,名称,单位,进价,售价,本次数量,本次单价,折扣率,本次折扣,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /编码,名称,单位,进价,售价,本次数量,本次单价,折扣率,本次折扣,本次金额,折后单价,折后金额/)
     assert.match(csv, /P00001,管件,个,8\.00,12\.00,2,10\.00,0\.90,2\.00,18\.00,8\.55,17\.10/)
   } finally { await context.close() }
 })

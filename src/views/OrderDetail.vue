@@ -75,7 +75,7 @@
       </div>
 
       <ProductTable :items="detailItems" search-placeholder="搜索本单商品" :price-columns="tablePriceColumns"
-        :show-cost="showCostCol && !priceHidden" :remark-last="true" :show-history="showHistory && !priceHidden">
+        :show-cost="showCostCol && !priceHidden" :remark-last="true" :show-history="showHistory && !priceHidden" numbered>
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100" align="right" />
           <el-table-column v-if="!priceHidden" prop="_price" label="本次单价" width="100" align="right" />
@@ -86,10 +86,10 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100" align="right" />
-          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后单价（含整单折扣）" width="180" align="right">
+          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后单价" width="180" align="right">
             <template #default="{ row }">{{ Number(row._unitNet || 0).toFixed(2) }}</template>
           </el-table-column>
-          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后金额（含整单折扣）" width="180" align="right">
+          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后金额" width="180" align="right">
             <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
           </el-table-column>
         </template>
@@ -289,8 +289,8 @@ const exportColumns = computed(() => {
     cols.push({ label: '本次金额', value: r => Number(r._total || 0).toFixed(2) })
     if (hasOrderDiscount.value) {
       cols.push(
-        { label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) },
-        { label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }
+        { label: '折后单价', value: r => Number(r._unitNet || 0).toFixed(2) },
+        { label: '折后金额', value: r => Number(r._net || 0).toFixed(2) }
       )
     }
   }
