@@ -16,7 +16,7 @@
         </div>
       </template>
       <el-alert type="info" :closable="false" show-icon
-        title="订单只是草稿：不占库存、不计应收/应付。收订金会开真实收款单；点「过账」才生成正式销售/采购单。" />
+        title="订单是未过账单据：不占库存、不计应收/应付。收订金会开真实收款单；点「过账」才生成正式销售/采购单。" />
       <el-input v-model="keyword" clearable placeholder="搜索订单号 / 往来单位 / 商品" class="search-input" />
       <div class="filter-row">
         <span class="filter-label">状态</span>
@@ -87,7 +87,7 @@
           </el-table-column>
           <el-table-column label="状态" width="200">
             <template #default="{ row }">
-              <el-tag :type="row.status === POSTED ? 'success' : 'warning'" size="small" disable-transitions>{{ row.status }}</el-tag>
+              <el-tag :type="row.status === POSTED ? 'success' : 'warning'" size="small" disable-transitions>{{ orderStatusText(row.status) }}</el-tag>
               <router-link v-if="row.postedOrderId" :to="`${row.kind === 'purchase' ? '/purchase/' : '/sale/'}${row.postedOrderId}`" class="link posted-link">{{ row.postedOrderId }}</router-link>
             </template>
           </el-table-column>
@@ -166,7 +166,7 @@ import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
 import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
 import { downloadCSV, printA4, printA4Sections } from '../utils/export'
-import { orderAmount, orderDepositSum, DRAFT, POSTED, orderKeys } from '../utils/orders.js'
+import { orderAmount, orderDepositSum, orderStatusText, DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 
@@ -252,7 +252,7 @@ const exportColumns = [
   { label: '商品', value: r => itemNamesOf(r).join('、') },
   { label: '订单金额', value: r => orderAmount(r).toFixed(2) },
   { label: '已收订金', value: r => depositSumOf(r).toFixed(2) },
-  { label: '状态', prop: 'status' },
+  { label: '状态', value: r => orderStatusText(r.status) },
   { label: '过账单号', prop: 'postedOrderId' },
   { label: '备注', prop: 'remark' }
 ]
@@ -287,7 +287,7 @@ const orderHeaderFields = (row) => {
     ['业务单号', row.no && row.no !== row.id ? row.no : '—'],
     [row.kind === 'purchase' ? '供应商' : '客户', partyOf(row) || '—'],
     ['日期', row.date],
-    ['状态', row.status]
+    ['状态', orderStatusText(row.status)]
   ]
   if (row.postedOrderId) fields.push(['关联单据', row.postedOrderId])
   if (linesDiscountTotal(row) > 0) {
@@ -315,7 +315,7 @@ function printOrder(row) {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品 · ${row.status}`, orderHeaderFields(row))
+  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品 · ${orderStatusText(row.status)}`, orderHeaderFields(row))
 }
 
 // ---- 勾选后的批量操作 ----
@@ -355,7 +355,7 @@ const maskedHeaderFields = (row) => {
     ['业务单号', row.no && row.no !== row.id ? row.no : '—'],
     [row.kind === 'purchase' ? '供应商' : '客户', partyOf(row) || '—'],
     ['日期', row.date],
-    ['状态', row.status]
+    ['状态', orderStatusText(row.status)]
   ]
   if (row.postedOrderId) fields.push(['关联单据', row.postedOrderId])
   fields.push(['备注', row.remark || '—'])
@@ -370,7 +370,7 @@ function printSelectedDetails(masked) {
     const items = row.items || []
     return {
       title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
-      subtitle: `共 ${items.length} 项商品 · ${row.status}${masked ? ' · 金额已隐藏' : ''}`,
+      subtitle: `共 ${items.length} 项商品 · ${orderStatusText(row.status)}${masked ? ' · 金额已隐藏' : ''}`,
       headerFields: masked ? maskedHeaderFields(row) : orderHeaderFields(row),
       columns: masked ? maskedLineColumns : orderLineColumns,
       rows: items
@@ -472,7 +472,7 @@ async function post(row) {
 
 async function unpost(row) {
   try {
-    await ElMessageBox.confirm('撤销过账会把生成的单据删掉、订单退回草稿。已收过款的单据不允许撤销。是否继续？', '撤销过账', { type: 'warning' })
+    await ElMessageBox.confirm('撤销过账会把生成的单据删掉、订单退回未过账。已收过款的单据不允许撤销。是否继续？', '撤销过账', { type: 'warning' })
   } catch { return }
   busy.value = true
   try {

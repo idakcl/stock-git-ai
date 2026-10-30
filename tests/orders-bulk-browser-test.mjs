@@ -94,6 +94,9 @@ await t('默认不显示已过账订单，下拉选项与文案一致', async ()
   try {
     assert.equal(await rows(page).count(), 4, '默认只显示 4 张未过账订单')
     assert.equal(await rowOf(page, 'D202610281000000005').count(), 0, '已过账订单默认不出现')
+    const tableText = (await page.locator('.el-table').innerText()).replace(/\s+/g, ' ')
+    assert.match(tableText, /未过账/, '状态列显示「未过账」')
+    assert.doesNotMatch(tableText, /草稿/, '状态列不再出现「草稿」')
     await page.locator('.filter-row .el-select').first().click()
     const options = (await page.locator('.el-select-dropdown__item').allTextContents()).map(s => s.trim())
     assert.deepEqual(options, ['显示全部订单', '仅显示未过账订单', '仅显示已过账订单'])
@@ -172,7 +175,7 @@ await t('隐藏金额打印：单价、折扣、合计、订金、未收全部�
     assert.match(html, /客户：<\/b>客户甲/)
     assert.match(html, /管件/)
     assert.match(html, /数量/)
-    assert.match(html, /共 1 项商品 · 草稿 · 金额已隐藏/)
+    assert.match(html, /共 1 项商品 · 未过账 · 金额已隐藏/)
     // 所有金额信息都不能出现：¥ 符号、金额列与金额字段一个都不留
     assert.doesNotMatch(html, /¥/, '不得出现任何金额符号')
     for (const word of ['单价', '折扣率', '折扣金额', '折后金额', '订单金额', '已收订金', '原价合计', '整单折扣', '整单优惠', '未收', '未付']) {

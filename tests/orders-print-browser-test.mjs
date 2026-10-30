@@ -119,7 +119,7 @@ await t('打印单头 / 明细 / 折扣链 / 合计与未收金额', async () =>
     assert.match(html, /管件/)
     assert.match(html, /2\.00/)
     assert.match(html, /18\.00/)
-    assert.match(html, /共 2 项商品 · 草稿/)
+    assert.match(html, /共 2 项商品 · 未过账/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

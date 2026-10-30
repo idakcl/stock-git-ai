@@ -17,6 +17,9 @@
               ↑生成 X/C 单据          ↓删除那张单
 ```
 
+> 界面用词：`草稿` 在页面上统一显示为「**未过账**」（`orderStatusText()`：非已过账一律显示未过账）。
+> **存储值仍是 `草稿`**，历史订单与备份恢复的数据无需迁移，老数据也显示为未过账。
+
 - **过账**：按 `genOrderId('X'|'C', …)` 开一张正式单据（19 位单号），订单标 `postedOrderId` / `postedAt`；
   同时跑 `derive()` + `rebuildStock()`，库存与应收从这一刻才动。
 - **撤销过账**：有条件允许。`canUnpost(doc, list)` 三闸门——已有 `payments` 流水、已有 `settlements` 核销、
@@ -162,7 +165,7 @@
 
 ## 四、测试
 纯 Node（不碰线上仓）：
-- `node tests/orders-test.mjs`（12 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、
+- `node tests/orders-test.mjs`（14 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、状态显示「未过账」、
   订金开凭证 + 过账搬成首笔流水、孤儿订单两个兜底分支、清空草稿的保留规则、`restore` 整表替换与非法形状拒绝。
 - `node tests/amend-test.mjs`（9 项）`diffOrderLines` / `refundPreview` / `applyAmendOperation`：
   退货行按行索引分摊、改价拒绝、混合单价拒绝、幂等 `requestId`、补差沿用原单价。

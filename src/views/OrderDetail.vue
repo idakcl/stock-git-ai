@@ -5,7 +5,7 @@
         <div class="card-header">
           <div class="title">
             <b>{{ isPurchase ? '采购订单' : '销售订单' }}：<span>{{ order.id }}</span></b>
-            <el-tag :type="order.status === POSTED ? 'success' : 'warning'" size="small" disable-transitions class="status-tag">{{ order.status }}</el-tag>
+            <el-tag :type="order.status === POSTED ? 'success' : 'warning'" size="small" disable-transitions class="status-tag">{{ orderStatusText(order.status) }}</el-tag>
           </div>
           <div class="actions">
             <el-checkbox v-if="!externalView" v-model="hidePrice" class="hide-price-cb">隐藏单价与金额</el-checkbox>
@@ -25,7 +25,7 @@
       <el-alert v-if="externalView" class="external-banner" type="info" :closable="false" show-icon
         title="对外查看模式：价格与金额已隐藏，页面只读" />
       <el-alert v-if="found && order.status === DRAFT && !deposits.length" class="external-banner" type="info" :closable="false" show-icon
-        title="草稿订单：不占库存、不计应收/应付；点「过账」才生成正式销售/采购单。" />
+        title="未过账订单：不占库存、不计应收/应付；点「过账」才生成正式销售/采购单。" />
 
       <div class="info">
         <span>{{ isPurchase ? '供应商' : '客户' }}：
@@ -129,7 +129,7 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
-import { orderAmount, orderDepositSum, DRAFT, POSTED } from '../utils/orders.js'
+import { orderAmount, orderDepositSum, orderStatusText, DRAFT, POSTED } from '../utils/orders.js'
 import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
 import { lineDisplayName, normalizeRate } from '../utils/catalog'
 import { downloadCSV, printA4 } from '../utils/export'
@@ -227,7 +227,7 @@ const exportColumns = computed(() => {
   return cols
 })
 
-const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品 · ${order.value.status}`)
+const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品 · ${orderStatusText(order.value.status)}`)
 const docHeaderFields = computed(() => {
   const fields = [
     ['订单号', order.value.id],
@@ -238,7 +238,7 @@ const docHeaderFields = computed(() => {
     const p = partyInfo.value
     fields.push(['联系人', p.contact || '—'], ['电话', p.phone || '—'], ['地址', p.address || '—'])
   }
-  fields.push(['日期', order.value.date], ['状态', order.value.status])
+  fields.push(['日期', order.value.date], ['状态', orderStatusText(order.value.status)])
   if (order.value.postedOrderId) fields.push(['关联单据', order.value.postedOrderId])
   if (!priceHidden.value) {
     fields.push(['合计', `¥${netSum.value.toFixed(2)}`])

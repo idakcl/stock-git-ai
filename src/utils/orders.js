@@ -33,6 +33,10 @@ export function orderKeys(kind) {
 export const orderAmount = order => grossOf({ ...(order || {}), total: round2((order?.items || []).reduce((s, l) => s + Number(l.total || 0), 0)) })
 export const orderDepositSum = order => round2(depositSumOf(order?.deposits))
 
+// 状态显示口径：界面上「草稿」统一叫「未过账」。库里历史数据仍是 '草稿'，凡是「非已过账」都按未过账显示，
+// 这样老订单、备份恢复的数据不用迁移也能显示一致。
+export const orderStatusText = status => (status === POSTED ? POSTED : '未过账')
+
 // 校验：返回错误数组（空数组＝通过）。前端与服务端共用，避免「界面能提交、服务端拒」
 export function validateOrder(order, { items = [] } = {}) {
   const errors = []

@@ -2,7 +2,7 @@
 // ——「订单不占库存、不进应收」。跑法：node tests/orders-test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, DRAFT, POSTED } from '../src/utils/orders.js'
+import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, orderStatusText, DRAFT, POSTED } from '../src/utils/orders.js'
 import { grossOf, receivableOf } from '../src/utils/account.js'
 import { derive, rebuildStock } from '../api/routes.js'
 
@@ -221,6 +221,14 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
   const orphanDocId = s.orders.find(o => o.id === posted.code).postedOrderId
   const orphan = { ...s, sales: s.sales.filter(o => o.id !== orphanDocId) }
   assert.equal(applyOrderOperation(orphan, { action: 'deleteMany', orderIds: [posted.code] }).removed, 1)
+})
+
+test('状态显示：库里「草稿」一律显示成「未过账」，老数据不用迁移', () => {
+  assert.equal(DRAFT, '草稿')                        // 存储值不动，历史数据与备份恢复保持兼容
+  assert.equal(orderStatusText(DRAFT), '未过账')
+  assert.equal(orderStatusText('草稿'), '未过账')
+  assert.equal(orderStatusText(undefined), '未过账')
+  assert.equal(orderStatusText(POSTED), '已过账')
 })
 
 test('orderToOrderDoc 与 canUnpost 单独可用（前端预览同一份实现）', () => {

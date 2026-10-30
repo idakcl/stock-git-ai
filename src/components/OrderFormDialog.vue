@@ -4,7 +4,7 @@
        所以这里直接复用 utils/orders.js 的 orderAmount，绝不在弹窗里另算一套。 -->
   <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
     <el-alert class="draft-alert" type="info" :closable="false" show-icon
-      title="订单是未过账的草稿：不占库存、不计应收/应付，可以随便改、随便删。点「过账」才会生成正式单据。" />
+      title="订单是未过账单据：不占库存、不计应收/应付，可以随便改、随便删。点「过账」才会生成正式单据。" />
     <el-form :model="form" label-width="110px">
       <el-form-item label="订单类型">
         <!-- 已过账的订单不能改类型（要改请先撤销过账）；新建与草稿可自由切换 -->
