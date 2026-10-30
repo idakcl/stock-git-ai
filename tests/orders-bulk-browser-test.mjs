@@ -215,6 +215,9 @@ await t('直接打印：每张订单一页，金额与单价都在', async () =>
     assert.match(html, /销售订单 D202610281000000001/)
     assert.match(html, /销售订单 D202610281000000002/)
     assert.equal((html.match(/class="doc brk"/g) || []).length, 1, '两张单之间分页')
+    // 副标题只报商品项数，状态不能拼进 <div class="sub">
+    assert.equal((html.match(/<div class="sub">共 1 项商品<\/div>/g) || []).length, 2, '两张单副标题都只有项数')
+    assert.doesNotMatch(html, /<div class="sub">[^<]*未过账/)
     assert.match(html, /单价/)
     assert.match(html, /折扣率/)
     assert.match(html, /订单金额：<\/b>¥20\.00/)

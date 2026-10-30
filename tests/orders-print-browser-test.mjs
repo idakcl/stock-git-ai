@@ -119,7 +119,9 @@ await t('打印单头 / 明细 / 折扣链 / 合计与未收金额', async () =>
     assert.match(html, /管件/)
     assert.match(html, /2\.00/)
     assert.match(html, /18\.00/)
-    assert.match(html, /共 2 项商品 · 未过账/)
+    // 副标题只报商品项数，不出现订单状态（状态仍在单头「状态」字段）
+    assert.match(html, /<div class="sub">共 2 项商品<\/div>/)
+    assert.doesNotMatch(html, /<div class="sub">[^<]*未过账/)
     // 明细最前面是序号列：1、2 顺排
     assert.match(html, /<th class="idx">序号<\/th>/)
     assert.match(html, /<td class="idx">1<\/td>/)

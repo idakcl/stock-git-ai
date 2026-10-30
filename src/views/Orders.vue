@@ -325,7 +325,7 @@ function printOrder(row) {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品 · ${orderStatusText(row.status)}`, orderHeaderFields(row))
+  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品`, orderHeaderFields(row))
 }
 
 // ---- 勾选后的批量操作 ----
@@ -379,7 +379,7 @@ function printSelectedDetails(masked) {
     const items = row.items || []
     return {
       title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
-      subtitle: masked ? `共 ${items.length} 项商品` : `共 ${items.length} 项商品 · ${orderStatusText(row.status)}`,
+      subtitle: `共 ${items.length} 项商品`,
       headerFields: masked ? maskedHeaderFields(row) : orderHeaderFields(row),
       columns: masked ? maskedLineColumns : orderLineColumns,
       rows: items

@@ -77,7 +77,7 @@
       <!-- 商品明细表：紧跟「快速添加」下方，新增商品即可在下方明细继续改数量/单价。
            锁定态（原单已动过钱）整表改为纯文本展示：明细改动只能走「变更明细」生成关联单 -->
       <div class="lines-scroll">
-        <el-table :data="form.lines" stripe max-height="320">
+        <el-table ref="linesTable" :data="form.lines" stripe max-height="320">
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select
@@ -231,6 +231,7 @@ import OrderAmendDialog from './OrderAmendDialog.vue'
 import { moneyTouched } from '../utils/amend.js'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
+import { askDuplicateItem, flashTableRow } from '../utils/duplicateItem.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -272,6 +273,7 @@ const visible = computed({
 const photoUpload = ref(null)
 // 顶部快速添加：当前选中的商品（编码或新输名称），回车/选择即加入明细
 const quickItem = ref('')
+const linesTable = ref(null)
 // 每次打开自增：强制重建上传区，避免残留上一单的照片
 const photoKey = ref(0)
 const editingId = ref('')
@@ -578,10 +580,21 @@ const warn = (message) => ElMessage.warning({ message, duration: 5000 })
 
 // 顶部快速添加：选择已有商品或输入新商品名后回车，直接把一行加入明细（下方表格可继续改数量/单价）。
 // 新商品（库内无同名）以 name 占位、code 留空，保存时由 resolveLine 分配正式 P 编码，不会产生乱码
-function addQuickItem(val) {
+async function addQuickItem(val) {
   const code = val != null ? val : quickItem.value
   if (!code) return
   const found = (props.items || []).find(i => i.code === code || i.name === code)
+  // 同一商品已在本单明细里：弹「本商品已录入」，让用户选定位或再次添加。
+  // 库内商品按 code 认；手输的新商品名（code 为空）按 name 认，避免同名两行。
+  const dup = found
+    ? form.lines.findIndex(l => l.code === found.code || (!l.code && l.name === found.name))
+    : form.lines.findIndex(l => !l.code && l.name === String(code))
+  if (dup >= 0) {
+    const choice = await askDuplicateItem({ name: found ? found.name : String(code), index: dup })
+    quickItem.value = ''
+    if (choice === 'locate') return flashTableRow(linesTable, dup)
+    if (choice !== 'add') return
+  }
   const line = found
     ? { code: found.code, name: found.name, qty: 1, price: priceFor(found), discountRate: 1 }
     : { code: '', name: String(code), qty: 1, price: 0, discountRate: 1 }
@@ -768,6 +781,12 @@ async function save() {
 .deposit-avail{color:var(--text-regular);font-size:var(--fs-sub);}
 .deposit-used{color:var(--text-regular);font-size:var(--fs-table);}
 .deposit-used b{color:var(--color-success);}
+/* 定位重复商品：蓝色外框闪两下（只作用于该行单元格，不改变表格布局） */
+:deep(tr.locate-flash > td){animation:locate-flash 1.6s ease-in-out 1;}
+@keyframes locate-flash{
+  0%,20%,40%,60%,80%,100%{box-shadow:inset 0 0 0 0 rgba(64,158,255,0);background:transparent;}
+  10%,30%,50%,70%{box-shadow:inset 0 0 0 2px #409eff;background:rgba(64,158,255,.14);}
+}
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .debt{color:var(--color-danger);font-weight:600;}

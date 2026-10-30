@@ -211,6 +211,10 @@ await t('正常模式打印：单头 + 业务单号 + 折扣链 + 明细与合�
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /销售订单 D202610281000000001/)
+    // 副标题不显示订单状态，状态只在单头字段里
+    assert.match(html, /<div class="sub">共 2 项商品<\/div>/)
+    assert.doesNotMatch(html, /<div class="sub">[^<]*未过账/)
+    assert.match(html, /状态：<\/b>未过账/)
     assert.match(html, /业务单号：<\/b>HT-2026-001/)
     assert.match(html, /原价合计：<\/b>¥25\.00（单项折扣 -¥2\.00）/)
     assert.match(html, /整单折扣：<\/b>×0\.95（减 ¥1\.15）/)

@@ -238,9 +238,8 @@ const exportColumns = computed(() => {
 })
 
 // 隐藏金额（对外）打印不显示内部状态，第二行只留商品项数
-const docSubtitle = computed(() => (priceHidden.value
-  ? `共 ${detailItems.value.length} 项商品`
-  : `共 ${detailItems.value.length} 项商品 · ${orderStatusText(order.value.status)}`))
+// 打印副标题只报商品项数：订单状态属于内部信息，不印在副标题上（单头仍保留「状态」字段）
+const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品`)
 const docHeaderFields = computed(() => {
   const fields = [
     ['订单号', order.value.id],

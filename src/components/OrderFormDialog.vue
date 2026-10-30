@@ -43,7 +43,7 @@
         <div class="calc-hint">订单只能选商品库里已有的商品；新品请先到商品档案新增</div>
       </el-form-item>
       <div class="lines-scroll">
-        <el-table :data="form.lines" stripe max-height="320">
+        <el-table ref="linesTable" :data="form.lines" stripe max-height="320">
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select v-model="row.code" filterable placeholder="选择商品" style="width:100%" @change="onItemChange(row)">
@@ -124,6 +124,7 @@ import { round2, discountRatesTextOf } from '../utils/account.js'
 import { normalizeRate } from '../utils/catalog.js'
 import { orderAmount, orderDepositSum, validateOrder, isUnposted, DRAFT } from '../utils/orders.js'
 import { todayCN } from '../utils/time.js'
+import { askDuplicateItem, flashTableRow } from '../utils/duplicateItem.js'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -140,6 +141,7 @@ const visible = computed({ get: () => props.modelValue, set: (v) => emit('update
 const photoUpload = ref(null)
 const photoKey = ref(0)
 const quickItem = ref('')
+const linesTable = ref(null)
 const emitting = ref(false)
 const editingId = ref('')
 const posted = ref(false)
@@ -234,10 +236,18 @@ function onItemChange(row) {
   // 采购带进价、销售带售价（订单价格仍可手改）；换商品不动行折扣，用户自己改过的折扣不丢
   row.price = Number(isPurchase.value ? (found.cost || found.price || 0) : (found.price || 0))
 }
-function addQuickItem(val) {
+async function addQuickItem(val) {
   if (!val) return
   const found = (props.items || []).find(i => i.code === val)
   if (!found) return ElMessage.warning('订单只能选商品库里已有的商品')
+  // 同一商品已经在本单明细里：先问是定位过去还是确实要再添加一行
+  const dup = form.lines.findIndex(l => l.code === found.code)
+  if (dup >= 0) {
+    const choice = await askDuplicateItem({ name: found.name, index: dup })
+    quickItem.value = ''
+    if (choice === 'locate') return flashTableRow(linesTable, dup)
+    if (choice !== 'add') return
+  }
   const line = { code: found.code, name: found.name, qty: 1, discountRate: 1, price: Number(isPurchase.value ? (found.cost || found.price || 0) : (found.price || 0)) }
   const blank = form.lines.findIndex(l => !l.code && !l.name && !(Number(l.qty) > 1) && !(Number(l.price) > 0))
   if (blank >= 0) form.lines.splice(blank, 1, line)
@@ -278,6 +288,12 @@ async function save() {
 .deposit-list{width:100%;color:var(--text-regular);font-size:var(--fs-table);}
 .deposit-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;}
 .deposit-total{margin-top:4px;color:var(--text-secondary);font-size:var(--fs-sub);}
+/* 定位重复商品：蓝色外框闪两下（只作用于该行单元格，不改变表格布局） */
+:deep(tr.locate-flash > td){animation:locate-flash 1.6s ease-in-out 1;}
+@keyframes locate-flash{
+  0%,20%,40%,60%,80%,100%{box-shadow:inset 0 0 0 0 rgba(64,158,255,0);background:transparent;}
+  10%,30%,50%,70%{box-shadow:inset 0 0 0 2px #409eff;background:rgba(64,158,255,.14);}
+}
 @media (max-width: 768px){
   .lines-scroll :deep(.el-table .cell){padding-left:5px;padding-right:5px;}
 }
