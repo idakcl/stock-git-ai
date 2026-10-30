@@ -367,9 +367,13 @@ await t('菜单：应付排在应收上方，两颗角标都与文字同一行',
       const span = [...n.querySelectorAll('span')].find(x => !x.classList.contains('menu-badge'))
       const badge = n.querySelector('.menu-badge')
       const sr = span && span.getBoundingClientRect(), br = badge && badge.getBoundingClientRect()
+      // 文字实际墨迹的右边界（span 是行内盒，宽度含不到的空隙会骗过间距判断）
+      let textRight = null
+      if (span) { const range = document.createRange(); range.selectNodeContents(span); textRight = range.getBoundingClientRect().right }
       return { text: (span ? span.textContent : n.textContent).trim(), spanMid: sr && sr.top + sr.height / 2,
         badgeMid: br && br.top + br.height / 2, badgeTop: br && br.top, badgeBottom: br && br.bottom,
-        itemTop: item.top, itemBottom: item.bottom, badgeRight: br && br.right, itemRight: item.right }
+        textRight, badgeLeft: br && br.left, badgeRight: br && br.right,
+        itemTop: item.top, itemBottom: item.bottom, itemRight: item.right }
     }))
     const order = rows.map(r => r.text)
     const payableAt = order.indexOf('应付款管理'), receivableAt = order.indexOf('应收款管理')
@@ -381,6 +385,7 @@ await t('菜单：应付排在应收上方，两颗角标都与文字同一行',
       assert.ok(Math.abs(r.badgeMid - r.spanMid) <= 1.5, `${name} 角标应与文字中线对齐：偏差 ${(r.badgeMid - r.spanMid).toFixed(1)}px`)
       assert.ok(r.badgeTop >= r.itemTop && r.badgeBottom <= r.itemBottom, `${name} 角标不得越出菜单项上下沿`)
       assert.ok(r.badgeRight <= r.itemRight && r.badgeRight > r.itemRight - 40, `${name} 角标应靠右且留在菜单项内`)
+      assert.ok(r.badgeLeft - r.textRight >= 6, `${name} 角标与文字至少留 6px 间距：${(r.badgeLeft - r.textRight).toFixed(1)}px`)
     }
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }

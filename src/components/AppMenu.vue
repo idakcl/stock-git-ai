@@ -142,7 +142,10 @@ onMounted(async () => {
   margin: 2px 8px;
   border-radius: 6px;
 }
-.menu :deep(.el-sub-menu .el-menu-item) { padding-left: 44px !important; }
+/* 资金子项：左边缩进留给图标、右边收紧内边距——「应付款管理」这种五字标签加上角标后
+   几乎占满抽屉菜单的可用宽度，右边留 20px 会把文字和角标挤到一起（间距 0px）。
+   左边 30 + 右边 12 后，手机抽屉里还有 ~9px 空隙，图标也比上一级略深、层级看得出来。 */
+.menu :deep(.el-sub-menu .el-menu-item) { padding-left: 30px !important; padding-right: 12px !important; }
 /* 菜单角标：原先用 el-badge，但它是「默认插槽 + 绝对定位的 sup」结构——这里没有插槽内容，
    el-badge 本体就是个零高度盒子，sup 相对它 top:0 + translateY(-50%) 定位，在 flex 菜单项里
    会掉到文字下沿（手机上 3 颗像素的偏移就被看成一整行）。改成自己画一颗胶囊：
