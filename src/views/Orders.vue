@@ -37,13 +37,14 @@
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
         <el-button :disabled="loading" @click="load">刷新</el-button>
       </div>
-      <TableToolbar filename="订单" title="订单" :subtitle="subtitle" :columns="exportColumns" :rows="filtered" />
+      <TableToolbar filename="订单" title="订单" :subtitle="subtitle" :columns="exportColumns" :rows="paged" />
       <div class="table-wrap">
         <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
-          <el-table-column label="订单号" width="200" class-name="id-col">
+          <el-table-column label="订单号" width="210" class-name="id-col">
             <template #default="{ row }">
               <span class="link" @click="openEdit(row)">{{ row.id }}</span>
               <span v-if="depositSumOf(row) > 0" class="dep-flag" :title="`已收订金 ¥${depositSumOf(row).toFixed(2)}`">订</span>
+              <div v-if="row.no && row.no !== row.id" class="biz-no" :title="row.no">业务单号 {{ row.no }}</div>
             </template>
           </el-table-column>
           <el-table-column label="类型" width="90">
@@ -78,13 +79,15 @@
               <router-link v-if="row.postedOrderId" :to="`${row.kind === 'purchase' ? '/purchase/' : '/sale/'}${row.postedOrderId}`" class="link posted-link">{{ row.postedOrderId }}</router-link>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="380" class-name="ops-col">
+          <el-table-column label="操作" width="470" class-name="ops-col">
             <template #default="{ row }">
               <el-button size="small" type="primary" :disabled="row.status === POSTED" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="success" :disabled="row.status === POSTED" @click="openDeposit(row)">收订金</el-button>
               <el-button size="small" type="warning" :disabled="row.status === POSTED || busy" @click="post(row)">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
+              <el-button size="small" plain @click="printOrder(row)">打印</el-button>
+              <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -135,8 +138,9 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { lineDisplayName, itemNameMap } from '../utils/catalog'
-import { round2 } from '../utils/account'
+import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
+import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
+import { downloadCSV, printA4 } from '../utils/export'
 import { orderAmount, orderDepositSum, DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
@@ -179,7 +183,7 @@ const filtered = computed(() => list.value
     if (kind.value !== 'all' && row.kind !== kind.value) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
-    if (!matchText(keyword.value, row.id, partyOf(row), row.date, orderTimeOf(row), row.remark,
+    if (!matchText(keyword.value, row.id, row.no, partyOf(row), row.date, orderTimeOf(row), row.remark,
       ...itemNamesOf(row), ...(row.items || []).map(i => i.code))) return false
     return true
   })
@@ -209,6 +213,7 @@ const subtitle = computed(() => {
 })
 const exportColumns = [
   { label: '订单号', prop: 'id' },
+  { label: '业务单号', value: r => r.no || '' },
   { label: '类型', value: r => (r.kind === 'purchase' ? '采购' : '销售') },
   { label: '往来单位', value: r => partyOf(r) },
   { label: '时间', value: r => orderTimeOf(r) },
@@ -219,6 +224,67 @@ const exportColumns = [
   { label: '过账单号', prop: 'postedOrderId' },
   { label: '备注', prop: 'remark' }
 ]
+
+// ---- 单张订单打印 / 导出 ----
+// 行金额与订单弹窗、正式单据同一口径：原价＝数量×单价，折后＝原价×(1−折扣率)
+const lineGross = (l) => round2(Number(l.qty || 0) * Number(l.price || 0))
+const lineRate = (l) => normalizeRate(l, lineGross(l))
+const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
+const lineTotal = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
+const linesGrossTotal = (row) => round2((row.items || []).reduce((s, l) => s + lineGross(l), 0))
+const linesNetTotal = (row) => round2((row.items || []).reduce((s, l) => s + lineTotal(l), 0))
+const linesDiscountTotal = (row) => round2((row.items || []).reduce((s, l) => s + lineDiscount(l), 0))
+const orderRateDiscount = (row) => Math.max(0, round2(linesNetTotal(row) * (1 - effectiveRateOf(row))))
+const owedOf = (row) => Math.max(0, round2(orderAmount(row) - depositSumOf(row)))
+
+// 单张订单的明细列：订单行没有单位/备注，只打真实的字段
+const orderLineColumns = [
+  { label: '编码', prop: 'code' },
+  { label: '名称', value: r => lineDisplayName(r, nameMap.value) },
+  { label: '数量', value: r => Number(r.qty || 0) },
+  { label: '单价', value: r => Number(r.price || 0).toFixed(2) },
+  { label: '折扣率', value: r => lineRate(r).toFixed(2) },
+  { label: '折扣金额', value: r => lineDiscount(r).toFixed(2) },
+  { label: '折后金额', value: r => lineTotal(r).toFixed(2) }
+]
+
+// 单头信息：与屏幕上的口径一致；业务单号单独一行，打印出去能对上客户/供应商那边的单号
+const orderHeaderFields = (row) => {
+  const fields = [
+    ['订单号', row.id],
+    ['业务单号', row.no && row.no !== row.id ? row.no : '—'],
+    [row.kind === 'purchase' ? '供应商' : '客户', partyOf(row) || '—'],
+    ['日期', row.date],
+    ['状态', row.status]
+  ]
+  if (row.postedOrderId) fields.push(['关联单据', row.postedOrderId])
+  if (linesDiscountTotal(row) > 0) {
+    fields.push(['原价合计', `¥${linesGrossTotal(row).toFixed(2)}（单项折扣 -¥${linesDiscountTotal(row).toFixed(2)}）`])
+  }
+  if (discountRatesTextOf(row)) fields.push(['整单折扣', `${discountRatesTextOf(row)}（减 ¥${orderRateDiscount(row).toFixed(2)}）`])
+  if (Number(row.discount || 0) > 0) fields.push(['整单优惠', `¥${Number(row.discount).toFixed(2)}`])
+  fields.push(
+    ['订单金额', `¥${orderAmount(row).toFixed(2)}`],
+    ['已收订金', `¥${depositSumOf(row).toFixed(2)}`],
+    [row.kind === 'purchase' ? '未付' : '未收', `¥${owedOf(row).toFixed(2)}`],
+    ['备注', row.remark || '—']
+  )
+  return fields
+}
+
+function exportOrderCsv(row) {
+  const items = row.items || []
+  if (!items.length) return ElMessage.warning('该订单没有商品明细')
+  downloadCSV(`${row.kind === 'purchase' ? '采购' : '销售'}订单-${row.id}.csv`, orderLineColumns, items, orderHeaderFields(row))
+  ElMessage.success(`已导出 ${items.length} 行`)
+}
+
+function printOrder(row) {
+  const items = row.items || []
+  if (!items.length) return ElMessage.warning('该订单没有商品明细')
+  const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
+  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品 · ${row.status}`, orderHeaderFields(row))
+}
 
 async function load() {
   loading.value = true
@@ -347,6 +413,8 @@ onMounted(load)
 .item-codes{color:var(--text-secondary);}
 .calc-hint{color:var(--text-secondary);font-size:var(--fs-sub);}
 .posted-link{margin-left:8px;font-size:var(--fs-sub);}
+/* 业务单号放在订单号下方一行，不额外占一列宽度 */
+.biz-no{margin-top:2px;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 /* 订金角标：与补差单徽章同款小尺寸，列表里一眼看出这张订单已经收过钱 */
 .dep-flag{display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;background:var(--color-success);color:#fff;font-size:11px;line-height:16px;vertical-align:middle;}
 </style>
