@@ -110,12 +110,13 @@ export function customSpec(width, height, rowsPerPage = 0) {
 }
 
 /**
- * 解析纸张：paper 来自页面按钮（'A4' / 'A5'），用户可在「打印设置」里改成纵向或自定义纸张。
- * 自定义纸优先（此时 A4/A5 按钮不再区分）；每页行数手动填了就用它，否则按纸高自动推算。
+ * 解析纸张：页面上只有一个「打印」按钮，纸张统一来自「打印设置」（A4 / A5 / 自定义 + 横纵向）。
+ * paper 参数只是给脚本类调用留的覆盖口（打印入口都不再传它）。
+ * 自定义纸优先（此时 A4/A5 与方向都不参与）；每页行数手动填了就用它，否则按纸高自动推算。
  */
 export const paperSpec = (paper) => {
   const cfg = paperPref || {}
-  const preset = PAPER_SPECS[String(paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
+  const preset = PAPER_SPECS[String(paper || cfg.paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
   let spec = preset
   if (cfg.mode === 'custom') {
     // 自定义：宽高即最终出纸方向（宽 < 高＝纵向），不再额外换算
@@ -336,7 +337,7 @@ function openPrintWindow(html, title) {
  * 每一节单独占一页（批量打印多张订单详情用）；paper='A4' | 'A5'；
  * repeatHeader=false 时明细不切片、表头只在每张单据第一页出现一次。
  */
-export function printA4Sections(sections, docTitle = '', paper = 'A4', repeatHeader = true) {
+export function printA4Sections(sections, docTitle = '', paper = '', repeatHeader = true) {
   const list = (sections || []).filter(Boolean)
   if (!list.length) return
   openPrintWindow(buildPrintHtml({ sections: list, docTitle, paper, repeatHeader }), docTitle || list[0].title || '打印')
@@ -344,10 +345,10 @@ export function printA4Sections(sections, docTitle = '', paper = 'A4', repeatHea
 
 /**
  * 打开排版好的新窗口并调用打印；headerFields 为单头信息 [[标签,值],...]，footerFields 打印在明细表下方。
- * paper：'A4'（默认）或 'A5'；函数名保留 printA4 是历史叫法，实际纸张由参数决定。
+ * paper：不传就用「打印设置」里的纸张（A4 / A5 / 自定义 + 横纵向）；函数名保留 printA4 是历史叫法。
  * repeatHeader：默认 true（每页都重复商品表头）；false＝整份明细一张连续大表，表头只印一次。
  */
-export function printA4(title, columns, rows, subtitle = '', headerFields = [], footerFields = [], paper = 'A4', repeatHeader = true) {
+export function printA4(title, columns, rows, subtitle = '', headerFields = [], footerFields = [], paper = '', repeatHeader = true) {
   openPrintWindow(
     buildPrintHtml({ title, subtitle, headerFields, columns, rows, footerFields, paper, repeatHeader }),
     title

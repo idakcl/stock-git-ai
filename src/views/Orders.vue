@@ -1,7 +1,7 @@
 <template>
   <div>
-    <!-- 新页面开单（/orders/new）：同一份列表组件只留订单表单，过账、订金、状态迁移
-         等链路仍走这里的 api.orderOperation，不另写第二套开单页 -->
+    <!-- 整页开单（/orders/new，按钮已去掉，仅保留路由供书签/外链直接打开）：
+         同一份列表组件只留订单表单，过账、订金、状态迁移等链路仍走这里 -->
     <el-card v-if="!entry" v-loading="loading">
       <template #header>
         <div class="card-header">
@@ -15,7 +15,6 @@
             </el-button>
             <el-button @click="openTemplatePicker">从模板导入</el-button>
             <el-button type="primary" @click="openCreate">新建订单</el-button>
-            <el-button @click="openEntryPage">新页面开单</el-button>
           </div>
         </div>
       </template>
@@ -44,8 +43,8 @@
       </div>
       <!-- 勾选后批量操作：打印列表 / 打印详情（可直接打印或隐藏金额）/ 批量删除 -->
       <div class="export-bar">
-        <el-button size="small" :disabled="!selected.length" @click="printSelectedList('A4')">打印勾选订单列表</el-button>
-        <el-button size="small" :disabled="!selected.length" @click="printSelectedList('A5')">打印勾选订单列表(A5)</el-button>
+        <!-- 纸张只有一个来源：「打印设置」，所以这里也只剩一个打印按钮 -->
+        <el-button size="small" :disabled="!selected.length" @click="printSelectedList()">打印勾选订单列表</el-button>
         <el-button size="small" :disabled="!selected.length" @click="openDetailPrint">打印勾选订单详情页</el-button>
         <el-button size="small" :disabled="!paged.length" @click="exportPageCsv">导出CSV（当前页）</el-button>
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
@@ -106,8 +105,7 @@
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
               <el-button size="small" plain @click="openRemark(row)">备注</el-button>
-              <el-button size="small" plain @click="printOrder(row, 'A4')">打印</el-button>
-              <el-button size="small" plain @click="printOrder(row, 'A5')">打印(A5)</el-button>
+              <el-button size="small" plain @click="printOrder(row)">打印</el-button>
               <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>
             </template>
           </el-table-column>
@@ -168,14 +166,8 @@
     <el-dialog v-model="detailPrintDialog" title="打印勾选订单详情页" width="420" :close-on-click-modal="false">
       <div class="print-choice">
         <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独起一页{{ repeatHeaderPref ? '（明细超过一页时自动续页并重复表头）' : '（明细不切片，商品表头只印在每张单据的第一页）' }}。</p>
-        <!-- 纸张在这里选一次，两个打印按钮共用：批量打印时没人想为同一批单点两遍 -->
+        <!-- 纸张与跨页表头都来自「打印设置」（全局同一份偏好），这里只留打印动作 -->
         <div class="print-paper">
-          <span class="filter-label">纸张</span>
-          <el-radio-group v-model="printPaper">
-            <el-radio-button value="A4">A4</el-radio-button>
-            <el-radio-button value="A5">A5</el-radio-button>
-          </el-radio-group>
-          <!-- 与工具栏那个开关是同一个全局偏好，这里改一下两边一起变 -->
           <PrintHeaderToggle />
         </div>
         <el-button type="primary" class="print-btn" @click="printSelectedDetails(false)">直接打印</el-button>
@@ -262,7 +254,7 @@ const dateEnd = ref('')
 const page = ref(1)
 const dialog = ref(false)
 // 整页开单（/orders/new）：隐藏列表、订单表单铺满屏幕；保存仍走本页的 orderOperation，不另写开单页
-const { entry, openEntryPage, backToList } = useEntryMode('/orders')
+const { entry, backToList } = useEntryMode('/orders')
 const editingOrder = ref(null)
 const depositDialog = ref(false)
 const depositOrder = ref(null)
@@ -271,7 +263,6 @@ const tableRef = ref(null)
 const selected = ref([])
 const detailPrintDialog = ref(false)
 // 批量打印详情页的纸张：选一次，直接打印 / 隐藏金额打印都用它
-const printPaper = ref('A4')
 // 从模板导入：模板列表按需拉一次（打开选择框时才请求，不拖慢订单列表首屏）
 const templatePicker = ref(false)
 const templates = ref([])
@@ -420,11 +411,11 @@ function exportOrderCsv(row) {
   ElMessage.success(`已导出 ${items.length} 行`)
 }
 
-function printOrder(row, paper = 'A4') {
+function printOrder(row) {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row), [], paper, repeatHeaderPref.value)
+  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row), [], '', repeatHeaderPref.value)
 }
 
 // ---- 勾选后的批量操作 ----
@@ -439,11 +430,11 @@ function exportPageCsv() {
   ElMessage.success(`已导出当前页 ${paged.value.length} 行`)
 }
 
-function printSelectedList(paper = 'A4') {
+function printSelectedList() {
   const rows = selectedSorted.value
   if (!rows.length) return ElMessage.warning('请先勾选订单')
   const total = round2(rows.reduce((s, r) => s + orderAmount(r), 0))
-  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`, [], [], paper, repeatHeaderPref.value)
+  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`, [], [], '', repeatHeaderPref.value)
 }
 
 function openDetailPrint() {
@@ -485,7 +476,7 @@ function printSelectedDetails(masked) {
     }
   })
   detailPrintDialog.value = false
-  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', printPaper.value, repeatHeaderPref.value)
+  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', '', repeatHeaderPref.value)
 }
 
 // 批量删除：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量
@@ -594,7 +585,7 @@ function importTemplate(tpl) {
   dialog.value = true
 }
 
-// 整页开单的进出：列表页点「新页面开单」时组件实例被复用，靠 watch(entry) 打开表单；
+// 整页开单的进出：直接打开 /orders/new 时组件实例被复用，靠 watch(entry) 打开表单；
 // 直接访问 /orders/new 走 onMounted（数据取齐后再开）；表单一关就回列表。
 // 注意不能把自动开窗放进 load()：保存成功后也会 load()，那时路由还在切回列表，
 // 会把刚存完的页面又顶开一张空表单。

@@ -76,7 +76,7 @@ const captureBlob = (page) => page.evaluate(() => {
 
 async function printAndCsv(page) {
   await capturePrint(page)
-  await page.getByRole('button', { name: '打印(A4)' }).click()
+  await page.getByRole('button', { name: '打印' }).click()
   await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
   const html = await page.evaluate(() => window.__printed)
   await captureBlob(page)

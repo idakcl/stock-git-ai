@@ -1,4 +1,4 @@
-// 新页面开单（需求：新增销售/采购/订单时，增加一个按钮，在新的页面打开）
+// 整页开单（/xxx/new 直达；列表页上的「新页面开单」按钮已按需求去掉）
 // 跑法：先起 dev server（npx vite --port 5173 --strictPort --host 127.0.0.1），再 node tests/entry-page-browser-test.mjs
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
@@ -85,7 +85,7 @@ async function waitFormGone(page) {
   await page.locator('.el-dialog:visible').first().waitFor({ state: 'detached', timeout: 5000 })
 }
 
-// 「新页面开单」必须是真·新开浏览器标签页（window.open）：那部分由 tests/entry-newtab-browser-test.mjs 覆盖，
+// 按钮入口已去掉，路由本身仍保留：/xxx/new 直达与出口文案由本文件和 tests/entry-newtab-browser-test.mjs 覆盖，
 // 本文件只管整页表单自身：/xxx/new 直达、表单继承、保存链路、出口文案。
 console.log('\n销售单：整页开单（/sales/new）')
 

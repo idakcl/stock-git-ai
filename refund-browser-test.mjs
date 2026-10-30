@@ -59,6 +59,13 @@ try {
     if (mode === 'deposit') assert.equal(state.customers[0].deposits[0].amount, 18)
     console.log(`PASS 浏览器创建 ${mode}`)
   }
+  // 退货原因非必填：留空不拦，服务端落库记「无」
+  state = fixture(); posts = []; failure = null
+  await begin()
+  await formItem('退货原因').locator('input').fill('')
+  await save(); await dialog.waitFor({ state: 'hidden' })
+  assert.equal(posts[0].reason, ''); assert.equal(state.sales[1].returnReason, '无')
+  console.log('PASS 退货原因留空：保存成功且落库记「无」')
   state = fixture(); posts = []; failure = null
   for (let i = 0; i < 2; i++) {
     await begin(); await setMode('先退货，暂不退款'); await save(); await dialog.waitFor({ state: 'hidden' })

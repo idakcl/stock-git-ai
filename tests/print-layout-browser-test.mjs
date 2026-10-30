@@ -12,6 +12,15 @@ import cp from 'node:child_process'
 const { chromium } = createRequire(import.meta.url)('playwright')
 // 纯函数直接 import：版面参数（字号、每页行数、分片算法）不依赖浏览器，能在 node 里算清楚
 import { buildPrintHtml, pageCapacities, paperSpec, columnWidths, PAPER_SPECS } from '../src/utils/export.js'
+import { paperPref } from '../src/utils/printPrefs.js'
+
+// 本文件验证的是「A4 横向」这套版面（40 行/页）以及跨页表头。
+// 产品默认已改成 A4 纵向，所以这里显式把方向定成横向；A4 纵向 / 自定义纸张由
+// tests/print-paper-browser-test.mjs 覆盖，两边口径分开，不互相牵连。
+paperPref.mode = 'preset'
+paperPref.paper = 'A4'
+paperPref.orientation = 'landscape'
+paperPref.rowsPerPage = 0
 
 const line = (code, name, qty, price, discountRate = 1) => ({
   code, name, qty, price, discountRate,
@@ -56,9 +65,17 @@ const t = async (name, fn) => {
   catch (e) { fail++; console.log('  ✗ ' + name + '\n      ' + (e.message || e).split('\n').join('\n      ')) }
 }
 
-async function open(path, state = {}) {
+async function open(path, state = {}, opts = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   await context.addInitScript(() => sessionStorage.setItem('stock.auth.token', 'isolated-test'))
+  // 本文件的历史断言都按「A4 横向、40 行/页」写的；产品默认已改成 A4 纵向，
+  // 需要横向的用例显式把纸张偏好预置进 localStorage，跟页面里的打印设置是同一份数据
+  if (opts.paper) {
+    const paper = JSON.stringify(opts.paper)
+    await context.addInitScript((p) => {
+      if (!localStorage.getItem('stock.print.paper')) localStorage.setItem('stock.print.paper', p)
+    }, paper)
+  }
   await context.route('**/api/**', async route => {
     const request = route.request(), pathname = new URL(request.url()).pathname
     // 必须放行 vite 的 /src/api/*.js 模块，否则会被 fulfill 成 JSON 导致白屏
@@ -89,6 +106,8 @@ const capturePrint = (page) => page.evaluate(() => {
   }
 })
 const printed = async (page, trigger) => {
+  // 每次都先清空：否则第二次打印会立刻读到上一次的 HTML，断言就成了摆设
+  await page.evaluate(() => { window.__printed = null })
   await trigger.click()
   await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
   return page.evaluate(() => window.__printed)
@@ -178,14 +197,16 @@ await t('分片后每片都自带表头，序号跨片接续', () => {
 console.log('\n真机打印（Chromium 分页引擎）：每片＝一张纸，每页都有表头')
 
 const docCases = [
-  { name: '销售单', path: `/sale/${SALE_ID}`, state: () => seed({ sales: [saleDoc(140)] }), button: '打印(A4)' },
-  { name: '采购单', path: `/purchase/${PURCHASE_ID}`, state: () => seed({ purchases: [purchaseDoc(140)] }), button: '打印(A4)' },
-  { name: '订单', path: `/order/${ORDER_ID}`, state: () => seed({ orders: [orderDoc(140)] }), button: '打印(A4)' }
+  { name: '销售单', path: `/sale/${SALE_ID}`, state: () => seed({ sales: [saleDoc(140)] }), button: '打印' },
+  { name: '采购单', path: `/purchase/${PURCHASE_ID}`, state: () => seed({ purchases: [purchaseDoc(140)] }), button: '打印' },
+  { name: '订单', path: `/order/${ORDER_ID}`, state: () => seed({ orders: [orderDoc(140)] }), button: '打印' }
 ]
+
+const LANDSCAPE_A4 = { mode: 'preset', paper: 'A4', orientation: 'landscape', width: 210, height: 297, rowsPerPage: 0 }
 
 for (const c of docCases) {
   await t(`${c.name}：140 行明细 → PDF 页数＝分片数，且每页都有「序号」表头行`, async () => {
-    const { page, context, errors } = await open(c.path, c.state())
+    const { page, context, errors } = await open(c.path, c.state(), { paper: LANDSCAPE_A4 })
     try {
       await capturePrint(page)
       const html = await printed(page, page.getByRole('button', { name: c.button }))
@@ -219,12 +240,17 @@ for (const c of docCases) {
   })
 }
 
-await t('销售单：打印(A5) 按钮走 A5 版面，页数与分片数一致且每页带表头', async () => {
+await t('销售单：打印设置选 A5 后走 A5 版面，页数与分片数一致且每页带表头', async () => {
   const { page, context } = await open(`/sale/${SALE_ID}`, seed({ sales: [saleDoc(140)] }))
   try {
+    // 纸张统一在「打印设置」里选：点开面板切到 A5，再切横向（默认是纵向）
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.locator('.el-popover:visible').getByText('横向', { exact: true }).click()
+    await page.keyboard.press('Escape')
     await capturePrint(page)
-    const html = await printed(page, page.getByRole('button', { name: '打印(A5)' }))
-    assert.match(html, /@page \{ size: A5 landscape/, 'A5 按钮必须打 A5 纸')
+    const html = await printed(page, page.getByRole('button', { name: '打印' }))
+    assert.match(html, /@page \{ size: A5 landscape/, '打印设置选 A5 后必须打 A5 纸')
     const chunks = (html.match(/<table class="pg/g) || []).length
     // A5 每页约 28 行，首页再扣单头预留；140 行至少切 5 片，且能整除到片内
     const caps = (html.match(/<table class="pg[^"]*"[\s\S]*?<\/table>/g) || [])
@@ -240,54 +266,72 @@ await t('销售单：打印(A5) 按钮走 A5 版面，页数与分片数一致�
   } finally { await context.close() }
 })
 
-await t('订单列表页：每行都有「打印(A5)」入口', async () => {
+await t('订单列表页：每行只有一个「打印」入口（纸张统一走打印设置）', async () => {
   const { page, context } = await open('/orders', seed({ orders: [orderDoc(2)] }))
   try {
     const row = page.locator('.el-table__row', { hasText: ORDER_ID }).first()
     await row.waitFor({ timeout: 5000 })
-    await expectAllVisible(row, ['打印', '打印(A5)'])
+    await expectAllVisible(row, ['打印'])
+    const labels = await row.getByRole('button').allInnerTexts()
+    assert.ok(!labels.some(t => /打印\(/.test(t)), `行内不应再有 打印(A4)/打印(A5)：${labels.join('|')}`)
   } finally { await context.close() }
 })
 
-await t('订单列表页：批量打印详情页可选 A5', async () => {
+await t('订单列表页：批量打印详情的纸张也跟着打印设置（弹窗里不再重复选）', async () => {
   const { page, context } = await open('/orders', seed({ orders: [orderDoc(2)] }))
   try {
     const row = page.locator('.el-table__row', { hasText: ORDER_ID }).first()
     await row.waitFor({ timeout: 5000 })
     await row.locator('.el-table-column--selection .el-checkbox').click()
+    // 先把纸张切成 A5（唯一的纸张来源）
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.keyboard.press('Escape')
     await page.getByRole('button', { name: '打印勾选订单详情页' }).click()
     const dialog = page.locator('.el-dialog', { hasText: '打印勾选订单详情页' })
     await dialog.waitFor({ state: 'visible' })
-    await dialog.locator('.el-radio-button__inner', { hasText: 'A5' }).click()
+    assert.equal(await dialog.locator('.el-radio-button__inner', { hasText: 'A5' }).count(), 0, '弹窗里不应再有 A4/A5 纸张选择')
     await capturePrint(page)
     await dialog.getByRole('button', { name: '直接打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
-    assert.match(html, /@page \{ size: A5 landscape/, '选了 A5 就必须按 A5 排')
+    assert.match(html, /@page \{ size: A5 portrait/, '设置里选了 A5 就必须按 A5 排（默认纵向）')
   } finally { await context.close() }
 })
 
-await t('订单列表页：单行打印(A5) 出的确实是 A5 版面', async () => {
+await t('订单列表页：设置成 A5 后单行打印确实是 A5 版面', async () => {
   const { page, context } = await open('/orders', seed({ orders: [orderDoc(2)] }))
   try {
     const row = page.locator('.el-table__row', { hasText: ORDER_ID }).first()
     await row.waitFor({ timeout: 5000 })
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.keyboard.press('Escape')
     await capturePrint(page)
-    const html = await printed(page, row.getByRole('button', { name: '打印(A5)' }))
-    assert.match(html, /@page \{ size: A5 landscape/)
+    const html = await printed(page, row.getByRole('button', { name: '打印' }))
+    assert.match(html, /@page \{ size: A5 portrait/, '设置里选了 A5 就按 A5 纵向出纸')
     assert.match(html, /font-size: 9\.5px/)
   } finally { await context.close() }
 })
 
-await t('列表类打印（TableToolbar）也提供 A5 入口', async () => {
+await t('列表类打印（TableToolbar）只有一个「打印」，纸张跟设置走', async () => {
   const { page, context } = await open('/items', seed())
   try {
-    const btn = page.getByRole('button', { name: '打印(A5)' })
+    const btn = page.getByRole('button', { name: '打印' })
     await btn.waitFor({ timeout: 5000 })
-    assert.ok(await btn.isVisible(), '商品列表应有「打印(A5)」按钮')
+    assert.ok(await btn.isVisible(), '商品列表应有「打印」按钮')
+    const labels = await page.locator('.export-bar button').allInnerTexts()
+    assert.ok(!labels.some(t => /打印\(/.test(t)), `工具栏不应再有 打印(A4)/打印(A5)：${labels.join('|')}`)
+    // 默认 A4 纵向；切成 A5 后同一按钮打 A5
     await capturePrint(page)
-    const html = await printed(page, btn)
-    assert.match(html, /@page \{ size: A5 landscape/)
+    let html = await printed(page, btn)
+    assert.match(html, /@page \{ size: A4 portrait/)
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.keyboard.press('Escape')
+    await capturePrint(page)
+    html = await printed(page, page.getByRole('button', { name: '打印' }))
+    assert.match(html, /@page \{ size: A5/)
   } finally { await context.close() }
 })
 
@@ -297,7 +341,7 @@ await t('订单详情打印：订单金额用 xl（1.2 倍）而不是 24px', as
   const { page, context } = await open(`/order/${ORDER_ID}`, seed({ orders: [orderDoc(2)] }))
   try {
     await capturePrint(page)
-    const html = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
+    const html = await printed(page, page.getByRole('button', { name: '打印' }))
     assert.match(html, /class="f xl"><b>订单金额：/, '订单金额应带 xl 样式')
     assert.match(html, /\.fields \.f\.xl \{ font-size: 13\.2px/, 'xl 应为正文 1.2 倍')
   } finally { await context.close() }
@@ -398,13 +442,18 @@ await t('列表页工具栏：取消「跨页表头」后打印只有一份表�
     assert.equal(await cb.count(), 1, '工具栏要有「跨页表头」开关')
     assert.match((await cb.first().getAttribute('class')) || '', /is-checked/, '默认开启')
     await capturePrint(page)
-    const on4 = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
-    // 商品库列表按 60 行分页，工具栏打的是「当前页」→ 60 行切成 34 + 26 两片
-    assert.ok((on4.match(/<thead>/g) || []).length >= 2, '默认应切片重复表头')
+    const on4 = await printed(page, page.getByRole('button', { name: '打印' }))
+    // 默认 A4 纵向；商品库按 60 行分页，工具栏打「当前页」→ 60 行在纵向 A4 上一页装得下
+    assert.match(on4, /@page \{ size: A4 portrait/, '未设置时默认 A4 纵向')
     await cb.first().click()
-    const off4 = await printed(page, page.getByRole('button', { name: '打印(A4)' }))
+    const off4 = await printed(page, page.getByRole('button', { name: '打印' }))
     assert.equal((off4.match(/<thead>/g) || []).length, 1, '取消后表头只有一份')
-    const off5 = await printed(page, page.getByRole('button', { name: '打印(A5)' }))
+    // 切到 A5 横向：60 行会切成多片，关闭开关后仍只有一份表头
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.locator('.el-popover:visible').getByText('横向', { exact: true }).click()
+    await page.keyboard.press('Escape')
+    const off5 = await printed(page, page.getByRole('button', { name: '打印' }))
     assert.match(off5, /@page \{ size: A5 landscape/, '开关对 A5 同样生效')
     assert.equal((off5.match(/<thead>/g) || []).length, 1, 'A5 取消后也只有一份表头')
     // 偏好要能被记住（同一浏览器换页面不用再点一遍）

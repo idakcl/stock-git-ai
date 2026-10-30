@@ -11,7 +11,7 @@
         <div class="actions">
           <el-button :loading="loading" @click="load">刷新</el-button>
           <el-button type="primary" @click="openCreate">新建模板</el-button>
-          <!-- 行上的 打印 / 打印(A5) / 空表 / 空表(A5) 共用这一个跨页表头开关 -->
+          <!-- 行上的 打印 / 空表 与全站其它打印共用这一份纸张与跨页表头设置 -->
           <PrintHeaderToggle />
         </div>
       </div>
@@ -41,10 +41,8 @@
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="openConvert(row)">转订单</el-button>
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" plain @click="printTemplate(row, false, 'A4')">打印</el-button>
-          <el-button size="small" plain @click="printTemplate(row, false, 'A5')">打印(A5)</el-button>
-          <el-button size="small" plain @click="printTemplate(row, true, 'A4')">空表</el-button>
-          <el-button size="small" plain @click="printTemplate(row, true, 'A5')">空表(A5)</el-button>
+          <el-button size="small" plain @click="printTemplate(row, false)">打印</el-button>
+          <el-button size="small" plain @click="printTemplate(row, true)">空表</el-button>
           <el-button size="small" @click="duplicate(row)">复制</el-button>
           <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
         </template>
@@ -277,8 +275,8 @@ async function doConvert() {
   }
 }
 
-// 打印模板：empty=true 时只打印商品名称/编码/单位，不出现数量/单价/金额；paper='A4' | 'A5'
-function printTemplate(tpl, empty = false, paper = 'A4') {
+// 打印模板：empty=true 时只打印商品名称/编码/单位，不出现数量/单价/金额；纸张跟「打印设置」走
+function printTemplate(tpl, empty = false) {
   const title = `订单模板 · ${tpl.name}`
   const subtitle = `${tpl.kind === 'purchase' ? '采购' : '销售'}模板 · ${(tpl.items || []).length} 项商品`
   const items = tpl.items || []
@@ -291,7 +289,7 @@ function printTemplate(tpl, empty = false, paper = 'A4') {
       { prop: 'unit', label: '单位' }
     ]
     const rows = items.map(it => ({ code: it.code || '', name: it.name || '', unit: it.unit || '' }))
-    printA4(title, columns, rows, subtitle, [], [], paper, repeatHeaderPref.value)
+    printA4(title, columns, rows, subtitle, [], [], '', repeatHeaderPref.value)
   } else {
     // 正常打印：带数量、单价、折扣、小计
     const columns = [
@@ -319,7 +317,7 @@ function printTemplate(tpl, empty = false, paper = 'A4') {
       }
     })
     const headerFields = [['合计', `¥ ${templateAmount(tpl).toFixed(2)}`, 'xl']]
-    printA4(title, columns, rows, subtitle, headerFields, [], paper, repeatHeaderPref.value)
+    printA4(title, columns, rows, subtitle, headerFields, [], '', repeatHeaderPref.value)
   }
 }
 

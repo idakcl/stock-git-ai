@@ -185,15 +185,15 @@ await t('没填名称就点保存：前端拦下，不发 POST', async () => {
   } finally { await context.close() }
 })
 
-console.log('\n模板打印：A4 / A5 / 空表')
+console.log('\n模板打印：默认 A4 纵向 / 打印设置里的 A5 / 空表')
 
-await t('打印：A4 landscape，明细带数量单价小计，合计用 xl（正文的 1.2 倍加粗）', async () => {
+await t('打印：默认 A4 纵向，明细带数量单价小计，合计用 xl（正文的 1.2 倍加粗）', async () => {
   const { page, context } = await open('/templates', seed({ templates: [tplSeed()] }))
   try {
     await capturePrint(page)
     await page.locator('.el-table__row').filter({ hasText: '常用管件组合' }).first().getByRole('button', { name: '打印', exact: true }).click()
     const html = await printed(page)
-    assert.match(html, /size: A4 landscape/, '默认纸张应是 A4 横向')
+    assert.match(html, /size: A4 portrait/, '未设置纸张时应是 A4 纵向')
     assert.match(html, /订单模板 · 常用管件组合/)
     assert.match(html, /<th[^>]*>数量<\/th>/)
     assert.match(html, /<th[^>]*>小计<\/th>/)
@@ -202,15 +202,20 @@ await t('打印：A4 landscape，明细带数量单价小计，合计用 xl（�
   } finally { await context.close() }
 })
 
-await t('打印(A5) / 空表(A5)：@page size 换成 A5 landscape', async () => {
+await t('打印设置选 A5 后，打印与空表都按 A5 出纸', async () => {
   const { page, context } = await open('/templates', seed({ templates: [tplSeed()] }))
   try {
-    await capturePrint(page)
+    // 纸张只在「打印设置」里选：切到 A5（默认纵向）
+    await page.locator('.paper-btn').click()
+    await page.locator('.el-popover:visible').getByText('A5', { exact: true }).click()
+    await page.keyboard.press('Escape')
     const row = page.locator('.el-table__row').filter({ hasText: '常用管件组合' }).first()
-    await row.getByRole('button', { name: '打印(A5)' }).click()
-    assert.match(await printed(page), /size: A5 landscape/, 'A5 按钮要打印 A5 版面')
-    await row.getByRole('button', { name: '空表(A5)' }).click()
-    assert.match(await printed(page), /size: A5 landscape/, '空表也能出 A5')
+    await capturePrint(page)
+    await row.getByRole('button', { name: '打印', exact: true }).click()
+    assert.match(await printed(page), /size: A5 portrait/, '设置里选了 A5 就按 A5 出纸')
+    await capturePrint(page)
+    await row.getByRole('button', { name: '空表', exact: true }).click()
+    assert.match(await printed(page), /size: A5 portrait/, '空表也按 A5 出纸')
   } finally { await context.close() }
 })
 

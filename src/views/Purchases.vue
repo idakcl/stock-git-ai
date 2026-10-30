@@ -1,14 +1,13 @@
 <template>
   <div>
-    <!-- 新页面开单（/purchases/new）：同一份列表组件只留开单表单，
-         保存链路、整表红线、单号生成全部沿用这里，不另写第二套开单页 -->
+    <!-- 整页开单（/purchases/new，按钮已去掉，仅保留路由供书签/外链直接打开）：
+         同一份列表组件只留开单表单，保存链路、整表红线、单号生成全部沿用这里 -->
     <el-card v-if="!entry">
       <template #header>
         <div class="card-header">
           <b>采购入库</b>
           <div class="header-ops">
             <el-button type="primary" @click="openDialog()">新增采购</el-button>
-            <el-button @click="openEntryPage">新页面开单</el-button>
           </div>
         </div>
       </template>
@@ -20,7 +19,7 @@
         <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
         <el-button :type="onlyReturns ? 'primary' : 'default'" @click="onlyReturns = !onlyReturns">
-          {{ onlyReturns ? '显示全部单据' : '仅显示退款单' }}
+          {{ onlyReturns ? '显示全部单据' : '仅显示退货单' }}
         </el-button>
       </div>
       <TableToolbar
@@ -179,7 +178,7 @@ const list = ref([])
 const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
-// 退款单筛选：只保留红字退货/退款单（CT-），便于快速对账
+// 退货单筛选：只保留红字退货单（CT-），便于快速对账
 const onlyReturns = ref(false)
 const page = ref(1)
 const itemOptions = ref([])
@@ -193,7 +192,7 @@ const supplierCodeMap = computed(() => {
 })
 const dialog = ref(false)
 // 整页开单（/purchases/new）：隐藏列表、表单铺满屏幕；沿用本页的保存链路与整表红线，不另写开单页
-const { entry, openEntryPage, backToList } = useEntryMode('/purchases')
+const { entry, backToList } = useEntryMode('/purchases')
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
 const payDialog = ref(false)
@@ -252,7 +251,7 @@ const itemCodesOf = (row) => [...new Set((row.items || []).map(i => i.code).filt
 const subtitle = computed(() => {
   const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
-  if (onlyReturns.value) parts.push('仅退款单')
+  if (onlyReturns.value) parts.push('仅退货单')
   if (keyword.value) parts.push('已按关键词筛选')
   return parts.join(' · ')
 })

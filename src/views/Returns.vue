@@ -39,7 +39,7 @@
           <el-table-column label="本次退货数量" width="160"><template #default="{ row }"><el-input-number v-model="row.returnQty" :min="0" :max="row.available" :controls="false" style="width:135px" /></template></el-table-column>
           <el-table-column label="折后可退金额" width="130"><template #default="{ row }">{{ row.remainingMoney.toFixed(2) }}</template></el-table-column>
         </el-table>
-        <el-form-item label="退货原因" required><el-input v-model="reason" maxlength="500" /></el-form-item>
+        <el-form-item label="退货原因"><el-input v-model="reason" maxlength="500" placeholder="选填，留空记「无」" /></el-form-item>
         <el-form-item label="本次退货额">¥ {{ previewAmount.toFixed(2) }}（按原单折后净额计算）</el-form-item>
       </template>
       <template v-else><p>所选 {{ selected.length }} 张，待退合计 ¥ {{ selectedDue.toFixed(2) }}</p><el-form-item label="本次金额" required><el-input-number v-model="amount" :min="0.01" :max="selectedDue" :precision="2" :controls="false" /><el-button link type="primary" style="margin-left:8px" @click="amount = selectedDue">全额退款</el-button></el-form-item></template>
@@ -63,7 +63,7 @@ const route = useRoute()
 const kind = ref(route.query.kind === 'purchase' ? 'purchase' : 'sale')
 const sales = ref([]), purchases = ref([]), loading = ref(false), ready = ref(false), error = ref('')
 const selected = ref([]), table = ref(null), dialog = ref(false), saving = ref(false), retryLocked = ref(false)
-const action = ref('create'), sourceId = ref(''), lines = ref([]), reason = ref('无'), mode = ref('cash'), amount = ref(0), date = ref(''), remark = ref('')
+const action = ref('create'), sourceId = ref(''), lines = ref([]), reason = ref(''), mode = ref('cash'), amount = ref(0), date = ref(''), remark = ref('')
 const pendingKey = 'stock.refund.pending'
 let requestId = '', pendingInput = null
 // 作废单不能退货：金额与库存都已回滚，再退一次等于重复冲销
@@ -92,7 +92,7 @@ function toggleSelectAll() {
 function fillFullReturn() {
   lines.value = lines.value.map(l => ({ ...l, returnQty: Number(l.available) > 0 ? l.available : 0 }))
 }
-function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '无' }
+function resetForm() { requestId = crypto.randomUUID(); pendingInput = null; retryLocked.value = false; mode.value = 'cash'; date.value = todayCN(); remark.value = ''; reason.value = '' }
 function chooseSource() { const o = orders.value.find(o => o.id === sourceId.value); lines.value = o ? returnableLines(o, orders.value).map(l => ({ ...l, returnQty: 0 })) : [] }
 function openCreate() { resetForm(); action.value = 'create'; sourceId.value = ''; lines.value = []; dialog.value = true }
 function openSettle() {
@@ -103,7 +103,7 @@ function openSettle() {
 async function save() {
   if (saving.value) return
   if (!pendingInput) {
-    if (action.value === 'create' && (!sourceId.value || !reason.value.trim() || !lines.value.some(l => l.returnQty > 0))) return ElMessage.warning('请选择原单、退货数量并填写原因')
+    if (action.value === 'create' && (!sourceId.value || !lines.value.some(l => l.returnQty > 0))) return ElMessage.warning('请选择原单与退货数量')
     pendingInput = { action: action.value, kind: kind.value, requestId, date: date.value, mode: mode.value, remark: remark.value,
       sourceOrderId: sourceId.value, reason: reason.value, lines: lines.value.filter(l => l.returnQty > 0).map(l => ({ index: l.index, qty: l.returnQty })),
       orderIds: selected.value.map(o => o.id), amount: amount.value }

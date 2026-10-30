@@ -157,7 +157,7 @@ await t('对外查看：只读 + 隐藏价格，编辑按钮消失、导出打�
     assert.equal(await page.getByRole('button', { name: '编辑', exact: true }).count(), 0, '只读模式不能有编辑按钮')
     assert.equal(await page.getByText('隐藏单价与金额', { exact: true }).count(), 0)
     assert.equal(await page.getByRole('button', { name: '导出CSV' }).count(), 1)
-    assert.equal(await page.getByRole('button', { name: '打印(A4)' }).count(), 1)
+    assert.equal(await page.getByRole('button', { name: '打印' }).count(), 1)
     assert.match(await headers(page), /本次数量/)
     assert.doesNotMatch(await headers(page), /本次单价/)
   } finally { await context.close() }
@@ -174,7 +174,7 @@ await t('采购订单勾「显示供应商信息详情」：页面显示联系�
     assert.match(body, /电话：13900000000/)
     assert.match(body, /地址：城北路 2 号/)
     await capturePrint(page)
-    await page.getByRole('button', { name: '打印(A4)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /供应商：<\/b>供应商甲/)
@@ -210,7 +210,7 @@ await t('正常模式打印：单头 + 业务单号 + 折扣链 + 明细与合�
   const { page, context } = await open(saleOrder.id)
   try {
     await capturePrint(page)
-    await page.getByRole('button', { name: '打印(A4)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /销售订单 D202610281000000001/)
@@ -243,7 +243,7 @@ await t('隐藏价格后打印/CSV：只留商品与数量，不泄露单价金�
     await page.getByText('隐藏单价与金额', { exact: true }).click()
     await page.waitForTimeout(200)
     await capturePrint(page)
-    await page.getByRole('button', { name: '打印(A4)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     // 泄露检查只看「印到纸上」的正文：样式块里给后人看的中文注释不算打印内容

@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <div class="title">
-            <b>{{ isReturn(sale) ? '销售退款单' : '销售单' }}：<span :class="{ 'return-code': isReturn(sale) }">{{ sale.id }}</span></b>
+            <b>{{ isReturn(sale) ? '销售退货单' : '销售单' }}：<span :class="{ 'return-code': isReturn(sale) }">{{ sale.id }}</span></b>
           </div>
           <!-- 单据不存在（已删除/链接失效）时禁用写操作，避免把占位空单当成新增保存 -->
           <div class="actions">
@@ -16,8 +16,8 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">显示客户信息详情</el-checkbox>
             <el-checkbox v-model="showProfile" class="opt-cb">显示用户信息</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
-            <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
-            <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
+            <!-- 只有一个打印按钮：纸张/方向统一在右边的「打印设置」里选 -->
+            <el-button :disabled="!found" @click="doPrint()">打印</el-button>
             <PrintHeaderToggle />
             <el-button v-if="found && !externalView && !isVoided(sale)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || isVoided(sale)" @click="editDialog = true">编辑</el-button>
@@ -45,7 +45,7 @@
           <span>地址：{{ customerInfo.address || '—' }}</span>
         </template>
         <span>记录时间：{{ orderTimeOf(sale) }}</span>
-        <!-- 退款单必须能回到原销售单：以后所有退款单都带 sourceOrderId -->
+        <!-- 退货单必须能回到原销售单：以后所有退货单都带 sourceOrderId -->
         <span v-if="isReturn(sale)">原销售单：
           <router-link v-if="sale.sourceOrderId" :to="`/sale/${sale.sourceOrderId}`" class="link">{{ sale.sourceOrderId }}</router-link>
           <span v-else>—</span>
@@ -425,7 +425,7 @@ const detailItems = computed(() => {
   })
 })
 
-// ---- 导出 CSV / 打印(A4) ----
+// ---- 导出 CSV / 打印 ----
 // 「隐藏单价与金额」勾选后剔除所有价格列，只留商品与数量：用于对外送货单、不带价对账场景
 const hidePrice = ref(false)
 // 打印/导出是否带客户联系方式（联系人、电话、地址）。默认不带：单据打印出去多半是给外部的，
@@ -504,9 +504,9 @@ function doExport() {
   downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
-function doPrint(paper = 'A4') {
+function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper, repeatHeaderPref.value)
+  printA4(`${isReturn(sale.value) ? '销售退货单' : '销售单'} ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
 }
 
 async function onPaySaved(updated, payload) {

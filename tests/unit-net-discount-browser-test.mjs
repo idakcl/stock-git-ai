@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 const { chromium } = createRequire(import.meta.url)('playwright')
 import { existsSync } from 'node:fs'
+import { paperSpec, pageCapacities } from '../src/utils/export.js'
 
 const line = (code, name, qty, price, discountRate = 1) => ({
   code, name, qty, price, discountRate,
@@ -83,7 +84,7 @@ const capturePrint = (page) => page.evaluate(() => {
   }
 })
 const printed = async (page, trigger = null) => {
-  await (trigger || page.getByRole('button', { name: '打印(A4)' })).click()
+  await (trigger || page.getByRole('button', { name: '打印' })).click()
   await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
   return page.evaluate(() => window.__printed)
 }
@@ -211,7 +212,7 @@ await t('打印样式声明 thead=table-header-group（跨页重复商品表头�
   } finally { await context.close() }
 })
 
-await t('80 行明细打印：按每页 40 行分片，每片自带表头、序号接续', async () => {
+await t('80 行明细打印：按纸张容量分片，每片自带表头、序号接续', async () => {
   const many = {
     ...saleDoc(),
     total: 800, discountRates: [0.9],
@@ -221,10 +222,12 @@ await t('80 行明细打印：按每页 40 行分片，每片自带表头、序�
   try {
     await capturePrint(page)
     const html = await printed(page)
-    // 明细不再是一整张表：切成「首页 34 + 40 + 6」三片，每片都带 <thead>，
+    // 明细不再是一整张表：按当前纸张（默认 A4 纵向）算出的容量切片，每片都带 <thead>，
     // 表头因此物理存在于每一页，不依赖浏览器是否实现 table-header-group
+    const spec = paperSpec()
     const chunks = (html.match(/<table class="pg/g) || []).length
-    assert.equal(chunks, 3, '80 行应切成 3 片')
+    assert.equal(chunks, pageCapacities(80, spec.rowsPerPage, spec.headReserve, spec.footReserve).length,
+      `80 行应按每页 ${spec.rowsPerPage} 行切成 ${pageCapacities(80, spec.rowsPerPage, spec.headReserve, spec.footReserve).length} 片，实际 ${chunks}`)
     assert.equal((html.match(/<thead>/g) || []).length, chunks, '每片都要有自己的表头')
     const thead = /<thead>([\s\S]*?)<\/thead>/.exec(html)[1]
     assert.match(thead, /本次单价/)

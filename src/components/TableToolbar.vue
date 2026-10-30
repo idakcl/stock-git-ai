@@ -2,10 +2,8 @@
   <div class="export-bar">
     <slot />
     <el-button size="small" :disabled="!rows.length" @click="doExport">导出CSV</el-button>
-    <el-button size="small" :disabled="!rows.length" @click="doPrint('A4')">打印(A4)</el-button>
-    <!-- A5 小票/小单纸张：同一份内容按 A5 版面重新排（字号与每页行数都另算一套） -->
-    <el-button size="small" :disabled="!rows.length" @click="doPrint('A5')">打印(A5)</el-button>
-    <!-- 跨页是否重复商品表头（A4/A5 都受这个开关控制，选择会被记住） -->
+    <!-- 只有一个打印按钮：纸张统一在右边的「打印设置」里选（A4 / A5 / 自定义 + 横纵向） -->
+    <el-button size="small" :disabled="!rows.length" @click="doPrint()">打印</el-button>
     <PrintHeaderToggle />
   </div>
 </template>
@@ -37,10 +35,10 @@ function doExport() {
   ElMessage.success(`已导出 ${props.rows.length} 行`)
 }
 
-function doPrint(paper = 'A4') {
+function doPrint() {
   const cols = props.printColumns || props.columns
   if (!cols.length) return ElMessage.warning('未定义导出列')
-  printA4(props.title, cols, props.rows, props.subtitle, [], [], paper, repeatHeaderPref.value)
+  printA4(props.title, cols, props.rows, props.subtitle, [], [], '', repeatHeaderPref.value)
 }
 </script>
 

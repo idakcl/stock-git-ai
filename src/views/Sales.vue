@@ -1,14 +1,13 @@
 <template>
   <div>
-    <!-- 新页面开单（/sales/new）：同一份列表组件只留开单表单，保存链路、整表红线、
-         单号生成全部沿用这里的逻辑，避免出现第二套「页面版保存」实现 -->
+    <!-- 整页开单（/sales/new，按钮已去掉，仅保留路由供书签/外链直接打开）：
+         同一份列表组件只留开单表单，保存链路、整表红线、单号生成全部沿用这里的逻辑 -->
     <el-card v-if="!entry">
       <template #header>
         <div class="card-header">
           <b>销售出库</b>
           <div class="header-ops">
             <el-button type="primary" @click="openDialog()">新增销售</el-button>
-            <el-button @click="openEntryPage">新页面开单</el-button>
           </div>
         </div>
       </template>
@@ -20,7 +19,7 @@
         <el-date-picker v-model="dateEnd" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width:150px" />
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
         <el-button :type="onlyReturns ? 'primary' : 'default'" @click="onlyReturns = !onlyReturns">
-          {{ onlyReturns ? '显示全部单据' : '仅显示退款单' }}
+          {{ onlyReturns ? '显示全部单据' : '仅显示退货单' }}
         </el-button>
       </div>
       <TableToolbar
@@ -184,7 +183,7 @@ const list = ref([])
 const keyword = ref('')
 const dateStart = ref('')
 const dateEnd = ref('')
-// 退款单筛选：只保留红字退货/退款单（XT-），便于快速对账
+// 退货单筛选：只保留红字退货单（XT-），便于快速对账
 const onlyReturns = ref(false)
 const page = ref(1)
 const itemOptions = ref([])
@@ -199,7 +198,7 @@ const dialog = ref(false)
 // 整页开单（/sales/new）：entry=true 时隐藏列表、把开单表单铺满屏幕。
 // 复用本页组件而不是新写开单页：单号生成、整表红线校验、资金单据联动全在这里，
 // 复制一份表单就是两套保存链路，金额口径漂移会直接造成错账。
-const { entry, openEntryPage, backToList } = useEntryMode('/sales')
+const { entry, backToList } = useEntryMode('/sales')
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
 const payDialog = ref(false)
@@ -258,7 +257,7 @@ const itemCodesOf = (row) => [...new Set((row.items || []).map(i => i.code).filt
 const subtitle = computed(() => {
   const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
-  if (onlyReturns.value) parts.push('仅退款单')
+  if (onlyReturns.value) parts.push('仅退货单')
   if (keyword.value) parts.push('已按关键词筛选')
   return parts.join(' · ')
 })
@@ -336,7 +335,7 @@ function openDialog(row) {
 }
 
 // 整页开单的进出：
-// - 从列表点「新页面开单」→ 路由换到 /sales/new，组件实例复用，watch(entry) 触发开表单；
+// - 直接打开 /sales/new → 路由变化，组件实例复用，watch(entry) 触发开表单；
 // - 直接访问 /sales/new → 首次挂载时数据还没回来，等 onMounted 加载完再开（单号要靠整表算）；
 // - 表单关掉（取消 / 保存成功）→ 回列表。保存成功后回列表而不是停在一张已入库的空表单上。
 watch(entry, (v) => { if (v) openDialog() })

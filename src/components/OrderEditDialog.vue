@@ -10,7 +10,7 @@
     <template v-if="!standalone" #header="{ titleId, titleClass }">
       <div class="dlg-header">
         <el-button class="dlg-max" text :title="maximized ? '还原窗口' : '最大化窗口'" :aria-label="maximized ? '还原窗口' : '最大化窗口'" @click="maximized = !maximized">
-          <el-icon :size="15"><ScaleToOriginal v-if="maximized" /><FullScreen v-else /></el-icon>
+          <MaxIcon :restore="maximized" />
         </el-button>
         <span :id="titleId" :class="titleClass">{{ title }}</span>
       </div>
@@ -262,7 +262,7 @@ import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf,
 import PhotoUpload from './PhotoUpload.vue'
 import OrderAmendDialog from './OrderAmendDialog.vue'
 import LineDiscountDialog from './LineDiscountDialog.vue'
-import { FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
+import MaxIcon from './MaxIcon.vue'
 import { moneyTouched } from '../utils/amend.js'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
@@ -865,8 +865,15 @@ async function save() {
 .lock-bar{margin:-8px 0 14px;}
 /* 弹窗标题栏：最大化角标在最左侧，标题紧随其后 */
 .dlg-header{display:flex;align-items:center;gap:6px;min-width:0;}
-.dlg-max{padding:2px 4px;color:var(--text-regular);}
-.dlg-max:hover{color:var(--color-primary);background:var(--bg-hover);}
+/* 标题左侧的最大化角标：一处纯图标按钮。
+   全局把 .el-button.is-text 补成了实心蓝（见 App.vue），这里必须整块覆盖掉，
+   否则角标是个蓝色方块，跟标题挤在一起像个徽章 */
+.dlg-max{
+  padding:0; width:26px; height:26px; min-height:0; margin-right:2px;
+  background:transparent !important; border-color:transparent !important;
+  color:var(--text-regular) !important;
+}
+.dlg-max:hover{ color:var(--color-primary) !important; background:var(--bg-hover) !important; }
 .lock-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:8px;}
 .locked-value{color:var(--text-regular);font-size:var(--fs-table);}
 .calc-line{display:flex;gap:20px;flex-wrap:wrap;color:var(--text-regular);font-size:var(--fs-table);}

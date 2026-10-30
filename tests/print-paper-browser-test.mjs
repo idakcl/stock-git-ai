@@ -72,8 +72,9 @@ await t('A4 纵向：行数按纵向纸高重算，比横向多', () => {
   resetPaperPref()
 })
 
-await t('自定义纸张优先于 A4/A5 按钮；每页行数可手动覆盖', () => {
+await t('自定义纸张优先于 A4/A5 纸张选择；每页行数可手动覆盖', () => {
   resetPaperPref()
+  paperPref.orientation = 'landscape'
   assert.equal(paperSpec('A4').page, 'A4 landscape')
   assert.equal(paperSpec('A5').page, 'A5 landscape')
   paperPref.mode = 'custom'
@@ -102,6 +103,7 @@ console.log('\n真机打印：纸张尺寸、页数与每页表头')
 
 await t('A4 横向 160 行：PDF 页数＝分片数，每页都有「序号」表头', async () => {
   resetPaperPref()
+  paperPref.orientation = 'landscape'
   const html = buildPrintHtml(docOf(rowsOf(160)))
   const chunks = chunkCount(html)
   const { pages, size, textOf } = await pdfPages(html, '/tmp/paper-a4.pdf')
@@ -112,6 +114,7 @@ await t('A4 横向 160 行：PDF 页数＝分片数，每页都有「序号」�
 
 await t('A4 横向 140 行长商品名（自动换行）：页数＝分片数，每页仍有表头', async () => {
   resetPaperPref()
+  paperPref.orientation = 'landscape'
   const long = (i) => `第${i + 1}号 PE管外牙直接50*112M 加长商品名称用于测试换行`
   const html = buildPrintHtml(docOf(rowsOf(140, long)))
   const chunks = chunkCount(html)
@@ -195,7 +198,7 @@ await t('打印设置弹层：切换自定义纸张后，打印按钮按新纸�
   try {
     const btn = page.locator('.paper-btn')
     await btn.waitFor()
-    assert.equal((await btn.innerText()).trim(), 'A4/A5 横向')
+    assert.equal((await btn.innerText()).trim(), 'A4 纵向', '默认 A4 纵向')
     await btn.click()
     const pop = page.locator('.pp')
     await pop.waitFor()
@@ -209,43 +212,43 @@ await t('打印设置弹层：切换自定义纸张后，打印按钮按新纸�
     await nums.nth(1).blur()
     await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.trim() === '100×150mm', null, { timeout: 5000 })
     assert.equal((await btn.innerText()).trim(), '100×150mm')
-    // 点「打印(A4)」：纸张必须是自定义的 100×150mm，而不是 A4
+    // 点「打印」：纸张必须是自定义的 100×150mm，而不是 A4
     await page.evaluate(() => {
       window.__printed = null
       window.open = () => { const doc = { write: h => { window.__printed = h }, close() {} }; return { document: doc, focus() {}, print() {} } }
     })
-    await page.getByRole('button', { name: '打印(A4)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /@page \{ size: 100mm 150mm; margin: 4mm; \}/)
     // 重新进页面，设置仍在（localStorage）
     await page.reload({ waitUntil: 'networkidle' })
     assert.equal((await page.locator('.paper-btn').innerText()).trim(), '100×150mm')
-    // 打印(A5) 也用同一张自定义纸：自定义优先于 A5
+    // 换回默认设置后仍是自定义纸优先，不会偷偷变回 A4
     await page.evaluate(() => {
       window.__printed = null
       window.open = () => { const doc = { write: h => { window.__printed = h }, close() {} }; return { document: doc, focus() {}, print() {} } }
     })
-    await page.getByRole('button', { name: '打印(A5)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     assert.match(await page.evaluate(() => window.__printed), /@page \{ size: 100mm 150mm/)
   } finally { await context.close() }
 })
 
-await t('打印设置弹层：选纵向后 A4 打印出纵向纸', async () => {
+await t('打印设置弹层：默认就是 A4 纵向，打印出纵向纸', async () => {
   const { page, context } = await openApp('/sale/X202610301100000001')
   try {
     await page.locator('.paper-btn').click()
     const pop = page.locator('.pp')
     await pop.waitFor()
     await pop.getByText('纵向', { exact: true }).click()
-    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.trim() === 'A4/A5 纵向', null, { timeout: 5000 })
-    assert.equal((await page.locator('.paper-btn').innerText()).trim(), 'A4/A5 纵向')
+    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.trim() === 'A4 纵向', null, { timeout: 5000 })
+    assert.equal((await page.locator('.paper-btn').innerText()).trim(), 'A4 纵向')
     await page.evaluate(() => {
       window.__printed = null
       window.open = () => { const doc = { write: h => { window.__printed = h }, close() {} }; return { document: doc, focus() {}, print() {} } }
     })
-    await page.getByRole('button', { name: '打印(A4)' }).click()
+    await page.getByRole('button', { name: '打印' }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /@page \{ size: A4 portrait/)

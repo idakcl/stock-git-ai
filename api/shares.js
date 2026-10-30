@@ -70,8 +70,8 @@ async function loadDoc(env, kind, docId) {
 
 export function docLabelOf(kind, doc) {
   if (kind === 'order') return doc && doc.kind === 'purchase' ? '采购订单' : '销售订单'
-  if (kind === 'sale') return isReturn(doc) ? '销售退款单' : '销售单'
-  return isReturn(doc) ? '采购退款单' : '采购单'
+  if (kind === 'sale') return isReturn(doc) ? '销售退货单' : '销售单'
+  return isReturn(doc) ? '采购退货单' : '采购单'
 }
 
 function partyOf(kind, doc) {
@@ -235,7 +235,7 @@ function buildPayload(share, doc, items) {
         ? (doc.kind === 'purchase' ? '供应商' : '客户')
         : (kind === 'sale' ? '客户' : '供应商'),
       docLabel: docLabelOf(kind, doc),
-      status: isOrder ? orderStatusText(doc.status) : (isReturn(doc) ? '退款单' : '正常'),
+      status: isOrder ? orderStatusText(doc.status) : (isReturn(doc) ? '退货单' : '正常'),
       remark: doc.remark || '',
       isReturn: !isOrder && isReturn(doc)
     },

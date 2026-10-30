@@ -79,7 +79,8 @@ test('普通收付及超付结清口径不回归', () => {
   assert.deepEqual(distributePayment([{ order: { id: 'a' }, kind: 'receivable', outstanding: 10 }], 15).leftover, 5)
 })
 test('非法输入中止，不改原快照', () => {
-  for (const change of [{ lines: [{ index: 0, qty: NaN }] }, { mode: 'bad' }, { date: '2026-02-30' }, { reason: '' }, { requestId: 'short' }]) assert.throws(() => applyRefundOperation(fixture(), create(change)))
+  // 退货原因已改成非必填（留空记「无」），不再属于非法输入
+  for (const change of [{ lines: [{ index: 0, qty: NaN }] }, { mode: 'bad' }, { date: '2026-02-30' }, { requestId: 'short' }]) assert.throws(() => applyRefundOperation(fixture(), create(change)))
 })
 test('原子提交：先生成单一提交；并发移动分支时拒绝，不重试', async () => {
   const savedFetch = globalThis.fetch, s = fixture(), calls = []

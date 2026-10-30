@@ -73,7 +73,7 @@ const capturePrint = (page) => page.evaluate(() => {
   }
 })
 const printed = async (page) => {
-  await page.getByRole('button', { name: '打印(A4)' }).click()
+  await page.getByRole('button', { name: '打印' }).click()
   await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
   return page.evaluate(() => window.__printed)
 }

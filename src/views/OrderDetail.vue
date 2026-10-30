@@ -16,8 +16,8 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">{{ isPurchase ? '显示供应商信息详情' : '显示客户信息详情' }}</el-checkbox>
             <el-checkbox v-model="showProfile" class="opt-cb">显示用户信息</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
-            <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
-            <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
+            <!-- 只有一个打印按钮：纸张/方向统一在右边的「打印设置」里选 -->
+            <el-button :disabled="!found" @click="doPrint()">打印</el-button>
             <PrintHeaderToggle />
             <el-button v-if="found && !externalView" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || order.status === POSTED" @click="editDialog = true">编辑</el-button>
@@ -264,7 +264,7 @@ const priceHidden = computed(() => hidePrice.value || externalView.value)
 // 档案售价默认收起（与「本次单价」重复）；勾「显示售价」才出现
 const tablePriceColumns = computed(() => (!priceHidden.value && showSellPrice.value) ? [{ prop: 'price', label: '售价' }] : [])
 
-// ---- 导出 CSV / 打印(A4)：与页面开关同一口径 ----
+// ---- 导出 CSV / 打印：与页面开关同一口径 ----
 const exportColumns = computed(() => {
   const cols = [
     { label: '编码', prop: 'code' },
@@ -336,10 +336,10 @@ function doExport() {
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
 
-function doPrint(paper = 'A4') {
+function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本订单暂无商品明细')
   const title = `${isPurchase.value ? '采购' : '销售'}订单 ${order.value.id}`
-  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper, repeatHeaderPref.value)
+  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
 }
 
 // 保存备注：只走 remark action，单号/金额/明细/凭证一律不碰

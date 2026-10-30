@@ -2,7 +2,7 @@ import { grossOf, netOf, ensurePayments, syncPayments, round2, depositSumOf } fr
 import { genVoucherCode } from './voucher.js'
 
 export const isReturn = o => Number(o?.total) < 0 || ['sale-return', 'purchase-return'].includes(o?.type)
-// 按单号识别退款单（历史数据已统一迁移为 XT-/CT- 前缀）：用于只有单号、没有单据对象的场合
+// 按单号识别退货单（销售 XT- / 采购 CT-，历史数据已统一迁移）：用于只有单号、没有单据对象的场合
 export const isReturnId = id => /^(XT|CT)-/.test(String(id || ''))
 const fail = message => { const error = new Error(message); error.status = 400; throw error }
 const cents = n => Math.round(Number(n) * 100)
@@ -46,7 +46,6 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
   if (input.action === 'create') {
     const source = orders.find(o => o.id === input.sourceOrderId)
     if (!source || isReturn(source)) fail('原单不存在或不是正常单据')
-    if (!String(input.reason || '').trim()) fail('请填写退货原因')
     if (!Array.isArray(input.lines) || !input.lines.length) fail('请选择退货商品')
     const candidates = returnableLines(source, orders)
     const seen = new Set()
@@ -65,7 +64,7 @@ export function applyRefundOperation(snapshot, input, now = new Date().toISOStri
     const id = genVoucherCode(input.kind === 'sale' ? 'XT' : 'CT', input.date, orders.map(o => ({ code: o.id })))
     const entry = { id, type: `${input.kind}-return`, sourceOrderId: source.id, no: source.no || '',
       [partyKey]: source[partyKey], date: input.date, items: lines, total, discount: 0,
-      returnReason: String(input.reason).trim(), refundMode: mode, remark: String(input.remark || ''),
+      returnReason: String(input.reason || '').trim() || '无', refundMode: mode, remark: String(input.remark || ''),
       payments: [], [field]: 0, settle: total === 0 ? '结清' : '挂账', requestId: input.requestId, createdAt: now }
     orders.push(entry)
     returns = [entry]
