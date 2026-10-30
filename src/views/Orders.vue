@@ -42,7 +42,7 @@
         <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
           <el-table-column label="订单号" width="210" class-name="id-col">
             <template #default="{ row }">
-              <span class="link" @click="openEdit(row)">{{ row.id }}</span>
+              <router-link :to="`/order/${row.id}`" class="link">{{ row.id }}</router-link>
               <span v-if="depositSumOf(row) > 0" class="dep-flag" :title="`已收订金 ¥${depositSumOf(row).toFixed(2)}`">订</span>
               <div v-if="row.no && row.no !== row.id" class="biz-no" :title="row.no">业务单号 {{ row.no }}</div>
             </template>
