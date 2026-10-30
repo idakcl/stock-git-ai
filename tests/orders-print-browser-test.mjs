@@ -120,6 +120,10 @@ await t('打印单头 / 明细 / 折扣链 / 合计与未收金额', async () =>
     assert.match(html, /2\.00/)
     assert.match(html, /18\.00/)
     assert.match(html, /共 2 项商品 · 未过账/)
+    // 明细最前面是序号列：1、2 顺排
+    assert.match(html, /<th class="idx">序号<\/th>/)
+    assert.match(html, /<td class="idx">1<\/td>/)
+    assert.match(html, /<td class="idx">2<\/td>/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

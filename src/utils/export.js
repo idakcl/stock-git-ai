@@ -44,23 +44,30 @@ const printStyle = `
   table { width: 100%; border-collapse: collapse; }
   th, td { border: 1px solid #666; padding: 4px 6px; text-align: left; vertical-align: top; }
   th { background: #eee; }
+  .idx { width: 42px; text-align: center; }
   tr { page-break-inside: avoid; }
   tfoot td { font-weight: 700; }
   .doc.brk { page-break-after: always; }
 `
 
-const sectionHtml = (sec) => {
-  const head = (sec.columns || []).map(c => `<th>${escHtml(c.label)}</th>`).join('')
-  const body = (sec.rows || [])
-    .map(r => '<tr>' + (sec.columns || []).map(c => `<td>${escHtml(pick(c, r))}</td>`).join('') + '</tr>')
+// 所有打印单据的明细表统一在最前面加「序号」列，从 1 顺排；列表类打印同样适用。
+const tableHtml = (columns = [], rows = []) => {
+  const head = '<th class="idx">序号</th>' + columns.map(c => `<th>${escHtml(c.label)}</th>`).join('')
+  const body = (rows || [])
+    .map((r, i) => '<tr><td class="idx">' + (i + 1) + '</td>' +
+      columns.map(c => `<td>${escHtml(pick(c, r))}</td>`).join('') + '</tr>')
     .join('')
+  return '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+}
+
+const sectionHtml = (sec) => {
   const fieldsHtml = normFields(sec.headerFields)
     .map(([label, value]) => `<div class="f"><b>${escHtml(label)}：</b>${escHtml(value)}</div>`)
     .join('')
   return (sec.title ? '<h2>' + escHtml(sec.title) + '</h2>' : '') +
     (sec.subtitle ? '<div class="sub">' + escHtml(sec.subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table>'
+    tableHtml(sec.columns, sec.rows)
 }
 
 /**
@@ -88,33 +95,15 @@ export function printA4Sections(sections, docTitle = '') {
 export function printA4(title, columns, rows, subtitle = '', headerFields = []) {
   const w = window.open('', '_blank')
   if (!w) return
-  const head = columns.map(c => `<th>${escHtml(c.label)}</th>`).join('')
-  const body = (rows || [])
-    .map(r => '<tr>' + columns.map(c => `<td>${escHtml(pick(c, r))}</td>`).join('') + '</tr>')
-    .join('')
   const fieldsHtml = normFields(headerFields)
     .map(([label, value]) => `<div class="f"><b>${escHtml(label)}：</b>${escHtml(value)}</div>`)
     .join('')
-  const style = `
-    @page { size: A4 landscape; margin: 10mm; }
-    * { box-sizing: border-box; }
-    body { font-family: 'Microsoft YaHei', Arial, sans-serif; font-size: 12px; color: #000; }
-    h2 { text-align: center; margin: 0 0 4px; font-size: 18px; }
-    .sub { text-align: center; color: #555; margin-bottom: 10px; font-size: 12px; }
-    .fields { display: flex; flex-wrap: wrap; gap: 2px 24px; border: 1px solid #999; padding: 6px 10px; margin-bottom: 10px; font-size: 12px; }
-    .fields .f { min-width: 200px; line-height: 1.7; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #666; padding: 4px 6px; text-align: left; vertical-align: top; }
-    th { background: #eee; }
-    tr { page-break-inside: avoid; }
-    tfoot td { font-weight: 700; }
-  `
   w.document.write(
     '<!doctype html><html><head><meta charset="utf-8"><title>' + escHtml(title) + '</title><style>' +
-    style + '</style></head><body><h2>' + escHtml(title) + '</h2>' +
+    printStyle + '</style></head><body><h2>' + escHtml(title) + '</h2>' +
     (subtitle ? '<div class="sub">' + escHtml(subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    '<table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></body></html>'
+    tableHtml(columns, rows) + '</body></html>'
   )
   w.document.close()
   w.focus()

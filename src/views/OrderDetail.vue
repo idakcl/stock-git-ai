@@ -227,7 +227,10 @@ const exportColumns = computed(() => {
   return cols
 })
 
-const docSubtitle = computed(() => `共 ${detailItems.value.length} 项商品 · ${orderStatusText(order.value.status)}`)
+// 隐藏金额（对外）打印不显示内部状态，第二行只留商品项数
+const docSubtitle = computed(() => (priceHidden.value
+  ? `共 ${detailItems.value.length} 项商品`
+  : `共 ${detailItems.value.length} 项商品 · ${orderStatusText(order.value.status)}`))
 const docHeaderFields = computed(() => {
   const fields = [
     ['订单号', order.value.id],
@@ -238,7 +241,8 @@ const docHeaderFields = computed(() => {
     const p = partyInfo.value
     fields.push(['联系人', p.contact || '—'], ['电话', p.phone || '—'], ['地址', p.address || '—'])
   }
-  fields.push(['日期', order.value.date], ['状态', orderStatusText(order.value.status)])
+  fields.push(['日期', order.value.date])
+  if (!priceHidden.value) fields.push(['状态', orderStatusText(order.value.status)])
   if (order.value.postedOrderId) fields.push(['关联单据', order.value.postedOrderId])
   if (!priceHidden.value) {
     fields.push(['合计', `¥${netSum.value.toFixed(2)}`])

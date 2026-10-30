@@ -175,10 +175,15 @@ await t('隐藏金额打印：单价、折扣、合计、订金、未收全部�
     assert.match(html, /客户：<\/b>客户甲/)
     assert.match(html, /管件/)
     assert.match(html, /数量/)
-    assert.match(html, /共 1 项商品 · 未过账 · 金额已隐藏/)
-    // 所有金额信息都不能出现：¥ 符号、金额列与金额字段一个都不留
+    // 第二行只留商品项数：不显示状态，也不显示「金额已隐藏」
+    assert.match(html, /<div class="sub">共 1 项商品<\/div>/)
+    assert.doesNotMatch(html, /金额已隐藏/)
+    // 每张单的明细表都有序号列，从 1 开始
+    assert.match(html, /<th class="idx">序号<\/th>/)
+    assert.equal((html.match(/<td class="idx">1<\/td>/g) || []).length, 2, '两张单各一行，都从 1 开始编号')
+    // 所有金额与内部状态都不能出现：¥ 符号、金额/状态列与字段一个都不留
     assert.doesNotMatch(html, /¥/, '不得出现任何金额符号')
-    for (const word of ['单价', '折扣率', '折扣金额', '折后金额', '订单金额', '已收订金', '原价合计', '整单折扣', '整单优惠', '未收', '未付']) {
+    for (const word of ['单价', '折扣率', '折扣金额', '折后金额', '订单金额', '已收订金', '原价合计', '整单折扣', '整单优惠', '未收', '未付', '状态']) {
       assert.doesNotMatch(html, new RegExp(word), `不得出现「${word}」`)
     }
     assert.deepEqual(errors, [], '页面不得报错')

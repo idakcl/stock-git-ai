@@ -348,14 +348,13 @@ const maskedLineColumns = [
   { label: '名称', value: r => lineDisplayName(r, nameMap.value) },
   { label: '数量', value: r => Number(r.qty || 0) }
 ]
-// 隐藏金额的单头：订单号、业务单号、往来单位、日期、状态、关联单据、备注，不含任何金额
+// 隐藏金额的单头：订单号、业务单号、往来单位、日期、关联单据、备注；不含金额，也不显示内部状态
 const maskedHeaderFields = (row) => {
   const fields = [
     ['订单号', row.id],
     ['业务单号', row.no && row.no !== row.id ? row.no : '—'],
     [row.kind === 'purchase' ? '供应商' : '客户', partyOf(row) || '—'],
-    ['日期', row.date],
-    ['状态', orderStatusText(row.status)]
+    ['日期', row.date]
   ]
   if (row.postedOrderId) fields.push(['关联单据', row.postedOrderId])
   fields.push(['备注', row.remark || '—'])
@@ -370,7 +369,7 @@ function printSelectedDetails(masked) {
     const items = row.items || []
     return {
       title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
-      subtitle: `共 ${items.length} 项商品 · ${orderStatusText(row.status)}${masked ? ' · 金额已隐藏' : ''}`,
+      subtitle: masked ? `共 ${items.length} 项商品` : `共 ${items.length} 项商品 · ${orderStatusText(row.status)}`,
       headerFields: masked ? maskedHeaderFields(row) : orderHeaderFields(row),
       columns: masked ? maskedLineColumns : orderLineColumns,
       rows: items

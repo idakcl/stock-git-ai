@@ -217,6 +217,10 @@ await t('正常模式打印：单头 + 业务单号 + 折扣链 + 明细与合�
     assert.match(html, /未收：<\/b>¥15\.85/)
     assert.match(html, /本次单价/)
     assert.match(html, /本次金额/)
+    // 明细最前面是序号列：1、2 顺排
+    assert.match(html, /<th class="idx">序号<\/th>/)
+    assert.match(html, /<td class="idx">1<\/td>/)
+    assert.match(html, /<td class="idx">2<\/td>/)
   } finally { await context.close() }
 })
 
@@ -233,6 +237,11 @@ await t('隐藏价格后打印/CSV：只留商品与数量，不泄露单价金�
     assert.doesNotMatch(html, /本次单价/)
     assert.doesNotMatch(html, /订单金额/)
     assert.doesNotMatch(html, /已收订金/)
+    // 对外打印不显示内部状态，第二行只留商品项数
+    assert.match(html, /<div class="sub">共 2 项商品<\/div>/)
+    assert.doesNotMatch(html, /状态/)
+    assert.doesNotMatch(html, /金额已隐藏/)
+    assert.match(html, /<th class="idx">序号<\/th>/)
 
     await captureBlob(page)
     await page.getByRole('button', { name: '导出CSV' }).click()
