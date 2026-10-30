@@ -9,6 +9,7 @@ import { isVoided } from '../src/utils/account.js'
 import { voidTransaction } from './voids.js'
 import { readProfile, saveProfile } from './profile.js'
 import { listShares, readPublicShare, shareOperation } from './shares.js'
+import { listTemplates, templateOperation } from './templates.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -477,6 +478,8 @@ export async function handleApi(req, url, env) {
     if (path === '/profile' && method === 'GET') return json(req, env, await readProfile(env))
     // 外链分享列表：带单据摘要（单据已删除/作废也会列出，便于取消）
     if (path === '/shares' && method === 'GET') return json(req, env, { shares: await listShares(env) })
+    // 订单模板：预设商品清单，可一键转订单；单独一个文件，缺失按空列表
+    if (path === '/templates' && method === 'GET') return json(req, env, { templates: await listTemplates(env) })
 
     // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端
     if (path === '/upload' && method === 'POST') {
@@ -515,6 +518,10 @@ export async function handleApi(req, url, env) {
       // 外链分享：建链 / 取消 / 改有效期。只动 shares.json，与单据数据完全解耦。
       if (path === '/shares') {
         return json(req, env, await shareOperation(env, body))
+      }
+      // 订单模板：新增 / 编辑 / 删除 / 复制。只动 order-templates.json，转订单是另一回事（走 /orders）。
+      if (path === '/templates') {
+        return json(req, env, await templateOperation(env, body))
       }
 
       if (path === '/items') {

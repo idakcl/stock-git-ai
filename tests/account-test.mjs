@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import {
   grossOf, payableOf, receivableOf, netOf, paidSumOf, receivedSumOf,
   overpaidOf, settleActionOf, isSettledOf, settleBalance,
-  discountRatesOf, effectiveRateOf, discountRatesTextOf, discountAmountOf, discountedTotalOf, allocateNetOf, round2
+  discountRatesOf, effectiveRateOf, discountRatesTextOf, discountAmountOf, discountedTotalOf, allocateNetOf, allocateUnitOf, round2
 } from '../src/utils/account.js'
 
 let pass = 0, fail = 0
@@ -167,6 +167,33 @@ await t('整单折扣按行摊开：各行净额合计恰等于整单折后金�
   assert.deepEqual(allocateNetOf([1, 2], 0), [1, 2])
   assert.deepEqual(allocateNetOf([], 0.9), [])
 })
+
+await t('折后单价（含整单折扣）：单价由行折后金额换算，且绝不改动金额口径', () => {
+  // 常规：单价 × 数量 正好乘得回去
+  const a = allocateUnitOf([18, 5], [2, 1], 0.95)
+  assert.deepEqual(a.units, [8.55, 4.75])
+  assert.deepEqual(a.nets, [17.1, 4.75])
+  // 铁律：金额与 allocateNetOf 完全一致（各行合计＝单头折后金额）
+  for (const [totals, qtys, rate] of [
+    [[20, 5], [2, 1], 0.9],
+    [[0.01, 0.01, 0.01], [1, 1, 1], 0.95],
+    [[10, 10, 10], [3, 7, 600], 1 / 3],
+    [[30], [3], 0.95],
+    [[12.34, 56.78, 90.12], [3, 7, 11], 0.88]
+  ]) {
+    const { nets } = allocateUnitOf(totals, qtys, rate)
+    assert.deepEqual(nets, allocateNetOf(totals, rate), '金额必须沿用累计取整口径')
+    assert.equal(round2(nets.reduce((s, n) => s + n, 0)), round2(round2(totals.reduce((s, v) => s + v, 0)) * rate), '合计要对得上单头折后金额')
+  }
+  // 数量除不尽时单价只作参考（不为了凑乘法把金额撑偏）
+  const u = allocateUnitOf([10, 10, 10], [3, 7, 600], 1 / 3)
+  assert.equal(round2(u.nets.reduce((s, n) => s + n, 0)), 10)
+  assert.ok(u.units.every(x => Number.isFinite(x)))
+  // 空明细 / 零数量：不炸、单价按 0
+  assert.deepEqual(allocateUnitOf([], [], 0.9), { nets: [], units: [] })
+  assert.deepEqual(allocateUnitOf([9], [0], 0.9).units, [0])
+})
+
 
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

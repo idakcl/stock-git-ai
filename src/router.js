@@ -23,6 +23,7 @@ import Returns from './views/Returns.vue'
 import Profile from './views/Profile.vue'
 import Shares from './views/Shares.vue'
 import ShareView from './views/ShareView.vue'
+import OrderTemplates from './views/OrderTemplates.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -32,11 +33,18 @@ const routes = [
   { path: '/customers', component: Customers },
   { path: '/customer/:code', component: CustomerDetail },
   { path: '/purchases', component: Purchases },
+  // 新页面开单（meta.entry）：复用列表页组件，靠 meta 把列表隐藏、开单表单整页显示。
+  // 复用而不是新写页面：开单要用的整表数据、单号生成、整表覆盖红线、资金单据联动都在列表页里，
+  // 再写一套就是两份保存链路，金额口径漂移就是错账。
+  { path: '/purchases/new', component: Purchases, meta: { entry: true } },
   { path: '/purchase/:id', component: PurchaseDetail },
   { path: '/sales', component: Sales },
+  { path: '/sales/new', component: Sales, meta: { entry: true } },
   { path: '/sale/:id', component: SalesDetail },
   { path: '/orders', component: Orders },
+  { path: '/orders/new', component: Orders, meta: { entry: true } },
   { path: '/order/:id', component: OrderDetail },
+  { path: '/templates', component: OrderTemplates },
   { path: '/stock', component: Stock },
   { path: '/report', component: Report },
   { path: '/receivables', component: Receivables },

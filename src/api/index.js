@@ -253,5 +253,13 @@ export const api = {
     fd.append('file', file)
     const res = await fetch(BASE + '/upload', { method: 'POST', body: fd, headers: authHeaders() })
     return handle(res)
+  },
+  // 订单模板：把常用商品组合存成可复用草稿，一键生成订单。
+  // 模板只存商品+数量+单价+行折扣率，不存客户/日期/单号（每次生成时现场填写）。
+  getTemplates: () => cachedGet('/templates'),
+  templateOperation: async (operation) => {
+    const r = await request('/templates', { method: 'POST', body: JSON.stringify(operation) })
+    invalidate('/templates')
+    return r
   }
 }

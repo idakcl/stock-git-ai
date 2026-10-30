@@ -1,6 +1,8 @@
 <template>
   <div>
-    <el-card v-loading="loading">
+    <!-- 新页面开单（/orders/new）：同一份列表组件只留订单表单，过账、订金、状态迁移
+         等链路仍走这里的 api.orderOperation，不另写第二套开单页 -->
+    <el-card v-if="!entry" v-loading="loading">
       <template #header>
         <div class="card-header">
           <b>订单</b>
@@ -12,6 +14,7 @@
               清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
             <el-button type="primary" @click="openCreate">新建订单</el-button>
+            <el-button @click="openEntryPage">新页面开单</el-button>
           </div>
         </div>
       </template>
@@ -116,6 +119,14 @@
       <el-empty v-if="ready && !filtered.length" description="暂无订单，点右上角「新建订单」开始" />
     </el-card>
 
+    <!-- 整页开单占位：数据还在路上就说「正在准备」，加载失败才给返回入口（ready 只在成功时置真） -->
+    <el-card v-if="entry && !dialog">
+      <div class="entry-loading">
+        <template v-if="loading">正在准备开单…</template>
+        <template v-else>订单数据未能加载，无法开单。<el-button size="small" @click="$router.replace('/orders')">返回列表</el-button></template>
+      </div>
+    </el-card>
+
     <OrderFormDialog
       v-model="dialog"
       :order="editingOrder"
@@ -123,6 +134,7 @@
       :customers="customerOptions"
       :suppliers="supplierOptions"
       :saving="saving"
+      :standalone="entry"
       @saved="onFormSaved"
     />
 
@@ -165,11 +177,13 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
+// 新页面开单：/orders/new 复用本页组件，只靠路由 meta 切换成整页表单
+import { useEntryMode } from '../utils/entryMode'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
-import { round2, discountRatesTextOf, effectiveRateOf, allocateNetOf } from '../utils/account'
+import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '../utils/account'
 import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
@@ -197,6 +211,8 @@ const dateStart = ref('')
 const dateEnd = ref('')
 const page = ref(1)
 const dialog = ref(false)
+// 整页开单（/orders/new）：隐藏列表、订单表单铺满屏幕；保存仍走本页的 orderOperation，不另写开单页
+const { entry, openEntryPage, backToList } = useEntryMode('/orders')
 const editingOrder = ref(null)
 const depositDialog = ref(false)
 const depositOrder = ref(null)
@@ -283,15 +299,16 @@ const hasLineDiscountOf = (row) => (row.items || []).some(l => {
   const r = Number(l.discountRate)
   return Number(l.discount || 0) > 0 || (Number.isFinite(r) && r > 0 && r < 1)
 })
-// 明细行附加「摊完整单折扣后的金额」，各行合计与单头折后金额一致
+// 明细行附加「摊完整单折扣后的金额 / 单价」，各行金额合计与单头折后金额一致
+// 单价只是行金额÷数量的换算，不参与任何加总，所以不会把总额带偏
 const lineRowsWithNet = (row) => {
   const items = row.items || []
-  const nets = allocateNetOf(items.map(lineTotal), effectiveRateOf(row))
-  return items.map((l, i) => ({ ...l, _net: nets[i] }))
+  const { nets, units } = allocateUnitOf(items.map(lineTotal), items.map(l => Number(l.qty || 0)), effectiveRateOf(row))
+  return items.map((l, i) => ({ ...l, _net: nets[i], _unitNet: units[i] }))
 }
 
 // 单张订单的明细列：订单行没有单位/备注，只打真实的字段；
-// 没有行折扣时隐藏「折扣率 / 折扣金额」，有整单折扣时追加「折后金额（含整单折扣）」
+// 没有行折扣时隐藏「折扣率 / 折扣金额」，有整单折扣时追加「折后单价 / 折后金额（含整单折扣）」
 const orderLineColumnsFor = (row) => {
   const cols = [
     { label: '编码', prop: 'code' },
@@ -307,7 +324,10 @@ const orderLineColumnsFor = (row) => {
   }
   cols.push({ label: '本次金额', value: r => lineTotal(r).toFixed(2) })
   if (discountRatesTextOf(row)) {
-    cols.push({ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) })
+    cols.push(
+      { label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) },
+      { label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }
+    )
   }
   return cols
 }
@@ -464,6 +484,13 @@ function openCreate() { editingOrder.value = null; dialog.value = true }
 function openEdit(row) { editingOrder.value = row; dialog.value = true }
 function openRemark(row) { remarkOrder.value = row; remarkDialog.value = true }
 
+// 整页开单的进出：列表页点「新页面开单」时组件实例被复用，靠 watch(entry) 打开表单；
+// 直接访问 /orders/new 走 onMounted（数据取齐后再开）；表单一关就回列表。
+// 注意不能把自动开窗放进 load()：保存成功后也会 load()，那时路由还在切回列表，
+// 会把刚存完的页面又顶开一张空表单。
+watch(entry, (v) => { if (v) openCreate() })
+watch(dialog, (v) => { if (!v) backToList() })
+
 // 备注只改 remark：走独立 action，已过账的订单也能补，不碰金额/明细/凭证
 async function onRemarkSaved(text) {
   const row = remarkOrder.value
@@ -573,12 +600,17 @@ async function clearDrafts() {
   } catch (e) { fail(e, '清空未过账订单失败') } finally { busy.value = false }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // 整页开单：数据取齐了才开窗（ready 只在成功时置真，加载失败就留在占位提示，不给一张存不了的表单）
+  if (entry.value && ready.value) openCreate()
+})
 </script>
 
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
 .header-ops{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.entry-loading{padding:48px 0;text-align:center;color:var(--text-secondary);}
 .search-input{margin:12px 0 12px;max-width:360px;}
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
 .filter-label{color:var(--text-regular);font-size:var(--fs-base);}

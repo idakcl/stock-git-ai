@@ -103,6 +103,9 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100"  align="right"/>
+          <el-table-column v-if="!priceHidden && orderRate" label="折后单价（含整单折扣）" width="180" align="right">
+            <template #default="{ row }">{{ Number(row._unitNet || 0).toFixed(2) }}</template>
+          </el-table-column>
           <el-table-column v-if="!priceHidden && orderRate" label="折后金额（含整单折扣）" width="180" align="right">
             <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -216,7 +219,7 @@ import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import ShareDialog from '../components/ShareDialog.vue'
-import { payableOf, grossOf, netOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, effectiveRateOf, allocateNetOf, isVoided } from '../utils/account'
+import { payableOf, grossOf, netOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, effectiveRateOf, allocateUnitOf, isVoided } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -397,7 +400,7 @@ const detailItems = computed(() => {
   const nameMap = Object.fromEntries((items.value || []).map(i => [i.code, i.name || '']))
   const lines = purchase.value.items || []
   // 摊完整单折扣后的行金额：各行合计 = 单头折后金额
-  const nets = allocateNetOf(lines.map(l => Number(l.total || 0)), effectiveRateOf(purchase.value))
+  const { nets, units } = allocateUnitOf(lines.map(l => Number(l.total || 0)), lines.map(l => Number(l.qty || 0)), effectiveRateOf(purchase.value))
   return lines.map((line, idx) => {
     const base = (items.value || []).find(i => i.code === line.code) || {}
     return {
@@ -414,7 +417,8 @@ const detailItems = computed(() => {
       _discount: Number(line.discount || 0),
       _discountRate: line.discountRate,
       _total: line.total,
-      _net: nets[idx]
+      _net: nets[idx],
+      _unitNet: units[idx]
     }
   })
 })
@@ -438,7 +442,7 @@ const externalView = ref(false)
 // 页面上的单价/折扣/金额列、单头金额、付款金额同步隐藏（导出与打印沿用同一规则）
 const priceHidden = computed(() => hidePrice.value || externalView.value)
 const tablePriceColumns = computed(() => (priceHidden.value || !showSellPrice.value) ? [] : [{ prop: 'price', label: '售价' }])
-const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额', '折后金额（含整单折扣）']
+const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额', '折后单价（含整单折扣）', '折后金额（含整单折扣）']
 const exportColumns = computed(() => {
   let cols = [
     { label: '编码', prop: 'code' },
@@ -451,6 +455,7 @@ const exportColumns = computed(() => {
     { label: '本次单价', value: r => (r._price == null || r._price === '' ? '' : Number(r._price).toFixed(2)) },
     ...(hasLineDiscount.value ? [{ label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') }] : []),
     { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) },
+    ...(orderRate.value ? [{ label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) }] : []),
     ...(orderRate.value ? [{ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }] : []),
     { label: '备注', prop: 'remark' }
   ]

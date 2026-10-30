@@ -84,6 +84,9 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100" align="right" />
+          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后单价（含整单折扣）" width="180" align="right">
+            <template #default="{ row }">{{ Number(row._unitNet || 0).toFixed(2) }}</template>
+          </el-table-column>
           <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后金额（含整单折扣）" width="180" align="right">
             <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -159,7 +162,7 @@ import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import ShareDialog from '../components/ShareDialog.vue'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, DRAFT, POSTED } from '../utils/orders.js'
-import { round2, discountRatesTextOf, effectiveRateOf, allocateNetOf } from '../utils/account'
+import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '../utils/account'
 import { lineDisplayName, normalizeRate } from '../utils/catalog'
 import { downloadCSV, printA4 } from '../utils/export'
 import { fmtCNTime, orderTimeOf } from '../utils/time.js'
@@ -208,7 +211,8 @@ const lineTotal = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
 
 const detailItems = computed(() => {
   const lines = order.value.items || []
-  const nets = allocateNetOf(lines.map(lineTotal), effectiveRateOf(order.value))
+  // 单价由行折后金额 ÷ 数量换算；金额一律沿用累计取整口径，保证各行合计＝单头折后金额
+  const { nets, units } = allocateUnitOf(lines.map(lineTotal), lines.map(l => Number(l.qty || 0)), effectiveRateOf(order.value))
   return lines.map((line, idx) => {
     const base = (items.value || []).find(i => i.code === line.code) || {}
     return {
@@ -225,7 +229,8 @@ const detailItems = computed(() => {
       _discount: lineDiscount(line),
       _total: lineTotal(line),
       // 摊完整单折扣后的行金额（各行合计 = 单头折后金额）
-      _net: nets[idx]
+      _net: nets[idx],
+      _unitNet: units[idx]
     }
   })
 })
@@ -279,7 +284,10 @@ const exportColumns = computed(() => {
     }
     cols.push({ label: '本次金额', value: r => Number(r._total || 0).toFixed(2) })
     if (hasOrderDiscount.value) {
-      cols.push({ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) })
+      cols.push(
+        { label: '折后单价（含整单折扣）', value: r => Number(r._unitNet || 0).toFixed(2) },
+        { label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }
+      )
     }
   }
   return cols

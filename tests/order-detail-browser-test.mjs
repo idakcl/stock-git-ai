@@ -121,8 +121,9 @@ await t('勾「显示售价 / 显示进价」后出现档案价列（与本次�
     assert.match(head, /售价/)
     assert.match(head, /进价/)
     const row = (await page.locator('.el-table').first().locator('.el-table__row').first().innerText()).replace(/\s+/g, ' ')
-    // 供应商列之后依次是：进价 8、售价 12、本次数量 2、本次单价 10、折扣 -2.00、本次金额 18、摊完整单折扣 17.10
-    assert.match(row, /— 8 12 2 10 -2\.00 18 17\.10/)
+    // 供应商列之后依次是：进价 8、售价 12、本次数量 2、本次单价 10、折扣 -2.00、本次金额 18、
+    // 折后单价 8.55（18×0.95÷2）、摊完整单折扣后的行金额 17.10
+    assert.match(row, /— 8 12 2 10 -2\.00 18 8\.55 17\.10/)
   } finally { await context.close() }
 })
 
@@ -279,8 +280,8 @@ await t('正常模式 CSV：档案价按开关出现，单头含业务单号与�
     assert.match(csv, /业务单号,HT-2026-001/)
     assert.match(csv, /订单金额,¥20\.85/)
     assert.match(csv, /已收订金,¥5\.00/)
-    assert.match(csv, /编码,名称,单位,进价,售价,本次数量,本次单价,折扣率,本次折扣,本次金额,折后金额（含整单折扣）/)
-    assert.match(csv, /P00001,管件,个,8\.00,12\.00,2,10\.00,0\.90,2\.00,18\.00,17\.10/)
+    assert.match(csv, /编码,名称,单位,进价,售价,本次数量,本次单价,折扣率,本次折扣,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /P00001,管件,个,8\.00,12\.00,2,10\.00,0\.90,2\.00,18\.00,8\.55,17\.10/)
   } finally { await context.close() }
 })
 

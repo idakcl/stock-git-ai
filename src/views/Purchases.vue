@@ -1,8 +1,16 @@
 <template>
   <div>
-    <el-card>
+    <!-- 新页面开单（/purchases/new）：同一份列表组件只留开单表单，
+         保存链路、整表红线、单号生成全部沿用这里，不另写第二套开单页 -->
+    <el-card v-if="!entry">
       <template #header>
-        <div class="card-header"><b>采购入库</b><el-button type="primary" @click="openDialog()">新增采购</el-button></div>
+        <div class="card-header">
+          <b>采购入库</b>
+          <div class="header-ops">
+            <el-button type="primary" @click="openDialog()">新增采购</el-button>
+            <el-button @click="openEntryPage">新页面开单</el-button>
+          </div>
+        </div>
       </template>
       <el-input v-model="keyword" clearable placeholder="搜索单号 / 供应商 / 商品" class="search-input" />
       <div class="filter-row">
@@ -116,6 +124,14 @@
       />
     </el-card>
 
+    <!-- 整页开单占位：整表/商品/供应商没回来前，表单既生成不出单号，也必然过不了整表红线 -->
+    <el-card v-if="entry && !dialog">
+      <div class="entry-loading">
+        <template v-if="loadFailed">数据加载失败，开单所需的整表数据没有取到。<el-button size="small" @click="$router.replace('/purchases')">返回列表</el-button></template>
+        <template v-else>正在准备开单…</template>
+      </div>
+    </el-card>
+
     <OrderEditDialog
       v-model="dialog"
       :order="editingOrder"
@@ -124,6 +140,7 @@
       :suppliers="supplierOptions"
       kind="payable"
       :saving="saving"
+      :standalone="entry"
       @saved="onOrderSaved"
       @amended="refreshFromServer"
     />
@@ -153,6 +170,8 @@ import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import { joinLimited } from '../utils/export'
+// 新页面开单：/purchases/new 复用本页组件，只靠路由 meta 切换成整页表单
+import { useEntryMode } from '../utils/entryMode'
 
 const PAGE_SIZE = 60
 
@@ -173,6 +192,8 @@ const supplierCodeMap = computed(() => {
   return m
 })
 const dialog = ref(false)
+// 整页开单（/purchases/new）：隐藏列表、表单铺满屏幕；沿用本页的保存链路与整表红线，不另写开单页
+const { entry, openEntryPage, backToList } = useEntryMode('/purchases')
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
 const payDialog = ref(false)
@@ -266,6 +287,8 @@ onMounted(async () => {
     itemOptions.value = it
     supplierOptions.value = sup
     loadFailed.value = false
+    // 整页开单：数据齐了才把表单摊开
+    if (entry.value) openDialog()
   } catch (e) {
     // 不清空已有列表：清空过一次保存就能把线上单据覆盖没了
     loadFailed.value = true
@@ -303,6 +326,12 @@ function openDialog(row) {
   editingOrder.value = row || null
   dialog.value = true
 }
+
+// 整页开单的进出：列表跳过来组件实例复用，靠 watch(entry) 开表单；
+// 直接访问 /purchases/new 要等 onMounted 把整表取齐再开（单号靠整表算，缺整表保存必被红线拦下）；
+// 表单关掉（取消 / 保存成功）就回列表，不停在一张已入库的空表单上
+watch(entry, (v) => { if (v) openDialog() })
+watch(dialog, (v) => { if (!v) backToList() })
 
 // 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则立即关窗报成功再后台刷新。
@@ -597,6 +626,8 @@ async function remove(row) {
 </script>
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.header-ops{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.entry-loading{padding:48px 0;text-align:center;color:var(--text-secondary);}
 .search-input{margin-bottom:12px;max-width:360px;}
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
 .filter-label{color:var(--text-regular);font-size:var(--fs-base);}

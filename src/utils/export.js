@@ -65,6 +65,10 @@ const printStyle = `
   .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #666; display: flex; flex-wrap: wrap; gap: 2px 24px; font-size: 12px; }
   .foot .fi { min-width: 180px; line-height: 1.7; }
   table { width: 100%; border-collapse: collapse; }
+  /* 明细行数多到跨页时，第 2/3 页顶部必须重复商品表头：
+     显式声明 table-header-group，避免浏览器默认值或后续样式把重复能力弄丢（合计行同理跟在末页）。 */
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
   th, td { border: 1px solid #666; padding: 4px 6px; text-align: left; vertical-align: top; }
   th { background: #eee; }
   .idx { width: 42px; text-align: center; }

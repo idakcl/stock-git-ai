@@ -16,6 +16,8 @@
 - `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNNN`）
 - `src/utils/voucherFlow.js` — **收付款 → 资金单据联动的唯一入口**（纯逻辑，不含 UI）
 - `src/utils/account.js` — 全站唯一账务公式（应收/未收/结清判定）
+- `src/utils/catalog.js` — 商品目录口径：`resolveLine` 建档与行金额归一化（`normalizeRate`）、行级多级折扣链（`lineDiscountRatesOf` / `lineEffectiveRate` / `applyLineRates`）、改名后的展示名解析。纯函数，Worker 端可直接 import
+- `src/utils/entryMode.js` — 「新页面开单」的唯一逻辑：用路由 `meta.entry` 把列表页切成整页开单模式，开单保存链路仍复用列表页那一份
 - `src/utils/clipboard.js` — 复制链接（Clipboard API + 局域网 http 回退 `execCommand`）与分享链接拼接
 - `src/utils/export.js` — 导出 / 打印排版：`printA4()` / `printA4Sections()`，单头字段带 `tone`（`hl` 加框强调、`xl` 字号两倍），`footerFields` 输出商品列表底部的用户信息落款
 - `src/utils/orders.js` — 订单（草稿）状态机与校验：`validateOrder` / `orderAmount` / `orderToOrderDoc` / `canUnpost` / `applyOrderOperation`（前端预览与服务端落库共用）
@@ -27,6 +29,7 @@
 - `api/auth.js` — 登录票据（HMAC）与 CORS 白名单
 - `api/profile.js` — 用户信息（打印落款用的联系名称/电话/地址/备注）读写与字段裁剪
 - `api/shares.js` — 外链分享：令牌生成、时效、取消、公开只读读取与脱敏载荷
+- `api/templates.js` — 订单模板：多份模板的增删改复制、字段裁剪与上限保护（数据存 `order-templates.json`）
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
 - `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
 - `wrangler.json` — Cloudflare Workers 配置
@@ -101,6 +104,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/session` | `{ ok }` | 票据自检 |
 | `/profile` | `{ name, phone, address, remark }` | 用户信息（打印落款用），未填过返回四个空字符串 |
 | `/shares` | `{ shares: [...] }` | 外链分享列表（含已过期 / 已作废 / 单据已删除的记录），按创建时间倒序 |
+| `/templates` | `{ templates: [...] }` | 订单模板列表，元素 `{ id, name, kind, items:[{code,name,unit,qty,price,discountRate}], createdAt, updatedAt }`；**文件不存在时返回 `[]`**，模板本身不存金额 |
 
 返回体是**裸数组 / 裸对象**（不包 `data` 壳）；失败统一是 `{"error":"中文原因"}` + 4xx/5xx，脚本按 `res.ok` 判断即可。
 
@@ -128,6 +132,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/voids` | `{"kind":"sale"\|"purchase","id":"单据号","reason":"可选"}` | **操作接口**：整单作废并同步作废关联的 `SK-`/`FK-`，一次提交回滚库存/应收；重复作废幂等；子单/核销/合并凭证未拆时 `409`。详见 [docs/void.md](docs/void.md) |
 | `/profile` | `{"name","phone","address","remark"}` | 整份覆盖写入 `profile.json`；服务端逐字段裁剪空白并限长（40 / 60 / 160 / 200），多余字段丢弃 |
 | `/shares` | `{"action": "create" / "cancel" / "update", …}` | **操作接口**，见 [docs/shares.md](docs/shares.md)。`create` 需要 `{kind, docId, days}`（`days` 取 `1/7/30`，`0` 为长期），同一张单已有有效链接时**复用**并返回 `reused: true`；`cancel` 需要 `{token}`；`update` 需要 `{token, days}`（按「现在」重新起算）|
+| `/templates` | `{"action": "create" / "update" / "delete" / "duplicate", …}` | **操作接口**，见 [docs/templates.md](docs/templates.md)。只写 `order-templates.json`，不碰单据；`create`/`update` 传 `{template:{id?, name, kind, items}}`，`delete`/`duplicate` 传 `{id}`；上限 100 个模板、单模板 200 行 |
 | `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
 | `/stock` | 任意 | **403**：库存为派生数据，禁止直写 |
 
@@ -659,6 +664,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 - **录入**：录入/编辑弹窗「整单折扣」区可「+ 添加一级折扣」逐级叠加，每级一个 0~1 的折扣率（1＝不打折，0.9＝九折），可单独删除（删到空＝不打折），实时显示「累计等效折扣」。
 - **展示**：详情页与导出/打印的「整单折扣」字段显示完整折扣链——单级 `×0.90`，多级 `×0.90 ×0.90 ×0.80 = ×0.65`（含等效），无折扣不显示。
 - **单项折扣**（`line.discountRate`，每行一个）与整单折扣链相互独立、叠加生效：行折扣先作用于各行小计，整单折扣链再作用于合计。
+- **行级多级折扣**：明细行也可以带折扣链 `line.discountRates`（如 `[0.9, 0.9, 0.8]`），口径与整单折扣链完全一致——连乘得等效值，并把**等效乘积同步写进 `line.discountRate` 标量**。这样「过账后金额不变数」这条铁律不用改任何服务端代码就仍然成立：`orderToOrderDoc` 用 `{ ...l }` 原样搬行，`resolveLine` / `normalizeRate` 读的还是那个标量。开单页的勾选行批量设折扣就走这条路（见「开单页明细行批量操作」）。
 - **折扣金额与优惠金额联动**：折扣链不仅展示折扣率，还会实时算出它从合计里减掉的**折扣金额（人民币）** `discountAmountOf(order) = round2(合计 × (1 − 等效折扣率))`，与「整单优惠金额」（`discount` 字段，抹零）并列作为应收/应付的减项，二者一起联动：改折扣率 → 折扣金额与应收同步更新。展示形态示例：
   - 详情页 info 区：`整单折扣：×0.90 ×0.90 ×0.80 = ×0.65（减 ¥352.00）`
   - 编辑弹窗结算明细：`整单折扣 ×0.90 ×0.90 ×0.80 = ×0.65（减 ¥352.00）` + `整单优惠金额 -¥48.00`
@@ -704,6 +710,35 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 ### 打印排版（字号与折扣呈现）
 - 单头字段可带强调样式：`tone = 'hl'` 加框强调（整单折扣用），`tone = 'xl'` 字号放大到两倍（基础 12px → 24px，加粗），**订单金额**在订单详情与订单列表打印中统一用 `xl`。
 - 单头无值字段自动过滤；明细没有行折扣时打印隐藏「折扣率 / 本次折扣」两列，有整单折扣时保留「折后金额（含整单折扣）」列，行合计与单头折后金额分文不差（`allocateNetOf()` 累计取整）。
+- **打印分页后每页都重复商品表头**：`thead { display: table-header-group }`（`src/utils/export.js` 的 `printStyle()`）让浏览器在每张 A4 的顶部重排表头，商品几十上百行时第 2、3 页起不再是「无主数据」。表头只有一份 `<thead>`，所以该声明不会造成重复列。
+
+### 折后单价（含整单折扣）
+- 销售单 / 采购单 / 订单的明细在有整单折扣时多一列「**折后单价（含整单折扣）**」，页面、单张打印、CSV 同一口径（`src/utils/account.js` 的 `allocateUnitOf()`）。
+- 算法口径：先用 `allocateNetOf()` 按累计四舍五入把整单折扣摊到每行金额（铁律是 **Σ行折后金额 = 单头折后金额**），再用 `行折后金额 ÷ 数量` 得到折后单价。
+- 折后单价是**展示值**，不参与任何金额计算：`折后单价 × 数量` 与该行折后金额可能差 1 分钱（数量越大越明显），这是保证合计不变的必然结果。反过来若为了让每行 `单价×数量=行金额` 去改金额，就会破坏合计，属于不允许的做法。
+- 勾选「隐藏单价」（不给对方看进价/售价）时该列一并隐藏。
+
+### 订单模板
+详见 [docs/templates.md](docs/templates.md)。要点：
+- 「业务 → **订单模板**」（`/templates`）可以建**多份**模板，每份预设一批商品（商品 + 数量 + 单价 + 行折扣），不存客户/供应商、不存金额。
+- 模板支持新增 / 编辑 / 删除 / **复制**，上限 100 份、单份 200 行。
+- **一键转订单**：选类型（销售/采购）、往来单位、日期、业务单号后按订单口径 `orderAmount()` 重算金额，走 `POST /api/orders` 的 `save` 生成未过账订单并跳详情页。
+- 两种打印：正常打印带数量单价金额；**打印空表**只有编码 / 商品名称 / 单位，**不出现任何数量、单价、金额**，用于手写单据。
+
+### 新页面开单（销售 / 采购 / 订单）
+- 三个列表页的表头各有两个入口：「新增销售 / 新增采购 / 新建订单」仍然是弹窗，旁边的「**新页面开单**」把同一张表单开成整页（地址 `/sales/new`、`/purchases/new`、`/orders/new`）。
+- 实现口径：整页模式**复用列表页组件本身**，靠路由 `meta.entry`（`src/utils/entryMode.js`）隐藏列表、把开单表单切成 `el-dialog` 全屏（`standalone`）。单号生成、整表覆盖红线、资金单据联动、预付款抵扣仍是列表页那一份代码——新开一页就等于第二套保存链路，金额口径漂移在这套系统里等于错账。
+- 因为地址是真实 URL，可以直接收藏或在浏览器里新标签打开；整页模式底下只有「返回」一个出口（不显示右上角 ×），保存成功或返回都自动回列表。
+- 整页模式的明细表高度从 320px 提到 480px，几十行商品不用再在小窗里来回滚。
+
+### 开单页明细行批量操作
+详见 [docs/line-discount.md](docs/line-discount.md)。要点：
+- 新增/编辑采购单、销售单、订单的表单里，每行明细前有**勾选框**（表头可全选），上方「批量设置折扣（已选 N 项）」与「批量删除（已选 N 项）」两个按钮，未勾选时禁用。
+- 批量折扣弹窗（`src/components/LineDiscountDialog.vue`）两种给法：**统一折扣链**（一组级联折扣率套用到所有勾选行，可逐级增删，实时显示累计等效与逐行折后预览）与**逐行单独设置**（每行一个折扣率，可就地展开成多级链）。
+- 预览与写回共用 `applyLineRates()`：先 `round2` 折扣额、再从原价里减，绝不出现「预览一个数、落库另一个数」。
+- **批量删除**走 `ElMessageBox` 二次确认，按行索引倒序移除（正序删会错位），删完清空勾选态。
+- 金额不另算：写回只改行上的折扣字段，小计、合计、原价合计、单项折扣、整单折扣、应收/实收全部由既有 computed 重算。
+- 已动过钱的单据（`moneyLocked`）不出现勾选框与批量按钮，仍然只能走「变更明细」生成退货单 / 补差单。
 
 ## 本地开发
 ```bash

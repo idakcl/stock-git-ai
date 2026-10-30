@@ -3,7 +3,9 @@
        resolveLine 传参、结清补流水方向），统一由 kind 派生，逻辑只维护一份。
        落库由父组件完成：本组件只组装 entry 并 emit('saved')，失败时弹窗保持打开便于重试 -->
   <!-- 保存中禁止误关：点遮罩/按 ESC 不会中断保存（关闭由保存结果驱动） -->
-  <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
+  <!-- standalone＝整页开单（路由 /sales/new、/purchases/new）：同一份表单铺满屏幕，
+       明细表能拿到近两倍高度。关掉即由父组件回列表，所以不显示右上角 ×，避免「×」和「返回」两个出口 -->
+  <el-dialog v-model="visible" :title="title" width="620" :fullscreen="standalone" :show-close="!standalone" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
     <!-- 已动过钱的单：明细/折扣/优惠/结算状态全部锁定（表单级 disabled 会连按钮一起禁用，
          所以这块放在 el-form 外面），要增减商品改走「变更明细」生成退货单/补差单 -->
     <div v-if="moneyLocked" class="lock-bar">
@@ -74,10 +76,23 @@
         <el-input v-else model-value="明细已锁定，请点上方「变更明细」增减商品" disabled class="quick-add-select" />
         <div v-if="!moneyLocked" class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</div>
       </el-form-item>
+      <!-- 所选按钮区：批量折扣与批量删除，只在非锁定态显示。
+           勾选行后按钮可用，未勾选时禁用（避免空操作）。 -->
+      <div v-if="!moneyLocked" class="batch-actions">
+        <el-button size="small" type="primary" plain :disabled="!selectedIndices.size" @click="lineDiscountVisible = true">
+          批量设置折扣（已选 {{ selectedIndices.size }} 项）
+        </el-button>
+        <el-button size="small" type="danger" plain :disabled="!selectedIndices.size" @click="batchDelete">
+          批量删除（已选 {{ selectedIndices.size }} 项）
+        </el-button>
+      </div>
       <!-- 商品明细表：紧跟「快速添加」下方，新增商品即可在下方明细继续改数量/单价。
            锁定态（原单已动过钱）整表改为纯文本展示：明细改动只能走「变更明细」生成关联单 -->
       <div class="lines-scroll">
-        <el-table ref="linesTable" :data="form.lines" stripe max-height="320">
+        <!-- 整页模式给明细表近两倍高度：商品几十行的单子不用在小窗里来回滚 -->
+        <el-table ref="linesTable" :data="form.lines" stripe :max-height="standalone ? 480 : 320" @selection-change="onSelectionChange">
+          <!-- 勾选框列：非锁定态才显示，锁定态不显示（已动过钱的单不允许批量操作） -->
+          <el-table-column v-if="!moneyLocked" type="selection" width="42" />
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
               <el-select
@@ -124,7 +139,7 @@
         </el-table>
       </div>
       <div style="margin-top:8px">
-        <el-button v-if="!moneyLocked" size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1})">添加行</el-button>
+        <el-button v-if="!moneyLocked" size="small" @click="form.lines.push({code:'',name:'',qty:1,price:0,discountRate:1,discountRates:[]})">添加行</el-button>
         <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填表单下方「整单优惠」</span>
       </div>
       <div style="margin-top:12px;text-align:right">
@@ -205,7 +220,8 @@
     </el-form>
     <template #footer>
       <span v-if="saving || emitting" class="saving-hint">保存中，请稍候…</span>
-      <el-button @click="visible = false">取消</el-button>
+      <!-- 整页模式下这个按钮就是唯一的「回列表」出口，文案用返回而不是取消，避免用户以为会丢已填内容 -->
+      <el-button @click="visible = false">{{ standalone ? '返回' : '取消' }}</el-button>
       <el-button type="primary" :loading="saving || emitting" @click="save">{{ saveLabel }}</el-button>
     </template>
     <!-- 变更明细：嵌在这里，销售/采购两个列表页与两个详情页四处调用点自动全部继承 -->
@@ -217,17 +233,24 @@
       :kind="amendKind"
       @amended="onAmended"
     />
+    <!-- 批量行折扣弹窗：为勾选行统一设置多级折扣链或逐行单独设置 -->
+    <LineDiscountDialog
+      v-model="lineDiscountVisible"
+      :lines="selectedLinesSnapshot"
+      @confirm="onLineDiscountConfirm"
+    />
   </el-dialog>
 </template>
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { resolveLine, normalizeRate } from '../utils/catalog'
+import { resolveLine, normalizeRate, lineEffectiveRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
 import OrderAmendDialog from './OrderAmendDialog.vue'
+import LineDiscountDialog from './LineDiscountDialog.vue'
 import { moneyTouched } from '../utils/amend.js'
 import { api } from '../api'
 import { todayCN } from '../utils/time.js'
@@ -246,6 +269,8 @@ const props = defineProps({
   suppliers: { type: Array, default: () => [] },
   // payable=采购单 / receivable=销售单
   kind: { type: String, default: 'payable' },
+  // 整页模式（/sales/new、/purchases/new）：弹窗铺满屏幕，父组件负责关掉后回列表
+  standalone: { type: Boolean, default: false },
   // 父级保存锁：配合按钮 loading，防止双击重复提交（会生成两张同内容单据、库存翻倍）
   saving: { type: Boolean, default: false }
 })
@@ -281,12 +306,74 @@ const editingId = ref('')
 const emitting = ref(false)
 // 变更明细弹窗：原单已动过钱时，明细只能走它生成退货单/补差单
 const amendVisible = ref(false)
+// ---- 批量操作：勾选行 → 批量折扣 / 批量删除 ----
+// 选中态：Set<行索引>，由 el-table 的 selection-change 事件同步。
+// 用 Set 而非数组：批量删除时需要按索引倒序移除，Set 便于 O(1) 判定与遍历。
+const selectedIndices = reactive(new Set())
+// 批量折扣弹窗可见态
+const lineDiscountVisible = ref(false)
+// 传给批量折扣弹窗的行快照：取选中行的引用，弹窗内只读不写
+const selectedLinesSnapshot = computed(() => {
+  const indices = [...selectedIndices].sort((a, b) => a - b)
+  return indices.map(i => form.lines[i]).filter(Boolean)
+})
 // 变更成功后两层都关掉：原单本身没被改，但它所在的「单族」金额已经变了
 // （净成交、未收/未付都会带上新的退货单/补差单），留着旧表单容易基于过期数字点保存。
 function onAmended(result) {
   amendVisible.value = false
   visible.value = false
   emit('amended', result)
+}
+
+// ---- 批量操作处理函数 ----
+// el-table selection-change：同步选中态到 selectedIndices（Set<行索引>）。
+// el-table 的 selection 参数是当前勾选行的数组，需要反查它们在 form.lines 中的索引。
+function onSelectionChange(selection) {
+  selectedIndices.clear()
+  selection.forEach(row => {
+    const idx = form.lines.indexOf(row)
+    if (idx >= 0) selectedIndices.add(idx)
+  })
+}
+
+// 批量删除：二次确认后按索引倒序移除（倒序避免正序删除时索引错位）。
+// 删除后清空选中态，避免残留的索引指向已不存在的行。
+async function batchDelete() {
+  if (!selectedIndices.size) return
+  try {
+    await ElMessageBox.confirm(
+      `确定删除已勾选的 ${selectedIndices.size} 行商品明细？删除后不可恢复。`,
+      '批量删除确认',
+      { type: 'warning', confirmButtonText: '确定删除', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  const indices = [...selectedIndices].sort((a, b) => b - a)
+  for (const idx of indices) {
+    form.lines.splice(idx, 1)
+  }
+  selectedIndices.clear()
+  // 清 table 的勾选态：el-table 的 clearSelection 方法
+  nextTick(() => linesTable.value?.clearSelection())
+}
+
+// 批量折扣确认回调：LineDiscountDialog emit 的 results 数组，
+// 按选中顺序一一对应，逐项写回 form.lines 的折扣字段。
+// 写完后既有 computed（lineGross/lineDiscount/lineNet/totalAmount 等）自动重算，
+// 不在此处另算金额——保证口径与单行编辑完全一致。
+function onLineDiscountConfirm(results) {
+  const indices = [...selectedIndices].sort((a, b) => a - b)
+  results.forEach((r, i) => {
+    const lineIdx = indices[i]
+    if (lineIdx == null || !form.lines[lineIdx]) return
+    const line = form.lines[lineIdx]
+    line.discountRate = r.discountRate
+    line.discountRates = r.discountRates
+    line.discount = r.discount
+    line.total = r.total
+  })
+  selectedIndices.clear()
+  nextTick(() => linesTable.value?.clearSelection())
+  ElMessage.success(`已为 ${results.length} 行设置折扣`)
 }
 const form = reactive({ party:'', date:'', remark:'', settle:'挂账', photos:[], discount:0, discountRates:[], paidNow:0, depositPay:0, lines:[] })
 // 历史销售价改为按需接口，不再随 items.json 下发；打开弹窗时取一次，
@@ -323,7 +410,13 @@ watch(() => props.modelValue, async (open) => {
     const depositFromTotal = round2(originPayments.filter(p => p.fromDeposit).reduce((s, p) => s + Number(p.amount || 0), 0))
     form.paidNow = Math.max(0, round2((isPurchase.value ? paidSumOf(row) : receivedSumOf(row)) - depositFromTotal))
     form.depositPay = depositFromTotal
-    form.lines = (row.items || []).map(i => ({ code: i.code, name: i.name, qty: i.qty, price: i.price, discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)) }))
+    // 编辑回填：保留 discountRates 数组（多级折扣链），同时用 normalizeRate 兼容旧数据
+    form.lines = (row.items || []).map(i => ({
+      code: i.code, name: i.name, qty: i.qty, price: i.price,
+      discountRate: normalizeRate(i, (i.qty || 0) * (i.price || 0)),
+      // 多级折扣链：如果原行有 discountRates 数组，保留它；否则留空（由 discountRate 标量生效）
+      discountRates: Array.isArray(i.discountRates) && i.discountRates.length ? i.discountRates.map(Number) : []
+    }))
   } else {
     editingId.value = ''
     form.party = ''
@@ -335,7 +428,7 @@ watch(() => props.modelValue, async (open) => {
     form.discountRates = []
     form.paidNow = 0
     form.depositPay = 0
-    form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
+    form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1, discountRates:[] }]
   }
   // 打开弹窗后主动检查一次自动结清：unpaidAmount 可能「回填前后都是 0」
   // （首次打开就是全付旧单、或上一张处理过的单也未付为 0），值没变化 watch 不会触发，
@@ -412,7 +505,8 @@ const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
 let midSeq = 0
 const newMid = () => `o${Date.now().toString(36)}${(midSeq++).toString(36)}`
 // 行折扣率（默认1＝原价）/ 行原价（数量×单价）/ 行减免额 / 折后小计；折扣只减钱、不改单价
-const lineRate = (l) => normalizeRate(l, lineGross(l))
+// 行折扣率支持多级折扣链（discountRates 数组），与 normalizeRate 向后兼容旧单级 discountRate
+const lineRate = (l) => lineEffectiveRate(l) || normalizeRate(l, lineGross(l))
 const lineGross = (l) => round2((l.qty || 0) * (l.price || 0))
 const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
 const lineNet = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
@@ -596,8 +690,8 @@ async function addQuickItem(val) {
     if (choice !== 'add') return
   }
   const line = found
-    ? { code: found.code, name: found.name, qty: 1, price: priceFor(found), discountRate: 1 }
-    : { code: '', name: String(code), qty: 1, price: 0, discountRate: 1 }
+    ? { code: found.code, name: found.name, qty: 1, price: priceFor(found), discountRate: 1, discountRates: [] }
+    : { code: '', name: String(code), qty: 1, price: 0, discountRate: 1, discountRates: [] }
   // 优先填入第一个未触碰的空白行：直接 push 会在明细里留下一行空白，
   // 过去这行空白会让「保存出库」静默失败（点了没反应的直接原因）
   const blank = form.lines.findIndex(isUntouchedBlankLine)
@@ -638,7 +732,13 @@ async function doSave() {
     const result = isPurchase.value ? resolveLine(catalog, { ...l, cost: l.price }, idx, nextCodeFn) : resolveLine(catalog, l, idx, nextCodeFn)
     if (result.line) {
       catalog = result.items
-      resolved.push(result.line)
+      // 保留行级多级折扣链（discountRates 数组）：resolveLine 只返回 discountRate 标量，
+      // 但过账时需要把链本身也带上，确保「过账后金额不变数」
+      const resolvedLine = { ...result.line }
+      if (Array.isArray(l.discountRates) && l.discountRates.length) {
+        resolvedLine.discountRates = l.discountRates.map(Number)
+      }
+      resolved.push(resolvedLine)
     }
   })
   if (!resolved.length) return warn(`请完整填写${bizWord.value}明细`)
@@ -790,4 +890,6 @@ async function save() {
 .discount{color:var(--color-success);}
 .none{color:var(--text-placeholder);}
 .debt{color:var(--color-danger);font-weight:600;}
+/* 批量操作按钮区：紧贴明细表上方，与「添加行」按钮同行对齐 */
+.batch-actions{display:flex;gap:8px;margin-top:8px;align-items:center;}
 </style>

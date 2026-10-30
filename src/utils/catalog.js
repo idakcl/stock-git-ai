@@ -94,6 +94,55 @@ export function normalizeRate(line, gross) {
   return 1
 }
 
+// ---- 行级多级折扣（折扣链）----
+// 与整单折扣链（account.js 的 discountRatesOf / effectiveRateOf）同一概念，但作用在明细行上。
+// 数据结构：行上可带 discountRates: number[]（级联），向后兼容旧单级 discountRate 标量。
+// 为什么不在行上只存 discountRates 数组：过账时行数据原样搬进正式单据（utils/orders.js orderToOrderDoc），
+// 正式单据的 resolveLine 只读 discountRate 标量。把等效乘积同步写进 discountRate，保证「过账后金额不变数」。
+
+// 规范化行折扣链：优先取 discountRates 数组，回退旧 discountRate 标量，非法项剔除。
+// 纯函数、不引浏览器 API，Worker 端可安全 import。
+export function lineDiscountRatesOf(line) {
+  const rates = line?.discountRates
+  if (Array.isArray(rates) && rates.length) {
+    const valid = rates.map(Number).filter(r => Number.isFinite(r) && r > 0 && r <= 1)
+    if (valid.length) return valid
+  }
+  const r = Number(line?.discountRate)
+  // 这里允许 0：normalizeRate 的既有口径里 discountRate=0 表示「整行全免」，
+  // 若按链的规则剔掉 0，行折扣输入框填 0 会静默变回原价（金额凭空多出一笔）
+  if (Number.isFinite(r) && r >= 0 && r <= 1) return [r]
+  return []
+}
+
+// 行等效折扣率：折扣链连乘；无折扣返回 1（1＝不打折）。
+// 与 account.js 的 effectiveRateOf 同一口径，但作用于单行。
+// 末位 round4：连乘会产生浮点尘（0.9×0.8=0.7200000000000001），
+// 不收敛会让行金额与整单金额对不上账。
+export function lineEffectiveRate(line) {
+  const rates = lineDiscountRatesOf(line)
+  if (!rates.length) return 1
+  return round4(rates.reduce((a, b) => a * b, 1))
+}
+
+// 把一组级联折扣率应用到行上：返回 { discountRate, discountRates, discount, total }
+// 其中 discountRate = 等效乘积（向后兼容旧字段），discountRates = 原始链（供展示/编辑）。
+// gross 是行原价（qty × price），discount 是减免金额，total 是折后小计。
+// 纯函数，不修改入参。
+export function applyLineRates(line, rates, gross) {
+  const g = round2(Number(gross || 0))
+  const valid = (rates || []).map(Number).filter(r => Number.isFinite(r) && r > 0 && r <= 1)
+  const eff = valid.length ? valid.reduce((a, b) => a * b, 1) : 1
+  const rate = round4(Math.min(1, Math.max(0, eff)))
+  const discount = round2(g * (1 - rate))
+  return {
+    discountRate: rate,
+    discountRates: valid.length ? valid.slice() : [],
+    discount,
+    total: Math.max(0, round2(g - discount))
+  }
+}
+
 export function resolveLine(items, line, index = 0, nextCodeFn = null) {
   const result = ensureCatalogItem(items, line, index, nextCodeFn)
   if (!result.item) return result

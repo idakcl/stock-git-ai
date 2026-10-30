@@ -1,8 +1,16 @@
 <template>
   <div>
-    <el-card>
+    <!-- 新页面开单（/sales/new）：同一份列表组件只留开单表单，保存链路、整表红线、
+         单号生成全部沿用这里的逻辑，避免出现第二套「页面版保存」实现 -->
+    <el-card v-if="!entry">
       <template #header>
-        <div class="card-header"><b>销售出库</b><el-button type="primary" @click="openDialog()">新增销售</el-button></div>
+        <div class="card-header">
+          <b>销售出库</b>
+          <div class="header-ops">
+            <el-button type="primary" @click="openDialog()">新增销售</el-button>
+            <el-button @click="openEntryPage">新页面开单</el-button>
+          </div>
+        </div>
       </template>
       <el-input v-model="keyword" clearable placeholder="搜索单号 / 客户 / 商品" class="search-input" />
       <div class="filter-row">
@@ -119,6 +127,15 @@
       />
     </el-card>
 
+    <!-- 整页开单的占位：整表/商品/客户还没回来时表单没有意义（单号要靠整表算，
+         保存更要靠整表齐全），加载失败就明说，不给用户一张点了保存必然被拦的空表单 -->
+    <el-card v-if="entry && !dialog">
+      <div class="entry-loading">
+        <template v-if="loadFailed">数据加载失败，开单所需的整表数据没有取到。<el-button size="small" @click="$router.replace('/sales')">返回列表</el-button></template>
+        <template v-else>正在准备开单…</template>
+      </div>
+    </el-card>
+
     <OrderEditDialog
       v-model="dialog"
       :order="editingOrder"
@@ -127,6 +144,7 @@
       :customers="customerOptions"
       kind="receivable"
       :saving="saving"
+      :standalone="entry"
       @saved="onOrderSaved"
       @amended="refreshFromServer"
     />
@@ -156,6 +174,8 @@ import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import { joinLimited } from '../utils/export'
+// 新页面开单：/sales/new 复用本页组件，只靠路由 meta 切换成整页表单
+import { useEntryMode } from '../utils/entryMode'
 
 const PAGE_SIZE = 60
 // 客户类别 → 商品上的对应分级售价字段
@@ -176,6 +196,10 @@ const customerCodeMap = computed(() => {
   return m
 })
 const dialog = ref(false)
+// 整页开单（/sales/new）：entry=true 时隐藏列表、把开单表单铺满屏幕。
+// 复用本页组件而不是新写开单页：单号生成、整表红线校验、资金单据联动全在这里，
+// 复制一份表单就是两套保存链路，金额口径漂移会直接造成错账。
+const { entry, openEntryPage, backToList } = useEntryMode('/sales')
 // 保存中标记：配合按钮 loading 防止双击重复提交（会生成两张同内容单据、库存翻倍）
 const saving = ref(false)
 const payDialog = ref(false)
@@ -271,6 +295,8 @@ onMounted(async () => {
     itemOptions.value = it
     customerOptions.value = cu
     loadFailed.value = false
+    // 整页开单：数据齐了才把表单摊开（新增单号要靠整表算，缺整表时保存必被红线拦下）
+    if (entry.value) openDialog()
   } catch (e) {
     // 不清空已有列表：清空过一次保存就能把线上单据覆盖没了
     loadFailed.value = true
@@ -308,6 +334,13 @@ function openDialog(row) {
   editingOrder.value = row || null
   dialog.value = true
 }
+
+// 整页开单的进出：
+// - 从列表点「新页面开单」→ 路由换到 /sales/new，组件实例复用，watch(entry) 触发开表单；
+// - 直接访问 /sales/new → 首次挂载时数据还没回来，等 onMounted 加载完再开（单号要靠整表算）；
+// - 表单关掉（取消 / 保存成功）→ 回列表。保存成功后回列表而不是停在一张已入库的空表单上。
+watch(entry, (v) => { if (v) openDialog() })
+watch(dialog, (v) => { if (!v) backToList() })
 
 // 单据保存（新增/编辑均由弹窗组装好 entry 后交回本地落库）：
 // 合并进列表 → 整表保存 → 失败回滚并保持弹窗打开便于重试，成功则立即关窗报成功再后台刷新。
@@ -563,6 +596,8 @@ async function remove(row) {
 </script>
 <style scoped>
 .card-header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;}
+.header-ops{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.entry-loading{padding:48px 0;text-align:center;color:var(--text-secondary);}
 .search-input{margin-bottom:12px;max-width:360px;}
 .filter-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
 .filter-label{color:var(--text-regular);font-size:var(--fs-base);}

@@ -109,8 +109,8 @@ await t('有行折扣与整单折扣：页面多一列「折后金额（含整�
     await page.getByRole('button', { name: '导出CSV' }).click()
     await page.waitForFunction(() => !!window.__csv, null, { timeout: 5000 })
     const csv = (await page.evaluate(() => window.__csv)).replace(/^\uFEFF/, '')
-    assert.match(csv, /本次单价,本次折扣,本次金额,折后金额（含整单折扣）/)
-    assert.match(csv, /18\.00,17\.10/)
+    assert.match(csv, /本次单价,本次折扣,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /18\.00,8\.55,17\.10/)
     assert.match(csv, /5\.00,4\.75/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }

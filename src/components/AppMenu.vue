@@ -33,6 +33,10 @@
         <span>订单</span>
         <span v-if="draftOrders" class="menu-badge warn">{{ badgeText(draftOrders) }}</span>
       </el-menu-item>
+      <el-menu-item index="/templates">
+        <el-icon><Document /></el-icon>
+        <span>订单模板</span>
+      </el-menu-item>
       <el-menu-item index="/purchases">
         <el-icon><Download /></el-icon>
         <span>采购</span>
@@ -99,7 +103,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Document
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

@@ -121,6 +121,18 @@ export function allocateNetOf(baseTotals = [], rate = 1) {
   })
 }
 
+// 折后单价（含整单折扣）：把整单折扣摊到每行后，用「行折后金额 ÷ 数量」换算出的单价，两位小数。
+// 铁律是行折后金额合计必须一分不差等于单头折后金额，所以金额一律沿用 allocateNetOf 的累计取整口径，
+// **不为了凑「单价 × 数量 = 行金额」去改动金额**（单价是 2 位小数，数量一大就除不尽，
+// 强行对齐会把整单总额撑偏）。需要乘回去核对时，以「折后金额」列为准，本列是摊好的参考单价。
+export function allocateUnitOf(baseTotals = [], qtys = [], rate = 1) {
+  const nets = allocateNetOf(baseTotals, rate)
+  const units = nets.map((net, i) => {
+    const q = Number(qtys?.[i] || 0)
+    return q === 0 ? 0 : round2(Number(net) / q)
+  })
+  return { nets, units }
+}
 // 结清模式「实收/抵扣/优惠」平衡：在保持未付款=0 的前提下，按锚点字段计算另一字段。
 // 这是录入弹窗「以用户手填金额为最优先基准」的唯一计算入口，纯函数便于单测。
 //   anchor='paid' | 'deposit'（实收或抵扣为基准）→ 优惠金额 = 毛额 − 实收合计

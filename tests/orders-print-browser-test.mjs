@@ -147,9 +147,9 @@ await t('CSV 文件名与内容：单头 + 明细行，折扣与折后金额同�
     const csv = (await page.evaluate(() => window.__csv)).replace(/^\uFEFF/, '')
     assert.match(csv, /业务单号,HT-2026-001/)
     assert.match(csv, /订单金额,¥20\.85/)
-    assert.match(csv, /编码,名称,数量,单价,折扣率,折扣金额,本次金额,折后金额（含整单折扣）/)
-    assert.match(csv, /P00001,管件,2,10\.00,0\.90,2\.00,18\.00,17\.10/)
-    assert.match(csv, /P00002,弯头,1,5\.00,1\.00,0\.00,5\.00,4\.75/)
+    assert.match(csv, /编码,名称,数量,单价,折扣率,折扣金额,本次金额,折后单价（含整单折扣）,折后金额（含整单折扣）/)
+    assert.match(csv, /P00001,管件,2,10\.00,0\.90,2\.00,18\.00,8\.55,17\.10/)
+    assert.match(csv, /P00002,弯头,1,5\.00,1\.00,0\.00,5\.00,4\.75,4\.75/)
     // 文件名在下载时确定，这里只确认这条路径没发写请求（纯前端导出）
     assert.deepEqual(state.posts || [], [])
     assert.deepEqual(errors, [], '页面不得报错')
