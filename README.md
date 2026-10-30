@@ -111,7 +111,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/normalize` | `{}` | 全量重跑派生，修复编码/历史价/库存漂移。**幂等，改完数据仓后调一次即可** |
 | `/import` | `{"text":"<整份 JSON 的字符串>"}` | 见下方「导入」 |
 | `/import-merge` | `{"key":"items","records":[...]}` | 按主键去重后**追加**，不覆盖已有数据；`key` 可取 `items / customers / suppliers / purchases / sales / receipts / payment-vouchers / orders / refunds`，主键为编码（档案、资金单据、退款凭证）或单号（单据、订单），客户/供应商另按名称查重；返回各项计数 `{ ok, added, skippedKey, skippedName, invalid, total }` |
-| `/orders` | `{"action": "save" / "deposit" / "post" / "unpost" / "delete" / "deleteMany" / "clearDrafts" / "restore", …}` | **操作接口，不是整表覆盖**，请求体形状与闸门规则见 [docs/orders.md](docs/orders.md)。只有 `post` / `unpost` 才跑 `derive()` + `rebuildStock()`（存草稿、收订金不重写 200KB 的 `items.json`）；`restore` 仅供备份恢复，整表替换 `orders` 且不派生 |
+| `/orders` | `{"action": "save" / "remark" / "deposit" / "post" / "unpost" / "delete" / "deleteMany" / "clearDrafts" / "migrateStatus" / "restore", …}` | **操作接口，不是整表覆盖**，请求体形状与闸门规则见 [docs/orders.md](docs/orders.md)。只有 `post` / `unpost` 才跑 `derive()` + `rebuildStock()`（存草稿、收订金、改备注不重写 200KB 的 `items.json`）；`restore` 仅供备份恢复，整表替换 `orders` 且不派生 |
 | `/refunds` | `{"action": "create" / "settle" / "backfill" / "restore", …}` | **操作接口**，见 [docs/refunds.md](docs/refunds.md)；`restore` 仅供备份恢复，整表替换退款/核销凭证（退款是凭证、不影响库存，故不派生） |
 | `/amends` | `{"kind","requestId","sourceOrderId","party","date","reason","mode","refundLines":[{index,qty}],"amendLines":[{code,name,unit,qty,price}]}` | **操作接口**：原单不动，减少的商品生成退货单（复用退款四档资金处理）、增加的商品生成补差单，一次提交落库；`requestId` 幂等，金额一律服务端重算 |
 | `/voids` | `{"kind":"sale"\|"purchase","id":"单据号","reason":"可选"}` | **操作接口**：整单作废并同步作废关联的 `SK-`/`FK-`，一次提交回滚库存/应收；重复作废幂等；子单/核销/合并凭证未拆时 `409`。详见 [docs/void.md](docs/void.md) |
@@ -127,7 +127,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 - 金额请自己保证 2 位小数；服务端 `derive` 会收敛浮点残留，但不会替你四舍五入 `payments[].amount`。
 - 不要写 `payments[].mid`（前端一次性定位标记，落库前会被剥掉）；写 `items[].purchaseHistory` 也会被剥掉。
 
-**导入接口 `/import`**：`text` 是**字符串**（整份 JSON 文本），识别键 `items / suppliers / customers / purchases / sales / receipts / payment-vouchers`，逐个**整表覆盖**（传哪些键覆盖哪些，未传的不动）；`stock` 键会被忽略（库存一律由单据重建）。上限：文本 1MB、单类 5000 条、记录必须是对象，否则 400 中止。非 JSON 文本走行式解析，仅识别 `商品: 编码 名称 单位`、`供应商: 编码 名称`、`客户: 编码 名称` 三种行。每次导入会往 `logs.json` 追加一条 `{time, source:"ai", results}`。**订单草稿与退款/核销单不在 `/import` 的识别键里**（它们是操作型集合，没有整表写接口），「数据管理 → 全量导入」由前端在写完其余 7 类后，分别调用 `POST /api/orders` / `POST /api/refunds` 的 `restore` 动作整表写回。
+**导入接口 `/import`**：`text` 是**字符串**（整份 JSON 文本），识别键 `items / suppliers / customers / purchases / sales / receipts / payment-vouchers`，逐个**整表覆盖**（传哪些键覆盖哪些，未传的不动）；`stock` 键会被忽略（库存一律由单据重建）。上限：文本 1MB、单类 5000 条、记录必须是对象，否则 400 中止。非 JSON 文本走行式解析，仅识别 `商品: 编码 名称 单位`、`供应商: 编码 名称`、`客户: 编码 名称` 三种行。每次导入会往 `logs.json` 追加一条 `{time, source:"ai", results}`。**未过账订单与退款/核销单不在 `/import` 的识别键里**（它们是操作型集合，没有整表写接口），「数据管理 → 全量导入」由前端在写完其余 7 类后，分别调用 `POST /api/orders` / `POST /api/refunds` 的 `restore` 动作整表写回。
 
 ### 资金单据（`SK-` / `FK-`）结构
 ```json
@@ -243,8 +243,9 @@ console.log('已生成收款单', code, '｜本单未收', due)
 > 生产代码请优先复用 `src/utils/voucherFlow.js`（`allocVoucherCodes` / `attachPaymentVouchers` / `savePaymentWithVouchers` / `voucherNotices`）——编号预分配、`settle` 计算、失败分 `stage` 提示都已处理好，且是可单测的纯逻辑。
 
 ### 对接前必读的变更
-- **2026-10-30｜订单支持打印与导出**：订单页单张订单提供「打印(A4)」与「CSV」——A4 单头带订单号/业务单号/往来单位/状态/关联单据，明细含行折扣率、折扣金额与折后金额，合计含原价、整单折扣链、整单优惠、订金与未收(未付)；列表工具栏按当前页导出 CSV / A4。新增**订单详情页 `/order/:id`**（点订单号进入），带「隐藏单价与金额 / 显示售价 / 显示进价 / 展开历史价与商品档案 / 对外查看（隐藏价格·只读）/ 显示客户(供应商)信息详情」六个勾选，打印与导出严格跟随勾选。订单号下方直接显示业务单号，并纳入关键词搜索与导出列。订单列表**默认只看未过账订单**（状态下拉：显示全部 / 仅未过账 / 仅已过账），首列勾选后支持**打印勾选订单列表**、**打印勾选订单详情页**（可选直接打印 / 隐藏金额打印，后者单价与全部合计都不出现）与**批量删除**（`deleteMany` 一次提交，已过账 / 已收订金自动跳过）；原「清空草稿」更名为「清空未过账订单」。订单状态在界面上由「草稿」改称「**未过账**」（存储值仍是 `草稿`，历史数据与备份恢复无需迁移）。所有 A4 打印的明细表最前面增加「序号」列（1、2、3 顺排）；隐藏金额打印不再显示状态与「金额已隐藏」，第二行只留「共 N 项商品」。
-- **2026-10-30｜备份纳入订单与退款**：数据管理「全量导出 / 导入」由 7 类扩为 **9 类**（新增 `orders` / `refunds` 键），分类导入导出同样多出「订单草稿 / 退款核销单」两行；写回走 `POST /api/orders` / `POST /api/refunds` 的 `restore`（整表替换、形状校验、内容相同不提交），`/import-merge` 新增 `orders`（按 `id`）/ `refunds`（按 `code`）去重。**旧备份没有这两个键时前端不调用 restore，现有草稿与退款凭证保持不动。**
+- **2026-10-30｜订单状态统一「未过账」+ 备注 + 列表打印截断**：订单状态**库内存储值**由「草稿」改为「**未过账**」（`DRAFT = '未过账'`）。`POST /api/orders` 新增 `migrateStatus`（历史「草稿」一次性改写，幂等、无旧值不提交；订单页打开时自动调用一次）与 `remark`（只改备注，已过账订单也能改，≤500 字，空串＝清空）；`restore` 导入旧备份时把 `status:'草稿'` 归一化为「未过账」。订单列表每行新增「备注」按钮，订单详情页备注行旁新增「添加/编辑备注」按钮，与采购/销售详情页同一套弹窗。打印**订单列表 / 销售单列表 / 采购单列表**时，商品名称或编码超过 3 个只留前 3 个并以「…」结尾（`joinLimited`），CSV 导出仍为完整清单。
+- **2026-10-30｜订单支持打印与导出**：订单页单张订单提供「打印(A4)」与「CSV」——A4 单头带订单号/业务单号/往来单位/状态/关联单据，明细含行折扣率、折扣金额与折后金额，合计含原价、整单折扣链、整单优惠、订金与未收(未付)；列表工具栏按当前页导出 CSV / A4。新增**订单详情页 `/order/:id`**（点订单号进入），带「隐藏单价与金额 / 显示售价 / 显示进价 / 展开历史价与商品档案 / 对外查看（隐藏价格·只读）/ 显示客户(供应商)信息详情」六个勾选，打印与导出严格跟随勾选。订单号下方直接显示业务单号，并纳入关键词搜索与导出列。订单列表**默认只看未过账订单**（状态下拉：显示全部 / 仅未过账 / 仅已过账），首列勾选后支持**打印勾选订单列表**、**打印勾选订单详情页**（可选直接打印 / 隐藏金额打印，后者单价与全部合计都不出现）与**批量删除**（`deleteMany` 一次提交，已过账 / 已收订金自动跳过）；原「清空草稿」更名为「清空未过账订单」。所有 A4 打印的明细表最前面增加「序号」列（1、2、3 顺排）；隐藏金额打印不再显示状态与「金额已隐藏」，第二行只留「共 N 项商品」。
+- **2026-10-30｜备份纳入订单与退款**：数据管理「全量导出 / 导入」由 7 类扩为 **9 类**（新增 `orders` / `refunds` 键），分类导入导出同样多出「未过账订单 / 退款核销单」两行；写回走 `POST /api/orders` / `POST /api/refunds` 的 `restore`（整表替换、形状校验、内容相同不提交），`/import-merge` 新增 `orders`（按 `id`）/ `refunds`（按 `code`）去重。**旧备份没有这两个键时前端不调用 restore，现有订单与退款凭证保持不动。**
 - **2026-10-30｜单据作废上线**：`POST /api/voids` 作废销售单/采购单，并同步作废关联的 `SK-`/`FK-`。单据与凭证都保留（`status:"作废"`），但库存、应收应付、实收实付、历史价、往来账、看板/报表全部按 0 处理。**脚本统计必须先过滤作废单**；合并收款的凭证、有退货子单/核销记录的单会被 `409` 拦下。详见 [docs/void.md](docs/void.md)。
 - **2026-10-30｜明细行折扣**：订单与正式单据的 `items[]` 增加 `discountRate` / `discount` / `total`（折后）三件套，订单弹窗每行可单独折扣；过账时原样搬进单据。
 - **2026-10-29｜新增订单与单据变更两个操作接口**：`GET/POST /api/orders`（草稿住 `orders.json`，**文件不存在返回 `[]`**，不参与库存与应收派生）与 `POST /api/amends`（已动过钱的单增减商品 → 生成 `XT-`/`CT-` 退货单 + `XA-`/`CA-` 补差单，原单不动）。**两者都不是整表覆盖**，脚本按「读全量 → 改一条 → 写回全量」的老套路调它们会直接 400。销售/采购单可能开始出现 `type: 'sale-amend'` / `'purchase-amend'` 与 `sourceOrderId`、`fromOrderId` 字段，统计时注意：补差单是正数正常单，退货单是负数红字，两者都算进「单族」的净成交。详见 [docs/orders.md](docs/orders.md)。
@@ -267,8 +268,8 @@ console.log('已生成收款单', code, '｜本单未收', due)
 - **录入校验不得静默**：明细里的空白行（未选商品且未填任何值）不再拦下整单，「快速添加」会优先填入第一个空白行而不是追加，避免残留空行导致「点保存没反应」；填了数量/单价却没选商品的行会指明第几行。校验提示统一停留 5 秒。
 - **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
-- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（14 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿 / 批量删除 / 状态显示口径 / `restore` 整表恢复）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/orders-api-test.mjs`（15 项，`/api/orders` 与 `/api/amends` 全链路）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）、`node tests/backup-api-test.mjs`（8 项，备份恢复：`restore` 订单/退款一次提交且不动库存、空表清空、非法/重复整表拒绝、`import-merge` 对订单与退款按单号/凭证号去重）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
-- **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（14 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片 + 清空草稿 + 菜单顺序 + 菜单角标对齐）、`node tests/void-browser-test.mjs`（9 项，作废按钮/确认框 + 作废标记 + 详情页锁写 + 凭证打标与合计 + 订单行折扣 + 提示间距）、`node tests/backup-browser-test.mjs`（5 项，备份：分类表含订单/退款行、全量导出 JSON 含 9 类、全量导入按序调用含两个 `restore`、旧备份不含订单/退款时不误清、分类导入订单按单号去重）、`node tests/orders-print-browser-test.mjs`（4 项，订单打印/导出：列表 CSV 只导当前页且含业务单号、单张 A4 单头与折扣合计、单张 CSV 明细、已过账订单带关联单据号）、`node tests/orders-bulk-browser-test.mjs`（5 项，订单批量操作：默认只看未过账与三档下拉、只打印勾选订单、详情直接打印每单分页、隐藏金额打印无任何金额、勾选批量删除一次 `deleteMany`）、`node tests/order-detail-browser-test.mjs`（9 项，订单详情页：默认只看本次数据、显示售价/进价、隐藏单价与金额、对外只读、供应商联系方式、展开历史价与商品档案、打印/CSV 跟随开关）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
+- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（16 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿 / 批量删除 / 状态值统一与 `migrateStatus` / 备注 / `restore` 整表恢复）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/orders-api-test.mjs`（18 项，`/api/orders` 与 `/api/amends` 全链路，含备注、状态迁移与旧备份归一化）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）、`node tests/backup-api-test.mjs`（9 项，备份恢复：`restore` 订单/退款一次提交且不动库存、空表清空、非法/重复整表拒绝、`import-merge` 对订单与退款按单号/凭证号去重）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
+- **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（14 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片 + 清空草稿 + 菜单顺序 + 菜单角标对齐）、`node tests/void-browser-test.mjs`（9 项，作废按钮/确认框 + 作废标记 + 详情页锁写 + 凭证打标与合计 + 订单行折扣 + 提示间距）、`node tests/backup-browser-test.mjs`（5 项，备份：分类表含订单/退款行、全量导出 JSON 含 9 类、全量导入按序调用含两个 `restore`、旧备份不含订单/退款时不误清、分类导入订单按单号去重）、`node tests/orders-print-browser-test.mjs`（4 项，订单打印/导出：列表 CSV 只导当前页且含业务单号、单张 A4 单头与折扣合计、单张 CSV 明细、已过账订单带关联单据号）、`node tests/orders-bulk-browser-test.mjs`（8 项，订单批量操作：默认只看未过账与三档下拉、历史「草稿」自动迁移、列表备注只提交 `remark`、只打印勾选订单、打印列表商品超过 3 个截断、详情直接打印每单分页、隐藏金额打印无任何金额、勾选批量删除一次 `deleteMany`）、`node tests/order-detail-browser-test.mjs`（10 项，订单详情页：默认只看本次数据、显示售价/进价、隐藏单价与金额、对外只读、供应商联系方式、展开历史价与商品档案、打印/CSV 跟随开关、备注框保存 `remark`）、`node tests/list-print-truncate-browser-test.mjs`（3 项，销售/采购/订单列表打印：商品名称或编码超过 3 个只留前 3 个 +「…」，CSV 仍完整）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
 
 ## 读取性能优化（Phase 0）
 
@@ -364,7 +365,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
   "items": [ { "code": "P00001", "name": "管件", "qty": 4, "price": 10, "total": 40 } ],
   "discount": 0,
   "discountRates": [],
-  "status": "草稿",
+  "status": "未过账",
   "postedOrderId": "",
   "deposits": [ { "date": "2026-10-29", "amount": 100, "remark": "订单订金", "time": "…", "voucher": "SK-20261029-0001" } ],
   "createdAt": "…", "updatedAt": "…"
@@ -372,7 +373,8 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 ```
 
 - `kind` 取 `sale` / `purchase`，销售用 `customer`、采购用 `supplier`（与单据同名，过账时直接搬）。
-- `status` 取 `草稿` / `已过账`；已过账时 `postedOrderId` 是过账生成的正式单据号。
+- `status` 取 `未过账` / `已过账`；已过账时 `postedOrderId` 是过账生成的正式单据号。
+  早期版本存成 `草稿` 的历史数据会在打开订单页时通过 `migrateStatus` 自动改写成 `未过账`，`restore` 导入旧备份时也会归一化。
 - `deposits[]` 是订金流水，每笔都对应一张**已开**的资金凭证（`voucher`），因此收过订金的订单不能删。
 - 采购单 / 销售单上的 `fromOrderId` / `fromOrderType: 'order'` 回指订单，双向可查。
 - 完整状态机、订金与撤销闸门见 [docs/orders.md](docs/orders.md)。
@@ -432,7 +434,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
   - 单选按钮组（如录入弹窗的「挂账 / 结清」、报表的「按净额 / 按应收」）天然是选中项实心、未选中空心，符合本规则，无需改动；复选框、开关、分页等非方块控件保持原样。
   - `text` / `link` 改成实心方块后每个按钮约占 46px（两字）+ 6px 间距，表格「操作」列宽需按此估算（过窄会被裁切）。
 - **左侧菜单**：按「经营（看板/报表）→ 资料（商品/供应商/客户）→ 业务（**订单**/采购/销售/库存）→ 资金」分组；订单排业务组第一位（业务链的起点：先谈单、再收订金、过账后才生成采购/销售单），菜单项带**待过账草稿数**角标；**资金**为可展开子菜单，顺序为**应付款管理**、**应收款管理**、来往账、退货/退款、收付款单（应付在前对应「先付供应商、后收客户」的实际节奏），前两项带未付清/未收清单据数角标。角标是手画的胶囊 `span.menu-badge`（`inline-flex` 居中 + `margin-left:auto` 靠右），不用 `el-badge`——后者是「默认插槽 + 绝对定位 sup」结构，在无插槽内容的 flex 菜单项里会掉到文字下沿（手机上就是「角标换行」）。窄屏自动折叠为左上角抽屉菜单（结构相同）。看板顶部另有一张「待过账订单 N 张 · 订金合计 ¥X」卡片（点「去处理」跳 `/orders`；该卡片**故意不跟随日期筛选**——待办属于当下，不是某个区间）。
-- **订单页（`/orders`）**：**默认只看未过账订单**，状态选择框提供「显示全部订单 / 仅显示未过账订单 / 仅显示已过账订单」，另有类型、日期段、关键词筛选，列为勾选框、订单号（收过订金的带「订」标记、订单号下方显示业务单号）、类型、往来单位、时间、商品、订单金额、已收订金、状态（已过账的行给一个跳到生成单据的链接）与操作（草稿可 编辑 / 收订金 / 过账 / 删除，已过账只可 撤销过账；每行另有「打印」与「CSV」按单张订单输出 A4 / CSV；所有 A4 打印明细最前面都是「序号」列）。表格首列勾选后（跨页保留）可**打印勾选订单列表**、**打印勾选订单详情页**（弹框选「直接打印」或「隐藏金额打印」，后者每单单独一页，单价、折扣、行金额、订单金额、订金、未收/未付等所有金额信息全部不输出，单头不显示状态、第二行只留「共 N 项商品」）与**删除勾选**（`deleteMany` 一次请求、一次提交；已过账 / 已收订金的由服务端跳过并回报数量），工具栏保留「导出CSV（当前页）」。新建/编辑走 `OrderFormDialog`（明细与折扣口径与单据完全一致，校验函数 `validateOrder` 前后端共用），**保存只发 `{action:'save'}`，绝不碰 `sales`/`purchases`**。右上角「**清空未过账订单（N）**」按一次请求删掉全部纯草稿（`clearDrafts`），按钮上的 N 就是真会删掉的张数，**已过账与收过订金的单不在其中**（前者连着正式单据、后者凭证已开）。错误提示统一分三档：`409` → 刷新重试、`5xx` → 以刷新后的数据为准、其余 → 原样显示服务端中文原因。
+- **订单页（`/orders`）**：**默认只看未过账订单**，状态选择框提供「显示全部订单 / 仅显示未过账订单 / 仅显示已过账订单」，另有类型、日期段、关键词筛选，列为勾选框、订单号（收过订金的带「订」标记、订单号下方显示业务单号）、类型、往来单位、时间、商品、订单金额、已收订金、状态（已过账的行给一个跳到生成单据的链接）与操作（未过账可 编辑 / 收订金 / 过账 / **备注** / 删除，已过账只可 撤销过账 / 备注；每行另有「打印」与「CSV」按单张订单输出 A4 / CSV；所有 A4 打印明细最前面都是「序号」列）。「备注」弹窗只提交 `{action:'remark'}`，已过账订单也能补备注；订单详情页备注行旁同样有「添加/编辑备注」按钮。打印勾选订单列表时「商品」列最多保留 3 个名称，其余以「…」代替（CSV 不受影响）。表格首列勾选后（跨页保留）可**打印勾选订单列表**、**打印勾选订单详情页**（弹框选「直接打印」或「隐藏金额打印」，后者每单单独一页，单价、折扣、行金额、订单金额、订金、未收/未付等所有金额信息全部不输出，单头不显示状态、第二行只留「共 N 项商品」）与**删除勾选**（`deleteMany` 一次请求、一次提交；已过账 / 已收订金的由服务端跳过并回报数量），工具栏保留「导出CSV（当前页）」。新建/编辑走 `OrderFormDialog`（明细与折扣口径与单据完全一致，校验函数 `validateOrder` 前后端共用），**保存只发 `{action:'save'}`，绝不碰 `sales`/`purchases`**。右上角「**清空未过账订单（N）**」按一次请求删掉全部纯草稿（`clearDrafts`），按钮上的 N 就是真会删掉的张数，**已过账与收过订金的单不在其中**（前者连着正式单据、后者凭证已开）。错误提示统一分三档：`409` → 刷新重试、`5xx` → 以刷新后的数据为准、其余 → 原样显示服务端中文原因。
 - **订单详情页（`/order/:id`）**：点订单号进入，与销售/采购详情页同一套勾选——**隐藏单价与金额**、**显示售价**、**显示进价**、**展开历史价与商品档案**、**对外查看（隐藏价格·只读）**、**显示客户信息详情**（采购订单为「显示供应商信息详情」）。明细默认只看本次数据（本次数量 / 单价 / 折扣 / 金额），勾选后才叠加商品档案的售价、进价、历史采购价/销售价、规格包装与照片；「对外查看」同时隐藏价格与编辑入口，页面只读。**打印(A4) 与 导出CSV 严格跟随这些勾选**：隐藏价格时只输出编码/名称/单位/数量，订金卡片的金额也一并隐藏；正常模式单据头带业务单号、折扣链、订金与未收(未付)，并可按需带出客户/供应商的联系人、电话、地址。
 - **商品管理页**：表格含「备注」列；每行可**展开**查看「历史采购价」「历史销售价」两张明细表（日期 / 供应商或客户 / 数量 / 单价 / 金额），展开区同时显示规格/包装、分级售价、备注与商品照片。历史采购价与历史销售价均在首次展开时按需拉取（见「items.json 瘦身」），未取到时展开区显示加载状态，收起再展开可重试。
 - **采购单 / 销售单详情页**：默认**只显示本次数据**——明细表只保留「本次数量 / 本次单价 / 本次折扣 / 本次金额」，商品档案的售价、进价与「本次单价」重复，默认隐藏（顶部「显示售价 / 显示进价」勾选后可看）；「备注」固定置于条目最后；「历史采购价 / 历史销售价 / 商品照片」等档案信息默认收起，由顶部「展开历史价与商品档案」勾选开启。导出 CSV 与打印遵循同一口径。
@@ -600,12 +602,12 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 时间段筛选位于页签上方，对「单据列表」和「来往账」同时生效。
 
 ### 数据备份与恢复（数据管理页）
-- **全量导出 / 导入**：**九类数据**（商品 / 客户 / 供应商 / 销售单 / 采购单 / 收款单 / 付款单 / 订单草稿 / 退款核销单）打包为一个 JSON 备份文件；导入为**整表覆盖**语义，面向定期存档、换设备恢复。导入顺序固定：主数据 → 单据 → 资金单据 → 订单/退款，其中订单与退款走 `restore` 动作整表写回。
+- **全量导出 / 导入**：**九类数据**（商品 / 客户 / 供应商 / 销售单 / 采购单 / 收款单 / 付款单 / 未过账订单 / 退款核销单）打包为一个 JSON 备份文件；导入为**整表覆盖**语义，面向定期存档、换设备恢复。导入顺序固定：主数据 → 单据 → 资金单据 → 订单/退款，其中订单与退款走 `restore` 动作整表写回。
 - **旧备份兼容**：订单与退款是后加入的集合。旧备份文件里没有 `orders` / `refunds` 键时，摘要不显示这两行、导入**也不动**现有草稿与退款凭证；只有键存在（哪怕是 `[]`）才覆盖——空数组表示「备份时确实没有」，会一并清空。
 - **分类导入导出**：九类数据**各自独立**导出（单类型 JSON）与导入；导入走 `POST /api/import-merge`（**合并去重，不覆盖**）：
-  - 商品 / 客户 / 供应商按**编码**查重，采购单 / 销售单 / 订单草稿按**单号**查重，退款/核销单按**凭证号**查重；客户 / 供应商额外按**名称**查重（防止同名多码把一家单位拆成两份档案）；
+  - 商品 / 客户 / 供应商按**编码**查重，采购单 / 销售单 / 未过账订单按**单号**查重，退款/核销单按**凭证号**查重；客户 / 供应商额外按**名称**查重（防止同名多码把一家单位拆成两份档案）；
   - 导入前前端先用同一份 `src/utils/dedupe.js` 纯函数做**比对预览**（将新增 / 重复跳过 / 无效及逐条明细），确认后才写库；服务端落库前会重新比对一次，以服务端结果为准；
-  - 重复与无效记录自动跳过，只追加新记录；单据类导入后自动 `derive()` + `rebuildStock()` 重建库存、历史价与档案链接，并过 `normalizeOrderPayments` 防实付漏算；订单草稿与退款凭证只是档案/凭证，导入不触发派生（草稿不占库存、退款不影响库存）；
+  - 重复与无效记录自动跳过，只追加新记录；单据类导入后自动 `derive()` + `rebuildStock()` 重建库存、历史价与档案链接，并过 `normalizeOrderPayments` 防实付漏算；未过账订单与退款凭证只是档案/凭证，导入不触发派生（订单不占库存、退款不影响库存）；
   - 单次上限 5000 条。
 
 ### 清空数据（独立菜单项，位于「系统」分组）

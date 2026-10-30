@@ -149,7 +149,7 @@ test('早期数据：用了预存款但没有带标记的抵扣流水时，补�
   assert.equal(flows.reduce((n, f) => n + Number(f.amount), 0), 100)
 })
 
-test('订单过账来的单：作废后订单退回草稿，并摘掉已作废的订金凭证记录', () => {
+test('订单过账来的单：作废后订单退回未过账，并摘掉已作废的订金凭证记录', () => {
   const s = fixture()
   s.sales[0].fromOrderId = 'D001'
   s.receipts[0].items = [{ orderId: 'D001', orderType: 'order', amount: 40 }]
@@ -160,7 +160,7 @@ test('订单过账来的单：作废后订单退回草稿，并摘掉已作废�
   const r = applyVoidOperation(s, { kind: 'sale', id: 'X1' }, NOW)
   assert.equal(r.unpostedOrderId, 'D001')
   const o = r.state.orders[0]
-  assert.equal(o.status, '草稿')
+  assert.equal(o.status, '未过账')
   assert.equal(o.postedOrderId, '')
   assert.deepEqual(o.deposits.map(d => d.voucher), ['SK-0000'])
 })

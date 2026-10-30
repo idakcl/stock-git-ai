@@ -95,7 +95,7 @@ import {
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'
-import { DRAFT } from '../utils/orders.js'
+import { isUnposted } from '../utils/orders.js'
 
 defineEmits(['select'])
 
@@ -112,7 +112,7 @@ onMounted(async () => {
     const [sales, purchases, orders] = await Promise.all([api.getSales(), api.getPurchases(), api.getOrders()])
     receivableOpen.value = (sales || []).filter(s => receivableOf(s) > 0).length
     payableOpen.value = (purchases || []).filter(p => payableOf(p) > 0).length
-    draftOrders.value = (orders || []).filter(o => o.status === DRAFT).length
+    draftOrders.value = (orders || []).filter(o => isUnposted(o.status)).length
   } catch (e) { /* 忽略：角标仅为提示 */ }
 })
 </script>

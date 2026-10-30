@@ -110,7 +110,7 @@ await t('保存草稿自动创建 orders.json，且一张提交、绝不动单�
   assert.ok(repo.has('orders.json'), '首次保存必须把新集合建出来')
   const [o] = read('orders.json')
   assert.equal(o.id, orderId)
-  assert.equal(o.status, '草稿')
+  assert.equal(o.status, '未过账')
   assert.equal(commits() - before, 1, '一次操作只应有一次提交')
   assert.equal(repo.read('sales-2026.json'), salesBefore, '草稿不能碰单据')
   assert.equal(repo.read('stock.json'), stockBefore, '草稿不能碰库存')
@@ -138,6 +138,20 @@ await t('收订金开正式收款单：receipts.json 被创建，订金挂在订
   assert.equal(v[0].items[0].orderType, 'order')
   assert.equal(read('orders.json')[0].deposits[0].voucher, 'SK-20261029-0001')
   assert.equal(commits() - before, 1, '订金 + 订单必须同一提交')
+})
+
+await t('备注：只提交 remark，订单号/金额/订金一律不动', async () => {
+  const before = commits()
+  const r = await call('/orders', 'POST', { action: 'remark', orderId, remark: '  月底前交货  ' })
+  assert.equal(r.ok, true)
+  const [o] = read('orders.json')
+  assert.equal(o.remark, '月底前交货')
+  assert.equal(o.status, '未过账')
+  assert.equal(o.deposits.length, 1)
+  assert.equal(commits() - before, 1, '改备注一次提交')
+  const e = await badCall('/orders', 'POST', { action: 'remark', orderId: 'D-NOPE', remark: 'x' })
+  assert.equal(e.status, 400)
+  assert.match(String(e.message), /订单不存在/)
 })
 
 console.log('\n写：过账进年片')
@@ -169,6 +183,19 @@ await t('重复过账判定为幂等，不再产生提交', async () => {
   assert.equal(r.duplicate, true)
   assert.equal(commits(), before)
   assert.equal(read('sales-2026.json').length, 2)
+})
+
+await t('已过账订单也能补备注：不碰单据与库存', async () => {
+  const stockBefore = repo.read('stock.json')
+  const salesBefore = repo.read('sales-2026.json')
+  const before = commits()
+  const r = await call('/orders', 'POST', { action: 'remark', orderId, remark: '发票待补' })
+  assert.equal(r.ok, true)
+  assert.equal(read('orders.json')[0].remark, '发票待补')
+  assert.equal(read('orders.json')[0].status, '已过账')
+  assert.equal(repo.read('stock.json'), stockBefore)
+  assert.equal(repo.read('sales-2026.json'), salesBefore)
+  assert.equal(commits() - before, 1)
 })
 
 await t('带订金的单过账后不能撤销过账（钱已在台账里）', async () => {
@@ -286,6 +313,22 @@ await t('清空草稿：一次提交删完纯草稿，已过账的留着（remov
   assert.equal(orders.length, 1)
   assert.equal(orders[0].status, '已过账')
   assert.ok(!orders.some(o => o.id === a.code || o.id === b.code))
+})
+
+await t('restore 兼容旧备份：status「草稿」写成「未过账」；migrateStatus 幂等不空提交', async () => {
+  const before = commits()
+  const r = await call('/orders', 'POST', {
+    action: 'restore',
+    orders: [{ id: 'D202610301000000001', status: '草稿', kind: 'sale', customer: '客户甲', date: '2026-10-30', items: [line('P00003', '弯头', 1, 6)] }]
+  })
+  assert.equal(r.restored, 1)
+  assert.equal(read('orders.json')[0].status, '未过账')
+  assert.equal(commits() - before, 1)
+  // 已经统一之后，迁移动作是幂等的：migrated = 0，不产生空提交
+  const before2 = commits()
+  const m = await call('/orders', 'POST', { action: 'migrateStatus' })
+  assert.equal(m.migrated, 0)
+  assert.equal(commits(), before2)
 })
 
 console.log(`\n${pass} passed, ${fail} failed`)

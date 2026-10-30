@@ -243,7 +243,7 @@ await t('新建订单只提交 save，不碰销售单', async () => {
 
 await t('草稿列表可过账：确认后提交 post', async () => {
   const s = seed()
-  s.orders = [{ id: 'D20261029000000001', kind: 'sale', status: '草稿', customer: '客户甲', date: '2026-10-29',
+  s.orders = [{ id: 'D20261029000000001', kind: 'sale', status: '未过账', customer: '客户甲', date: '2026-10-29',
     discount: 0, discountRates: [], items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }], deposits: [] }]
   const { page, context, errors, state } = await open('/orders', s)
   try {
@@ -280,7 +280,7 @@ await t('已过账订单禁止编辑/删除，只提供撤销过账', async () =
 
 await t('看板显示待过账订单数并带订金', async () => {
   const s = seed()
-  s.orders = [{ id: 'D20261029000000003', kind: 'sale', status: '草稿', customer: '客户甲', date: '2026-10-29',
+  s.orders = [{ id: 'D20261029000000003', kind: 'sale', status: '未过账', customer: '客户甲', date: '2026-10-29',
     discount: 0, discountRates: [], items: [{ code: 'P00001', name: '管件', qty: 4, price: 10, total: 40 }],
     deposits: [{ date: '2026-10-29', amount: 10, voucher: 'SK-20261029-0001' }] }]
   const { page, context, errors } = await open('/', s)
@@ -301,10 +301,10 @@ await t('清空未过账订单：按钮只算纯草稿，确认后提交一次 c
   const base = { kind: 'sale', customer: '客户甲', date: '2026-10-29', discount: 0, discountRates: [],
     items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }] }
   s.orders = [
-    { ...base, id: 'D20261029000000011', status: '草稿', deposits: [] },
-    { ...base, id: 'D20261029000000012', status: '草稿', deposits: [] },
+    { ...base, id: 'D20261029000000011', status: '未过账', deposits: [] },
+    { ...base, id: 'D20261029000000012', status: '未过账', deposits: [] },
     // 收过订金：凭证已开，不能被批量清掉
-    { ...base, id: 'D20261029000000013', status: '草稿', deposits: [{ date: '2026-10-29', amount: 10, voucher: 'SK-20261029-0001' }] },
+    { ...base, id: 'D20261029000000013', status: '未过账', deposits: [{ date: '2026-10-29', amount: 10, voucher: 'SK-20261029-0001' }] },
     // 已过账：连着一条正式单据，要先撤销
     { ...base, id: 'D20261029000000014', status: '已过账', postedOrderId: 'X2', deposits: [] }
   ]
@@ -355,7 +355,7 @@ await t('菜单：应付排在应收上方，两颗角标都与文字同一行',
   s.purchases = [{ id: 'C1', date: '2026-10-20', supplier: '供应商甲', total: 100, discount: 0, paid: 0,
     settle: '挂账', payments: [], photos: [], items: [{ code: 'P00001', name: '管件', unit: '个', qty: 1, price: 100, total: 100 }] }]
   s.suppliers = [{ code: 'S00001', name: '供应商甲' }]
-  s.orders = [{ id: 'D20261029000000019', kind: 'sale', status: '草稿', customer: '客户甲', date: '2026-10-29',
+  s.orders = [{ id: 'D20261029000000019', kind: 'sale', status: '未过账', customer: '客户甲', date: '2026-10-29',
     discount: 0, discountRates: [], items: [], deposits: [] }]
   const { page, context, errors } = await open('/', s, { width: 390, height: 844 })
   try {

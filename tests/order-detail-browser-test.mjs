@@ -12,7 +12,7 @@ const line = (code, name, qty, price, discountRate = 1) => ({
 })
 
 const saleOrder = {
-  id: 'D202610281000000001', status: '草稿', kind: 'sale', customer: '客户甲', supplier: '',
+  id: 'D202610281000000001', status: '未过账', kind: 'sale', customer: '客户甲', supplier: '',
   date: '2026-10-28', no: 'HT-2026-001', remark: '月底交货',
   items: [line('P00001', '管件', 2, 10, 0.9), line('P00002', '弯头', 1, 5)],
   discountRates: [0.95], discount: 1,
@@ -61,6 +61,8 @@ async function open(orderId, state = seed()) {
     const key = pathname.slice(5)
     const send = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) })
     if (request.method() === 'GET') return send(key === 'session' ? { ok: true } : (state[key] ?? []))
+    state.posts = state.posts || []
+    state.posts.push(JSON.parse(request.postData() || '{}'))
     return send({ ok: true })
   })
   const page = await context.newPage()
@@ -269,6 +271,30 @@ await t('正常模式 CSV：档案价按开关出现，单头含业务单号与�
     assert.match(csv, /已收订金,¥5\.00/)
     assert.match(csv, /编码,名称,单位,进价,售价,本次数量,本次单价,折扣率,本次折扣,本次金额/)
     assert.match(csv, /P00001,管件,个,8\.00,12\.00,2,10\.00,0\.90,2\.00,18\.00/)
+  } finally { await context.close() }
+})
+
+console.log('\n订单详情：备注')
+
+await t('备注框 + 添加备注按钮：保存只提交 remark，单号/金额不动', async () => {
+  const state = seed()
+  const { page, context, errors } = await open(saleOrder.id, state)
+  try {
+    assert.match((await page.locator('.remark-cell').innerText()).replace(/\s+/g, ' '), /备注：\s*月底交货/)
+    await page.getByRole('button', { name: '编辑备注' }).click()
+    const dialog = page.locator('.el-dialog:visible').last()
+    await dialog.waitFor()
+    await dialog.locator('textarea').fill('发票待补，尾款下周付')
+    await dialog.getByRole('button', { name: '保存备注' }).click()
+    await page.waitForTimeout(500)
+    const post = state.posts.find(p => p.action === 'remark')
+    assert.ok(post, '应提交 remark 操作')
+    assert.equal(post.orderId, saleOrder.id)
+    assert.equal(post.remark, '发票待补，尾款下周付')
+    assert.deepEqual(Object.keys(post).sort(), ['action', 'orderId', 'remark'])
+    await page.waitForSelector('.el-message--success')
+    assert.match(await page.locator('.el-message--success').first().innerText(), /已保存备注/)
+    assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })
 

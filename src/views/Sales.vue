@@ -20,6 +20,7 @@
         title="销售单"
         :subtitle="subtitle"
         :columns="exportColumns"
+        :print-columns="printColumns"
         :rows="paged"
       />
       <div class="table-wrap">
@@ -154,6 +155,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import TableToolbar from '../components/TableToolbar.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
 import { todayCN, orderTimeOf } from '../utils/time.js'
+import { joinLimited } from '../utils/export'
 
 const PAGE_SIZE = 60
 // 客户类别 → 商品上的对应分级售价字段
@@ -250,6 +252,8 @@ const exportColumns = [
   { label: '资金单据编号', value: r => voucherCodesOf(r).join('、') },
   { label: '备注', prop: 'remark' }
 ]
+// 打印时商品编码最多 3 个，超出用省略号；CSV 仍导出完整清单
+const printColumns = exportColumns.map(c => (c.label === '商品编码' ? { ...c, value: r => joinLimited(itemCodesOf(r)) } : c))
 
 function loadAll() {
   return Promise.all([api.getSales(), api.getItems(), api.getCustomers()])

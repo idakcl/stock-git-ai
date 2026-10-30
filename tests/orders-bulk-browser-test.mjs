@@ -14,7 +14,7 @@ const line = (code, name, qty, price) => ({
 })
 
 const order = (over = {}) => ({
-  id: 'D202610281000000001', status: '草稿', kind: 'sale', customer: '客户甲',
+  id: 'D202610281000000001', status: '未过账', kind: 'sale', customer: '客户甲',
   date: '2026-10-28', no: '', remark: '',
   items: [line('P00001', '管件', 2, 10)],
   deposits: [], ...over
@@ -82,7 +82,7 @@ const capturePrint = (page) => page.evaluate(() => {
 const fixtures = () => [
   order({ id: 'D202610281000000001', no: 'HT-001', items: [line('P00001', '管件', 2, 10)] }),
   order({ id: 'D202610281000000002', items: [line('P00002', '弯头', 3, 5)] }),
-  order({ id: 'D202610281000000003', status: '草稿', deposits: [{ date: '2026-10-28', amount: 5 }] }),
+  order({ id: 'D202610281000000003', status: '未过账', deposits: [{ date: '2026-10-28', amount: 5 }] }),
   order({ id: 'D202610281000000004' }),
   order({ id: 'D202610281000000005', status: '已过账', postedOrderId: 'X202610281000000001' })
 ]
@@ -112,6 +112,46 @@ await t('默认不显示已过账订单，下拉选项与文案一致', async ()
   } finally { await context.close() }
 })
 
+console.log('\n历史数据：status「草稿」自动迁移为「未过账」')
+
+await t('打开订单页静默提交一次 migrateStatus，状态显示未过账', async () => {
+  const state = seed([order({ id: 'D202610281000000009', status: '草稿' })])
+  const { page, context, errors } = await open(state)
+  try {
+    await page.waitForTimeout(600)
+    const post = state.posts.find(p => p.action === 'migrateStatus')
+    assert.ok(post, '发现历史「草稿」应自动提交一次 migrateStatus')
+    assert.equal(await rowOf(page, 'D202610281000000009').count(), 1, '历史订单照常显示')
+    const tableText = (await page.locator('.el-table').innerText()).replace(/\s+/g, ' ')
+    assert.match(tableText, /未过账/)
+    assert.doesNotMatch(tableText, /草稿/)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+console.log('\n列表备注')
+
+await t('列表「备注」按钮：弹窗保存只提交 remark，不动其它字段', async () => {
+  const state = seed(fixtures())
+  const { page, context, errors } = await open(state)
+  try {
+    await rowOf(page, 'D202610281000000002').getByRole('button', { name: '备注', exact: true }).click()
+    const dialog = page.locator('.el-dialog:visible').last()
+    await dialog.waitFor()
+    await dialog.locator('textarea').fill('月底前交货')
+    await dialog.getByRole('button', { name: '保存备注' }).click()
+    await page.waitForTimeout(500)
+    const post = state.posts.find(p => p.action === 'remark')
+    assert.ok(post, '应提交 remark 操作')
+    assert.equal(post.orderId, 'D202610281000000002')
+    assert.equal(post.remark, '月底前交货')
+    assert.deepEqual(Object.keys(post).sort(), ['action', 'orderId', 'remark'], '只提交 remark 三个字段')
+    await page.waitForSelector('.el-message--success')
+    assert.match(await page.locator('.el-message--success').first().innerText(), /已保存备注/)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 console.log('\n勾选后打印订单列表')
 
 await t('只打印勾选的订单，未勾选的不出现', async () => {
@@ -132,6 +172,30 @@ await t('只打印勾选的订单，未勾选的不出现', async () => {
     assert.doesNotMatch(html, /X202610281000000001/, '已过账单据不在这批勾选里')
     assert.match(html, /业务单号/)
     assert.match(html, /订单金额/)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+console.log('\n打印列表：商品多于 3 个时用省略号')
+
+await t('打印订单列表时只保留前 3 个商品名，其余用省略号', async () => {
+  const names = ['管件', '弯头', '三通', '阀门']
+  const items = names.map((name, i) => line(`P0000${i + 1}`, name, 1, 10))
+  const state = seed([order({ id: 'D202610281000000010', items })])
+  state.items.push(
+    { code: 'P00003', name: '三通', unit: '个', price: 10, cost: 8 },
+    { code: 'P00004', name: '阀门', unit: '个', price: 10, cost: 8 }
+  )
+  const { page, context, errors } = await open(state)
+  try {
+    await capturePrint(page)
+    await checkRow(page, 'D202610281000000010')
+    await page.getByRole('button', { name: '打印勾选订单列表' }).click()
+    await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
+    const html = await page.evaluate(() => window.__printed)
+    assert.match(html, /管件、弯头、三通…/, '前 3 个保留并追加省略号')
+    assert.doesNotMatch(html, /阀门/, '第 4 个商品名不再打印')
+    assert.match(html, /<th class="idx">序号<\/th>/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

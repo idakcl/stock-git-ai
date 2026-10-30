@@ -8,7 +8,7 @@
       </template>
 
       <el-alert type="info" :closable="false" show-icon class="intro">
-        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单、收付款单、订单草稿、退款核销单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
+        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单、收付款单、未过账订单、退款核销单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
         <b>全量导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，操作前建议先导出一份当前数据。<br />
         <b>分类导入导出</b>：按数据类型单独导出、导入；导入时与库内现有数据<b>按编码/单号比对去重</b>，已存在的自动跳过，只追加新记录，不覆盖已有数据。
       </el-alert>
@@ -23,7 +23,7 @@
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导出备份</b></template>
-        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单、订单草稿、退款/核销单，以及客户/供应商的预存款、预付款流水）。</p>
+        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单、未过账订单、退款/核销单，以及客户/供应商的预存款、预付款流水）。</p>
         <el-button type="primary" :loading="exporting" @click="doExport">导出全部数据</el-button>
       </el-card>
 
@@ -60,7 +60,7 @@
             <el-descriptions-item label="供应商">{{ pending.counts.suppliers }} 条</el-descriptions-item>
             <el-descriptions-item label="销售单">{{ pending.counts.sales }} 单</el-descriptions-item>
             <el-descriptions-item label="采购单">{{ pending.counts.purchases }} 单</el-descriptions-item>
-            <el-descriptions-item v-if="pending.counts.orders != null" label="订单草稿">{{ pending.counts.orders }} 单</el-descriptions-item>
+            <el-descriptions-item v-if="pending.counts.orders != null" label="未过账订单">{{ pending.counts.orders }} 单</el-descriptions-item>
             <el-descriptions-item v-if="pending.counts.refunds != null" label="退款/核销">{{ pending.counts.refunds }} 单</el-descriptions-item>
           </el-descriptions>
           <div class="import-bar">
@@ -74,7 +74,7 @@
       <el-card shadow="never" class="panel">
         <template #header><b>分类导入导出（按编码/单号去重）</b></template>
         <p class="desc">
-          九种数据类型各自独立导出、导入（含订单草稿与退款/核销单）。导入时先与库内现有数据比对：<b class="ok-text">编码/单号已存在的自动跳过</b>，
+          九种数据类型各自独立导出、导入（含未过账订单与退款/核销单）。导入时先与库内现有数据比对：<b class="ok-text">编码/单号已存在的自动跳过</b>，
           客户/供应商还会按名称查重（防止同名多码把一家单位拆成两份档案），只追加真正的新记录，已有数据不会被覆盖或删除。
         </p>
         <el-table :data="typeRows" border size="small" class="type-table">
@@ -188,7 +188,7 @@ const DATA_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
 const BACKUP_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
 const KEY_LABELS = {
   items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单',
-  receipts: '收款单', 'payment-vouchers': '付款单', orders: '订单草稿', refunds: '退款/核销单'
+  receipts: '收款单', 'payment-vouchers': '付款单', orders: '未过账订单', refunds: '退款/核销单'
 }
 const MAX_SIZE = 30 * 1024 * 1024   // 30MB 上限：正常备份在几百 KB~几 MB
 
@@ -201,7 +201,7 @@ const TYPES = [
   { key: 'purchases', label: '采购单', unit: '单' },
   { key: 'receipts', label: '收款单', unit: '单' },
   { key: 'payment-vouchers', label: '付款单', unit: '单' },
-  { key: 'orders', label: '订单草稿', unit: '单' },
+  { key: 'orders', label: '未过账订单', unit: '单' },
   { key: 'refunds', label: '退款/核销单', unit: '单' }
 ]
 const typeRows = ref(TYPES.map(t => ({ ...t, count: null, exporting: false })))
@@ -429,7 +429,7 @@ async function doExport() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length} · 订单草稿 ${orders.length} · 退款/核销 ${refunds.length}`)
+    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length} · 未过账订单 ${orders.length} · 退款/核销 ${refunds.length}`)
   } catch (e) {
     ElMessage.error(`导出失败：${e.message || '网络异常'}`)
   } finally {
@@ -519,7 +519,7 @@ async function doImport() {
     // 收款单/付款单：旧备份可能不含这两者，存在才整体覆盖，避免清空调已产生的单据
     if (Array.isArray(p.data.receipts)) await api.saveReceipts(p.data.receipts)
     if (Array.isArray(p.data['payment-vouchers'])) await api.savePaymentVouchers(p.data['payment-vouchers'])
-    // 订单草稿与退款/核销单：旧备份可能不含，存在才整体覆盖（否则会无端清空现有草稿/凭证）
+    // 未过账订单与退款/核销单：旧备份可能不含，存在才整体覆盖（否则会无端清空现有草稿/凭证）
     if (Array.isArray(p.data.orders)) await api.restoreOrders(p.data.orders)
     if (Array.isArray(p.data.refunds)) await api.restoreRefunds(p.data.refunds)
     ElMessage.success('导入完成，页面即将刷新')

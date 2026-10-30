@@ -15,7 +15,7 @@ const line = (code, name, qty, price, discountRate = 1) => ({
 })
 
 const order = (over = {}) => ({
-  id: 'D202610281000000001', status: '草稿', kind: 'sale', customer: '客户甲',
+  id: 'D202610281000000001', status: '未过账', kind: 'sale', customer: '客户甲',
   date: '2026-10-28', no: 'HT-2026-001', remark: '月底交货',
   items: [line('P00001', '管件', 2, 10, 0.9), line('P00002', '弯头', 1, 5)],
   discountRates: [0.95], discount: 1,

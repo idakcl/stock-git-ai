@@ -1,4 +1,4 @@
-// 备份相关接口：订单草稿 / 退款核销单的「整表恢复」与「按单号去重追加」。
+// 备份相关接口：未过账订单 / 退款核销单的「整表恢复」与「按单号去重追加」。
 // 备份导入是整体覆盖语义，不能用订单的业务操作接口（save/post）拼出来，因此新增 restore 动作。
 // 跑法：node tests/backup-api-test.mjs
 import assert from 'node:assert/strict'
@@ -73,13 +73,13 @@ const t = async (name, fn) => {
   catch (e) { fail++; console.log('  ✗ ' + name + '\n      ' + (String(e && e.message || e)).split('\n').join('\n      ')) }
 }
 
-const order = (id, extra = {}) => ({ id, status: '草稿', kind: 'sale', customer: '客户甲', date: '2026-10-28', items: [line('P00001', '管件', 2, 10)], ...extra })
+const order = (id, extra = {}) => ({ id, status: '未过账', kind: 'sale', customer: '客户甲', date: '2026-10-28', items: [line('P00001', '管件', 2, 10)], ...extra })
 const refund = (code, extra = {}) => ({ code, kind: 'sale', category: 'refund', direction: 'to_customer', total: 20, date: '2026-10-20', ...extra })
 
 seed()
 token = await issueToken(env)
 
-console.log('\n订单草稿：restore 整表替换')
+console.log('\n未过账订单：restore 整表替换')
 
 await t('restore 自动创建 orders.json，一次提交，且不动单据与库存', async () => {
   assert.equal(repo.has('orders.json'), false) // 新集合，底库还没有这个文件
@@ -95,6 +95,17 @@ await t('restore 自动创建 orders.json，一次提交，且不动单据与库
   assert.equal(repo.read('sales-2026.json'), salesBefore)
   assert.equal(repo.read('stock.json'), stockBefore)
   assert.deepEqual(await call('/orders', 'GET'), read('orders.json'))
+})
+
+await t('旧备份里的 status「草稿」在 restore 时统一写成「未过账」', async () => {
+  const before = commits()
+  const r = await call('/orders', 'POST', {
+    action: 'restore',
+    orders: [order('D202610280900000003', { status: '草稿' }), order('D202610280900000004', { status: '已过账', postedOrderId: 'X1' })]
+  })
+  assert.equal(r.restored, 2)
+  assert.equal(commits(), before + 1)
+  assert.deepEqual(read('orders.json').map(o => o.status), ['未过账', '已过账'])
 })
 
 await t('重复导入同一份备份幂等：内容一致时不再产生提交', async () => {

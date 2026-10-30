@@ -1,4 +1,4 @@
-// 数据备份（真浏览器）：全量导出是否真的把订单草稿/退款核销单打进 JSON；全量导入是否用 restore
+// 数据备份（真浏览器）：全量导出是否真的把未过账订单/退款核销单打进 JSON；全量导入是否用 restore
 // 把它们写回；旧备份（不含这两类）是否保持兼容；分类导入订单是否按单号去重。
 // 跑法：先起 dev server（npx vite --port 5173 --strictPort --host 127.0.0.1），再 node tests/backup-browser-test.mjs
 import assert from 'node:assert/strict'
@@ -16,7 +16,7 @@ const seed = () => ({
   sales: [{ id: 'X1', date: '2026-10-02', customer: '客户甲', total: 20, discount: 0, payments: [], items: [line('P00001', '管件', 2, 10)] }],
   receipts: [{ code: 'SK-0001', kind: 'receivable', party: '客户甲', date: '2026-10-02', total: 20, items: [{ orderId: 'X1', amount: 20 }] }],
   'payment-vouchers': [{ code: 'FK-0001', kind: 'payable', party: '供应商甲', date: '2026-10-01', total: 40, items: [{ orderId: 'C1', amount: 40 }] }],
-  orders: [{ id: 'D202610280900000001', status: '草稿', kind: 'sale', customer: '客户甲', date: '2026-10-28', items: [line('P00001', '管件', 2, 10)] }],
+  orders: [{ id: 'D202610280900000001', status: '未过账', kind: 'sale', customer: '客户甲', date: '2026-10-28', items: [line('P00001', '管件', 2, 10)] }],
   refunds: [{ code: 'TK-20261020-0001', kind: 'sale', category: 'refund', direction: 'to_customer', party: '客户甲', total: 20, date: '2026-10-20' }],
   logs: []
 })
@@ -58,10 +58,10 @@ const typeRow = (page, label) => page.locator('.type-table .el-table__row', { ha
 
 console.log('\n分类导入导出：订单 / 退款也有一行')
 
-await t('表格列出订单草稿与退款/核销单，并显示库内数量', async () => {
+await t('表格列出未过账订单与退款/核销单，并显示库内数量', async () => {
   const s = seed(); const { page, context, errors } = await open(s)
   try {
-    const orderRow = typeRow(page, '订单草稿')
+    const orderRow = typeRow(page, '未过账订单')
     const refundRow = typeRow(page, '退款/核销单')
     await orderRow.waitFor()
     assert.match((await orderRow.innerText()).replace(/\s+/g, ' '), /1 单/)
@@ -72,7 +72,7 @@ await t('表格列出订单草稿与退款/核销单，并显示库内数量', a
 
 console.log('\n全量导出：JSON 里必须带上 orders / refunds')
 
-await t('导出的备份文件包含订单草稿与退款核销单', async () => {
+await t('导出的备份文件包含未过账订单与退款核销单', async () => {
   const s = seed(); const { page, context, errors } = await open(s)
   try {
     // 捕获导出用的 Blob：不依赖浏览器下载目录，直接读 JSON 文本
@@ -143,7 +143,7 @@ await t('旧备份（不含订单/退款）保持兼容：不碰现有草稿与�
     await page.locator('.backup-upload input[type=file]').setInputFiles({ name: 'old.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(old)) })
     await page.locator('.summary').waitFor()
     // 摘要里不显示这两类（文件里没有）
-    assert.equal(await page.locator('.summary').getByText('订单草稿').count(), 0)
+    assert.equal(await page.locator('.summary').getByText('未过账订单').count(), 0)
     await page.getByRole('button', { name: '确认导入（覆盖现有数据）' }).click()
     await page.locator('.el-message-box').getByRole('button', { name: '确认覆盖导入' }).click()
     await page.waitForTimeout(400)
@@ -158,13 +158,13 @@ console.log('\n分类导入订单：按单号去重')
 await t('粘贴 2 条（1 重复 + 1 新增）→ 预览只追加新增那条', async () => {
   const s = seed(); const { page, context, state, errors } = await open(s)
   try {
-    const row = typeRow(page, '订单草稿')
+    const row = typeRow(page, '未过账订单')
     await row.getByRole('button', { name: '粘贴文本' }).click()
     const dialog = page.locator('.el-dialog:visible').last()
     await dialog.waitFor()
     const incoming = [
       { ...s.orders[0] },
-      { id: 'D202610290900000002', status: '草稿', kind: 'sale', customer: '客户甲', date: '2026-10-29', items: [line('P00001', '管件', 1, 10)] }
+      { id: 'D202610290900000002', status: '未过账', kind: 'sale', customer: '客户甲', date: '2026-10-29', items: [line('P00001', '管件', 1, 10)] }
     ]
     await dialog.locator('textarea').fill(JSON.stringify({ orders: incoming }))
     await dialog.getByRole('button', { name: '解析并比对' }).click()

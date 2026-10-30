@@ -178,7 +178,7 @@ export const api = {
     for (const path of ['/sales', '/purchases', '/orders', '/refunds', '/receipts', '/payment-vouchers', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
     return result
   },
-  // 备份恢复：整表替换订单草稿（备份导入用；与 saveXxx 的整表语义一致，但走操作接口）
+  // 备份恢复：整表替换未过账订单（备份导入用；与 saveXxx 的整表语义一致，但走操作接口）
   restoreOrders: async (orders) => {
     const r = await request('/orders', { method: 'POST', body: JSON.stringify({ action: 'restore', orders }) })
     invalidate('/orders')

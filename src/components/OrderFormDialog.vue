@@ -122,7 +122,7 @@ import { ElMessage } from 'element-plus'
 import PhotoUpload from './PhotoUpload.vue'
 import { round2, discountRatesTextOf } from '../utils/account.js'
 import { normalizeRate } from '../utils/catalog.js'
-import { orderAmount, orderDepositSum, validateOrder, DRAFT } from '../utils/orders.js'
+import { orderAmount, orderDepositSum, validateOrder, isUnposted, DRAFT } from '../utils/orders.js'
 import { todayCN } from '../utils/time.js'
 
 const props = defineProps({
@@ -162,7 +162,7 @@ watch(() => props.modelValue, (open) => {
   const row = props.order
   if (row && row.id) {
     editingId.value = row.id
-    posted.value = row.status !== DRAFT
+    posted.value = !isUnposted(row.status)
     form.kind = row.kind === 'purchase' ? 'purchase' : 'sale'
     form.party = row.kind === 'purchase' ? (row.supplier || '') : (row.customer || '')
     form.date = row.date || todayCN()

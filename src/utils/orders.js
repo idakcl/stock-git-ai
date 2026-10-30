@@ -15,8 +15,10 @@ import { genOrderId } from './code.js'
 import { genVoucherCode } from './voucher.js'
 import { todayCN } from './time.js'
 
-export const DRAFT = '草稿'
+export const DRAFT = '未过账'
 export const POSTED = '已过账'
+// 早期版本草稿状态存的是「草稿」；保留常量用于一次性迁移与兼容判断
+export const LEGACY_DRAFT = '草稿'
 
 const fail = (message, status = 400) => { const error = new Error(message); error.status = status; throw error }
 
@@ -33,9 +35,12 @@ export function orderKeys(kind) {
 export const orderAmount = order => grossOf({ ...(order || {}), total: round2((order?.items || []).reduce((s, l) => s + Number(l.total || 0), 0)) })
 export const orderDepositSum = order => round2(depositSumOf(order?.deposits))
 
+// 状态判定：不是「已过账」的都算未过账（兼容早期存成「草稿」的历史数据）
+export const isUnposted = status => status !== POSTED
+
 // 状态显示口径：界面上「草稿」统一叫「未过账」。库里历史数据仍是 '草稿'，凡是「非已过账」都按未过账显示，
 // 这样老订单、备份恢复的数据不用迁移也能显示一致。
-export const orderStatusText = status => (status === POSTED ? POSTED : '未过账')
+export const orderStatusText = status => (status === POSTED ? POSTED : DRAFT)
 
 // 校验：返回错误数组（空数组＝通过）。前端与服务端共用，避免「界面能提交、服务端拒」
 export function validateOrder(order, { items = [] } = {}) {
@@ -128,8 +133,18 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
       if (seen.has(id)) fail(`订单号重复：${id}`)
       seen.add(id)
     }
-    state.orders = list.map(o => ({ ...o }))
+    state.orders = list.map(o => ({ ...o, status: o.status === LEGACY_DRAFT ? DRAFT : o.status }))
     return { state, code: '', restored: list.length }
+  }
+
+  // 一次性数据迁移：早期订单状态存成「草稿」，统一改写成「未过账」。
+  // 幂等：没有旧值时不改任何内容，提交层会判定 unchanged、不产生空提交。
+  if (action === 'migrateStatus') {
+    const migrated = state.orders.filter(o => o.status === LEGACY_DRAFT).length
+    if (migrated) {
+      state.orders = state.orders.map(o => (o.status === LEGACY_DRAFT ? { ...o, status: DRAFT, updatedAt: now } : o))
+    }
+    return { state, code: '', migrated }
   }
 
   if (action === 'save') {
@@ -147,6 +162,18 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     const id = genOrderId('D', state.orders, draft.date)
     state.orders.push({ ...draft, id, status: DRAFT, deposits: [], createdAt: now, updatedAt: now })
     return { state, code: id }
+  }
+
+  // 轻量补备注：只改 remark 一个字段，已过账的订单也能补（不碰金额、明细与凭证）。
+  // 与销售/采购详情页的备注入口同一口径：清空内容即删除备注。
+  if (action === 'remark') {
+    const order = find(input.orderId)
+    if (!order) fail('订单不存在')
+    const remark = String(input.remark ?? '').trim()
+    if (remark.length > 500) fail('备注最多 500 字')
+    order.remark = remark
+    order.updatedAt = now
+    return { state, code: order.id }
   }
 
   if (action === 'deposit') {

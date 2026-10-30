@@ -164,7 +164,7 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderTimeOf } from '../utils/time.js'
 import { isReturn } from '../utils/refunds.js'
-import { orderDepositSum, DRAFT } from '../utils/orders.js'
+import { orderDepositSum, isUnposted } from '../utils/orders.js'
 import { isVoided } from '../utils/account.js'
 
 const PAGE_SIZE = 20
@@ -302,7 +302,7 @@ onMounted(async () => {
     sales.value = saleList || []
     stats.itemCount = (itemList || []).length
     // 老库里还没有 orders.json 时后端返回空数组，看板这条提示自然不显示
-    pendingOrders.value = (orderList || []).filter(o => o.status === DRAFT)
+    pendingOrders.value = (orderList || []).filter(o => isUnposted(o.status))
 
     const stockObj = stock && !Array.isArray(stock) ? stock : {}
     const cm = {}

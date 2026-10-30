@@ -2,7 +2,7 @@
 // ——「订单不占库存、不进应收」。跑法：node tests/orders-test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, orderStatusText, DRAFT, POSTED } from '../src/utils/orders.js'
+import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, orderStatusText, isUnposted, DRAFT, POSTED } from '../src/utils/orders.js'
 import { grossOf, receivableOf } from '../src/utils/account.js'
 import { derive, rebuildStock } from '../api/routes.js'
 
@@ -223,12 +223,50 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
   assert.equal(applyOrderOperation(orphan, { action: 'deleteMany', orderIds: [posted.code] }).removed, 1)
 })
 
-test('状态显示：库里「草稿」一律显示成「未过账」，老数据不用迁移', () => {
-  assert.equal(DRAFT, '草稿')                        // 存储值不动，历史数据与备份恢复保持兼容
+test('状态值统一为「未过账」：库内就是未过账，老数据「草稿」照样认', () => {
+  assert.equal(DRAFT, '未过账')                      // 库内存储值也已统一，不再是显示层映射
+  assert.equal(POSTED, '已过账')
   assert.equal(orderStatusText(DRAFT), '未过账')
-  assert.equal(orderStatusText('草稿'), '未过账')
+  assert.equal(orderStatusText('草稿'), '未过账')    // 老数据/旧备份仍能正确显示
   assert.equal(orderStatusText(undefined), '未过账')
   assert.equal(orderStatusText(POSTED), '已过账')
+  assert.equal(isUnposted(DRAFT), true)
+  assert.equal(isUnposted('草稿'), true)             // 历史数据也算未过账
+  assert.equal(isUnposted(POSTED), false)
+})
+
+test('migrateStatus：只把历史「草稿」改成「未过账」，其它字段和状态不动', () => {
+  const s = fixture()
+  s.orders = [
+    { id: 'D1', status: '草稿', kind: 'sale', customer: '客户甲', date: '2026-10-29', items: [] },
+    { id: 'D2', status: '未过账', kind: 'sale', customer: '客户甲', date: '2026-10-29', items: [] },
+    { id: 'D3', status: POSTED, kind: 'sale', customer: '客户甲', postedOrderId: 'X1', date: '2026-10-29', items: [] }
+  ]
+  const r = applyOrderOperation(s, { action: 'migrateStatus' }, '2026-10-29 10:00:00')
+  assert.equal(r.migrated, 1)
+  assert.deepEqual(r.state.orders.map(o => o.status), ['未过账', '未过账', POSTED])
+  assert.equal(r.state.orders[0].updatedAt, '2026-10-29 10:00:00')
+  // 没有旧值的那张不被改动（没拿到新的 updatedAt）
+  assert.equal(r.state.orders[1].updatedAt, undefined)
+  // 已经没有历史值时幂等：0 条迁移
+  assert.equal(applyOrderOperation(r.state, { action: 'migrateStatus' }).migrated, 0)
+})
+
+test('remark：未过账/已过账都能改备注，只动 remark 与 updatedAt', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const id = s.orders[0].id
+  const r = applyOrderOperation(s, { action: 'remark', orderId: id, remark: '  月底前交货  ' }, '2026-10-29 10:00:00')
+  assert.equal(r.state.orders[0].remark, '月底前交货')   // 前后空白去掉
+  assert.equal(r.state.orders[0].updatedAt, '2026-10-29 10:00:00')
+  assert.equal(r.state.orders[0].total, s.orders[0].total)
+  // 清空备注
+  assert.equal(applyOrderOperation(r.state, { action: 'remark', orderId: id, remark: '' }).state.orders[0].remark, '')
+  // 已过账的订单也能加备注（备注不涉及金额与状态）
+  const postedState = applyOrderOperation(s, { action: 'post', orderId: id }).state
+  assert.equal(applyOrderOperation(postedState, { action: 'remark', orderId: id, remark: '发票待补' }).state.orders[0].remark, '发票待补')
+  // 订单号不存在 / 超长
+  assert.throws(() => applyOrderOperation(s, { action: 'remark', orderId: 'NOPE', remark: 'x' }), /订单不存在/)
+  assert.throws(() => applyOrderOperation(s, { action: 'remark', orderId: id, remark: 'x'.repeat(501) }), /500/)
 })
 
 test('orderToOrderDoc 与 canUnpost 单独可用（前端预览同一份实现）', () => {

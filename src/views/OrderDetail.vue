@@ -24,7 +24,7 @@
 
       <el-alert v-if="externalView" class="external-banner" type="info" :closable="false" show-icon
         title="对外查看模式：价格与金额已隐藏，页面只读" />
-      <el-alert v-if="found && order.status === DRAFT && !deposits.length" class="external-banner" type="info" :closable="false" show-icon
+      <el-alert v-if="found && isUnposted(order.status) && !deposits.length" class="external-banner" type="info" :closable="false" show-icon
         title="未过账订单：不占库存、不计应收/应付；点「过账」才生成正式销售/采购单。" />
 
       <div class="info">
@@ -55,6 +55,10 @@
         <span v-else class="price-hidden-note">（价格与金额已隐藏）</span>
         <span class="remark-cell">
           备注：<span v-if="order.remark">{{ order.remark }}</span><span v-else class="none">—</span>
+          <el-button v-if="!externalView" link size="small" type="primary" class="remark-btn"
+            :disabled="!found" @click="remarkDialog = true">
+            {{ order.remark ? '编辑备注' : '添加备注' }}
+          </el-button>
         </span>
       </div>
 
@@ -118,6 +122,10 @@
       :saving="saving"
       @saved="onFormSaved"
     />
+
+    <!-- 轻量补备注：与销售/采购详情页同一入口，只改 remark 字段 -->
+    <OrderRemarkDialog v-model="remarkDialog" :order="order"
+      placeholder="例如：客户要求月底前交货、发票待补、尾款下周付…" @saved="onRemarkSaved" />
   </div>
 </template>
 
@@ -129,7 +137,8 @@ import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
-import { orderAmount, orderDepositSum, orderStatusText, DRAFT, POSTED } from '../utils/orders.js'
+import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
+import { orderAmount, orderDepositSum, orderStatusText, isUnposted, DRAFT, POSTED } from '../utils/orders.js'
 import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
 import { lineDisplayName, normalizeRate } from '../utils/catalog'
 import { downloadCSV, printA4 } from '../utils/export'
@@ -143,6 +152,7 @@ const suppliers = ref([])
 const loading = ref(true)
 const saving = ref(false)
 const editDialog = ref(false)
+const remarkDialog = ref(false)
 
 const found = computed(() => orders.value.some(o => o.id === route.params.id))
 const order = computed(() => orders.value.find(o => o.id === route.params.id) || {
@@ -272,6 +282,21 @@ function doPrint() {
   printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value)
 }
 
+// 保存备注：只走 remark action，单号/金额/明细/凭证一律不碰
+async function onRemarkSaved(text) {
+  if (!found.value) return
+  saving.value = true
+  try {
+    await api.orderOperation({ action: 'remark', orderId: order.value.id, remark: text })
+    remarkDialog.value = false
+    ElMessage.success(text ? '已保存备注' : '已清空备注')
+    await load()
+  } catch (e) {
+    if (e.status === 409) ElMessage.error('数据已被其他操作更新，请刷新后重试')
+    else ElMessage.error(e.message || '备注保存失败')
+  } finally { saving.value = false }
+}
+
 async function onFormSaved({ draft, isEdit }) {
   saving.value = true
   try {
@@ -315,6 +340,7 @@ onMounted(load)
 .external-banner { margin-bottom: 12px; }
 .price-hidden-note { color: var(--text-secondary); }
 .remark-cell { display: inline-flex; align-items: center; gap: 4px; }
+.remark-btn { margin-left: 2px; }
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color: var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dep-card { margin-top: 12px; }

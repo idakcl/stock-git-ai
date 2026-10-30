@@ -91,13 +91,14 @@
               <router-link v-if="row.postedOrderId" :to="`${row.kind === 'purchase' ? '/purchase/' : '/sale/'}${row.postedOrderId}`" class="link posted-link">{{ row.postedOrderId }}</router-link>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="470" class-name="ops-col">
+          <el-table-column label="操作" width="540" class-name="ops-col">
             <template #default="{ row }">
               <el-button size="small" type="primary" :disabled="row.status === POSTED" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="success" :disabled="row.status === POSTED" @click="openDeposit(row)">收订金</el-button>
               <el-button size="small" type="warning" :disabled="row.status === POSTED || busy" @click="post(row)">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
+              <el-button size="small" plain @click="openRemark(row)">备注</el-button>
               <el-button size="small" plain @click="printOrder(row)">打印</el-button>
               <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>
             </template>
@@ -124,6 +125,10 @@
       :saving="saving"
       @saved="onFormSaved"
     />
+
+    <!-- 轻量补备注：只改 remark 字段，已过账的订单也能补 -->
+    <OrderRemarkDialog v-model="remarkDialog" :order="remarkOrder"
+      placeholder="例如：客户要求月底前交货、发票待补、尾款下周付…" @saved="onRemarkSaved" />
 
     <!-- 收订金：直接开一张真实收款单/付款单（SK-/FK-），过账时这笔会搬成单据的第一条流水 -->
     <el-dialog v-model="depositDialog" :title="`收订金 · ${depositOrder?.id || ''}`" width="440" :close-on-click-modal="false">
@@ -165,10 +170,11 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
 import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
-import { downloadCSV, printA4, printA4Sections } from '../utils/export'
-import { orderAmount, orderDepositSum, orderStatusText, DRAFT, POSTED, orderKeys } from '../utils/orders.js'
+import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
+import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
+import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 
 const PAGE_SIZE = 60
 
@@ -198,6 +204,8 @@ const depositForm = ref({ amount: 0, date: todayCN(), remark: '' })
 const tableRef = ref(null)
 const selected = ref([])
 const detailPrintDialog = ref(false)
+const remarkDialog = ref(false)
+const remarkOrder = ref(null)
 
 const partyOf = (row) => (row && row.kind === 'purchase' ? row.supplier : row && row.customer) || ''
 const depositSumOf = (row) => orderDepositSum(row)
@@ -206,7 +214,7 @@ const itemNamesOf = (row) => [...new Set((row.items || []).map(i => lineDisplayN
 
 const filtered = computed(() => list.value
   .filter(row => {
-    if (status.value === 'draft' && row.status !== DRAFT) return false
+    if (status.value === 'draft' && !isUnposted(row.status)) return false
     if (status.value === 'posted' && row.status !== POSTED) return false
     if (kind.value !== 'all' && row.kind !== kind.value) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
@@ -256,6 +264,8 @@ const exportColumns = [
   { label: '过账单号', prop: 'postedOrderId' },
   { label: '备注', prop: 'remark' }
 ]
+// 打印时商品名称最多留 3 个，其余用省略号，避免一个单元格把页面撑开；CSV 仍导出完整清单
+const printColumns = exportColumns.map(c => (c.label === '商品' ? { ...c, value: r => joinLimited(itemNamesOf(r)) } : c))
 
 // ---- 单张订单打印 / 导出 ----
 // 行金额与订单弹窗、正式单据同一口径：原价＝数量×单价，折后＝原价×(1−折扣率)
@@ -334,7 +344,7 @@ function printSelectedList() {
   const rows = selectedSorted.value
   if (!rows.length) return ElMessage.warning('请先勾选订单')
   const total = round2(rows.reduce((s, r) => s + orderAmount(r), 0))
-  printA4('订单列表', exportColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`)
+  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`)
 }
 
 function openDetailPrint() {
@@ -399,11 +409,22 @@ async function removeSelected() {
   } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
 }
 
+// 历史状态迁移：早期订单状态存的是「草稿」，进订单页时静默改写成「未过账」（成功一次即止，失败下次再试）
+let legacyMigrating = false
+
 async function load() {
   loading.value = true
   try {
     const [o, it, cu, sup] = await Promise.all([api.getOrders(), api.getItems(), api.getCustomers(), api.getSuppliers()])
-    list.value = o || []
+    let orders = o || []
+    if (!legacyMigrating && orders.some(x => x.status === LEGACY_DRAFT)) {
+      legacyMigrating = true
+      try {
+        await api.orderOperation({ action: 'migrateStatus' })
+        orders = await api.getOrders() || []
+      } catch { legacyMigrating = false }
+    }
+    list.value = orders
     itemOptions.value = it || []
     customerOptions.value = cu || []
     supplierOptions.value = sup || []
@@ -418,6 +439,20 @@ async function load() {
 
 function openCreate() { editingOrder.value = null; dialog.value = true }
 function openEdit(row) { editingOrder.value = row; dialog.value = true }
+function openRemark(row) { remarkOrder.value = row; remarkDialog.value = true }
+
+// 备注只改 remark：走独立 action，已过账的订单也能补，不碰金额/明细/凭证
+async function onRemarkSaved(text) {
+  const row = remarkOrder.value
+  if (!row) return
+  busy.value = true
+  try {
+    await api.orderOperation({ action: 'remark', orderId: row.id, remark: text })
+    remarkDialog.value = false
+    ElMessage.success(text ? '已保存备注' : '已清空备注')
+    await load()
+  } catch (e) { fail(e, '备注保存失败') } finally { busy.value = false }
+}
 function openDeposit(row) {
   depositOrder.value = row
   depositForm.value = { amount: 0, date: todayCN(), remark: '' }

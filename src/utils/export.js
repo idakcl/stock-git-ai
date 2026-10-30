@@ -5,6 +5,15 @@ const escCsv = (v) => {
 const escHtml = (v) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
 const pick = (col, row) => (typeof col.value === 'function' ? col.value(row) : row?.[col.prop])
 
+/**
+ * 列表打印用：商品名/编码超过 max 个时只保留前 max 个，其余用省略号代替，
+ * 避免一长串商品把打印纸占满（CSV 导出不受影响，仍导出全量）。
+ */
+export function joinLimited(list, max = 3) {
+  const arr = (list || []).filter(Boolean)
+  return arr.length > max ? arr.slice(0, max).join('、') + '…' : arr.join('、')
+}
+
 /** 过滤掉空值字段，统一为 [label, value] 数组 */
 const normFields = (headerFields) => (headerFields || [])
   .filter(([label, value]) => value != null && String(value) !== '')

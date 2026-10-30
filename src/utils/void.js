@@ -12,6 +12,7 @@
 // 这样「作废」永远是账实一致的分界线，不会出现「作废又恢复、凭证废了又活」的中间态。
 import { ensurePayments, isVoided, round2, VOIDED } from './account.js'
 import { todayCN } from './time.js'
+import { DRAFT } from './orders.js'
 
 const fail = (message, status = 400) => { const error = new Error(message); error.status = status; throw error }
 
@@ -110,7 +111,7 @@ export function applyVoidOperation(snapshot, input, now = new Date().toISOString
       unpostedOrderId = o.id
       return {
         ...o,
-        status: '草稿',
+        status: DRAFT,
         postedOrderId: '',
         postedAt: '',
         updatedAt: now,

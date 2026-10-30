@@ -20,7 +20,9 @@ const props = defineProps({
   // 列定义：[{ label:'名称', prop:'name' | value: row => xxx }]
   columns: { type: Array, default: () => [] },
   // 数据行（一般为当前筛选后的全部数据）
-  rows: { type: Array, default: () => [] }
+  rows: { type: Array, default: () => [] },
+  // 打印专用列（可选）：不传就与 CSV 共用 columns；用于「打印时截断商品名」这类场景
+  printColumns: { type: Array, default: null }
 })
 
 function doExport() {
@@ -30,8 +32,9 @@ function doExport() {
 }
 
 function doPrint() {
-  if (!props.columns.length) return ElMessage.warning('未定义导出列')
-  printA4(props.title, props.columns, props.rows, props.subtitle)
+  const cols = props.printColumns || props.columns
+  if (!cols.length) return ElMessage.warning('未定义导出列')
+  printA4(props.title, cols, props.rows, props.subtitle)
 }
 </script>
 
