@@ -10,6 +10,7 @@
 // 订金：订单阶段就能收钱，收的时候开一张正常收款单（SK-/FK-），items.orderId 指向订单号；
 //       过账时这笔订金原样搬成新单的第一条收款流水（凭证号带着走，不改写已开凭证）。
 import { grossOf, round2, syncPayments, ensurePayments, depositSumOf } from './account.js'
+import { normalizeRate } from './catalog.js'
 import { genOrderId } from './code.js'
 import { genVoucherCode } from './voucher.js'
 import { todayCN } from './time.js'
@@ -50,8 +51,14 @@ export function validateOrder(order, { items = [] } = {}) {
     if (!(qty > 0)) errors.push(`第 ${i + 1} 行数量必须大于 0（订单不支持负数，退货请走单据变更）`)
     const price = Number(l.price || 0)
     if (!(price >= 0)) errors.push(`第 ${i + 1} 行单价不能为负`)
+    // 行小计＝数量×单价×折扣率（与 utils/catalog.resolveLine、正式单据同一口径）；
+    // 无折扣率的旧数据按 1 处理，校验口径不变
+    const gross = round2(qty * price)
+    const rate = normalizeRate(l, gross)
     const lineTotal = round2(Number(l.total || 0))
-    if (lineTotal !== round2(qty * price)) errors.push(`第 ${i + 1} 行金额与数量×单价不符`)
+    if (lineTotal !== Math.max(0, round2(gross - round2(gross * (1 - rate))))) {
+      errors.push(`第 ${i + 1} 行金额与数量×单价×折扣不符`)
+    }
   })
   if (Number(order.discount || 0) < 0) errors.push('整单优惠不能为负')
   for (const r of (order.discountRates || [])) {

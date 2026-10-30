@@ -163,7 +163,7 @@ import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
-import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2 } from '../utils/account'
+import { grossOf, netOf as netOfOrder, ensurePayments, depositSumOf, isSettledOf, round2, isVoided } from '../utils/account'
 import { applyDepositFlows } from '../utils/deposit'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
 import { isReturn } from '../utils/refunds.js'
@@ -223,6 +223,8 @@ const depositBalanceOf = (row) => {
 
 const filtered = computed(() => {
   const rows = (list.value || []).filter(row => {
+    // 作废单不参与应收/应付统计：单已作废，欠款归零
+    if (isVoided(row)) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
     if (partyFilter.value && row[partyKey.value] !== partyFilter.value) return false

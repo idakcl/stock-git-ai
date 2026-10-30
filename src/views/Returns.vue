@@ -56,7 +56,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { isReturn, isReturnId, returnableLines } from '../utils/refunds.js'
-import { grossOf, netOf, round2 } from '../utils/account.js'
+import { grossOf, netOf, round2, isVoided } from '../utils/account.js'
 import { todayCN } from '../utils/time.js'
 const route = useRoute()
 const kind = ref(route.query.kind === 'purchase' ? 'purchase' : 'sale')
@@ -65,7 +65,8 @@ const selected = ref([]), table = ref(null), dialog = ref(false), saving = ref(f
 const action = ref('create'), sourceId = ref(''), lines = ref([]), reason = ref('无'), mode = ref('cash'), amount = ref(0), date = ref(''), remark = ref('')
 const pendingKey = 'stock.refund.pending'
 let requestId = '', pendingInput = null
-const orders = computed(() => kind.value === 'sale' ? sales.value : purchases.value)
+// 作废单不能退货：金额与库存都已回滚，再退一次等于重复冲销
+const orders = computed(() => (kind.value === 'sale' ? sales.value : purchases.value || []).filter(o => !isVoided(o)))
 const partyKey = computed(() => kind.value === 'sale' ? 'customer' : 'supplier')
 const accountKind = computed(() => kind.value === 'sale' ? 'receivable' : 'payable')
 const returns = computed(() => orders.value.filter(isReturn))

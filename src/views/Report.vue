@@ -282,7 +282,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { aggregateByItem } from '../utils/catalog'
-import { receivableOf, payableOf, ensurePayments } from '../utils/account'
+import { receivableOf, payableOf, ensurePayments, isVoided } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const purchases = ref([])
@@ -353,12 +353,14 @@ watch([dateStart, dateEnd, supplierFilter, customerFilter, keyword, purchaseKeyw
 
 // 筛选口径：时间段对采购/销售同时生效；供应商只影响采购与应付款，客户只影响销售与应收款
 const filteredPurchases = computed(() => (purchases.value || []).filter(p => {
+  if (isVoided(p)) return false
   if (dateStart.value && (p.date || '') < dateStart.value) return false
   if (dateEnd.value && (p.date || '') > dateEnd.value) return false
   if (supplierFilter.value && p.supplier !== supplierFilter.value) return false
   return true
 }))
 const filteredSales = computed(() => (sales.value || []).filter(s => {
+  if (isVoided(s)) return false
   if (dateStart.value && (s.date || '') < dateStart.value) return false
   if (dateEnd.value && (s.date || '') > dateEnd.value) return false
   if (customerFilter.value && s.customer !== customerFilter.value) return false

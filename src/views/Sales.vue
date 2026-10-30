@@ -29,6 +29,8 @@
             <!-- 补差单是「变更明细」追加出来的正数单，跟单号长得很像退货单，必须标出来 -->
             <router-link :to="`/sale/${row.id}`" class="link" :class="{ 'return-code': isReturn(row) }">{{ row.id }}</router-link>
             <span v-if="isAmend(row)" class="amend-flag" title="补差单：由原单「变更明细」追加生成">补</span>
+            <el-tag v-if="isVoided(row)" type="info" size="small" disable-transitions class="void-tag"
+              :title="row.voidedReason ? `作废原因：${row.voidedReason}` : '已作废：不占库存、不计应收'">作废</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="客户" width="150">
@@ -75,11 +77,12 @@
                  并用 .settle-cell 强制同行不换行：列宽 130 时二者会挤成两行，
                  标签加了状态点后又宽了 7px，换行更明显 -->
             <span class="settle-cell">
-              <el-tag :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" disable-transitions>
+              <el-tag v-if="isVoided(row)" type="info" disable-transitions>作废</el-tag>
+              <el-tag v-else :type="settleLabelOf(row) === '结清' ? 'success' : 'danger'" disable-transitions>
                 {{ settleLabelOf(row) }}
               </el-tag>
               <!-- 未收为 0 且无抹零优惠时不显示；两个改账动作：改结清＝结清未收差额，改挂账＝撤销抹零优惠、恢复未收 -->
-              <el-button v-if="!isReturn(row) && settleActionOf(row) !== 'none'" link size="small" type="primary" @click="toggleSettle(row)">
+              <el-button v-if="!isVoided(row) && !isReturn(row) && settleActionOf(row) !== 'none'" link size="small" type="primary" @click="toggleSettle(row)">
                 {{ settleActionOf(row) === 'settle' ? '改结清' : '改挂账' }}
               </el-button>
             </span>
@@ -92,8 +95,16 @@
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="140" show-overflow-tooltip />
-        <el-table-column label="操作" width="400" class-name="ops-col">
-          <template #default="{ row }"><el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button><el-button size="small" type="primary" @click="openDialog(row)">编辑</el-button><el-button size="small" type="success" @click="openPay(row)">收款</el-button><el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button><el-button size="small" type="danger" @click="remove(row)">删除</el-button></template>
+        <el-table-column label="操作" width="470" class-name="ops-col">
+          <template #default="{ row }">
+            <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
+            <el-button size="small" type="primary" :disabled="isVoided(row)" @click="openDialog(row)">编辑</el-button>
+            <el-button size="small" type="success" :disabled="isVoided(row)" @click="openPay(row)">收款</el-button>
+            <el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button>
+            <!-- 作废＝整单撤销并连带作废收款单；已作废、退货单、已有变更单的单据都不给作废 -->
+            <el-button size="small" type="info" :disabled="!canVoid(row)" @click="voidOrder(row)">作废</el-button>
+            <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+          </template>
         </el-table-column>
       </el-table>
       </div>
@@ -132,7 +143,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { orderKindCount, lineDisplayName, itemNameMap } from '../utils/catalog'
-import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf, settleActionOf, round2 } from '../utils/account'
+import { receivableOf, receivedSumOf, ensurePayments, syncPayments, grossOf, depositSumOf, isSettledOf, settleActionOf, isVoided, round2 } from '../utils/account'
 import { isReturn } from '../utils/refunds.js'
 import { isAmend } from '../utils/amend.js'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
@@ -195,10 +206,12 @@ const filtered = computed(() => list.value
 // 表格底部汇总：基于「全部筛选结果」，不受分页影响
 const summaryAmount = ({ columns }) => {
   const rows = filtered.value
-  const total = rows.reduce((sum, r) => sum + Number(r.total || 0), 0)
-  const settled = rows.filter(r => settleLabelOf(r) === '结清').length
+  // 作废单仍列在表里供追溯，但不计入「结清」口径（其应收/应付已归零）
+  const activeRows = rows.filter(r => !isVoided(r))
+  const settled = activeRows.filter(r => settleLabelOf(r) === '结清').length
+  const voidedCount = rows.length - activeRows.length
   return columns.map((c, idx) => {
-    if (idx === 0) return `合计（${rows.length} 单，结清 ${settled}）`
+    if (idx === 0) return `合计（${activeRows.length} 单，结清 ${settled}` + (voidedCount ? `，作废 ${voidedCount}）` : '）')
     if (c.label === '应收') return rows.reduce((s, r) => s + grossOf(r), 0).toFixed(2)
     return ''
   })
@@ -498,6 +511,29 @@ async function toggleSettle(row) {
   ElMessage.success(`已按抹零优惠结清 ¥${unpaid.toFixed(2)}（无资金变动，未生成收款单）`)
 }
 
+// 能不能作废：退货单本身不能作废（它是对原单的冲销），已作废的不能再废，
+// 有退货/补差子单的要先处理子单（服务端同样会拦，这里只是把按钮先灰掉）
+const canVoid = (row) => !!row && !isVoided(row) && !isReturn(row) && !list.value.some(o => o.sourceOrderId === row.id)
+
+async function voidOrder(row) {
+  try {
+    await ElMessageBox.confirm(
+      `确定作废销售单 ${row.id}？\n\n作废后：库存回滚、应收归零，本单的收款单同步作废（编号保留可查）。\n作废不可恢复；需要重开请重新录入一张。`,
+      '作废单据', { type: 'warning', confirmButtonText: '确认作废', cancelButtonText: '取消' }
+    )
+  } catch { return }
+  try {
+    const r = await api.voidDoc({ kind: 'sale', id: row.id })
+    const codes = (r.vouchers || []).join('、')
+    ElMessage.success(codes ? `已作废 ${row.id}，收款单同步作废：${codes}` : `已作废 ${row.id}`)
+  } catch (e) {
+    ElMessage.error({ message: `作废失败：${e.message || '网络异常'}`, duration: 6000 })
+  }
+  // 无论成败都回读：失败可能是本地数据过期（单据已变更/已作废），以服务端为准
+  await refreshFromServer()
+  if (page.value > pageCount.value) page.value = pageCount.value
+}
+
 async function remove(row) {
   try {
     await ElMessageBox.confirm(`确定删除销售单 ${row.id}?\n删除后库存与历史价会自动重算。`, '提示', { type: 'warning' })
@@ -512,8 +548,9 @@ async function remove(row) {
   }
   // 删除已落库：回读只为显示最新值，失败也不能让已成功的删除看起来没生效
   await refreshFromServer()
-  // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水（含历史无标记抵扣的补回），避免删除后余额残留幽灵流水或预存款丢失
-  const cu2 = await removeDepositFlows(api, 'receivable', row.customer, row.id, row).catch(() => null)
+  // 删除单据时同步清掉其超收转存/抵扣标记的预存款流水（含历史无标记抵扣的补回），避免删除后余额残留幽灵流水或预存款丢失。
+  // 作废单不再处理：作废时已撤掉本单流水（需要退回的也已补回），再跑一次会重复退款。
+  const cu2 = isVoided(row) ? null : await removeDepositFlows(api, 'receivable', row.customer, row.id, row).catch(() => null)
   if (cu2) customerOptions.value = cu2
   // 删掉末页最后一条后页码要回退，否则停留在已不存在的页上会看到空白表格
   if (page.value > pageCount.value) page.value = pageCount.value
@@ -543,4 +580,6 @@ async function remove(row) {
 .item-codes{color:var(--text-secondary);}
 /* 补差单角标：单号前缀与退货单容易混，用一个小徽章区分「追加出来的正数单」 */
 .amend-flag{display:inline-block;margin-left:4px;padding:0 4px;border-radius:3px;background:var(--color-warning);color:#fff;font-size:11px;line-height:16px;vertical-align:middle;}
+/* 作废标签紧跟在单号后面，和「补」标记同一档尺寸，扫一眼就知道这张单不算数 */
+.void-tag{margin-left:6px;vertical-align:middle;}
 </style>

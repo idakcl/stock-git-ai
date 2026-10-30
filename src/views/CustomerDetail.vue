@@ -214,7 +214,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
-import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf } from '../utils/account'
+import { receivableOf, grossOf, receivedSumOf, depositSumOf, isSettledOf, isVoided } from '../utils/account'
 import { orderKindCount } from '../utils/catalog'
 import { isReturn, isReturnId } from '../utils/refunds.js'
 import { appendVouchers, mapDepositVouchers } from '../utils/voucherFlow'
@@ -348,7 +348,8 @@ async function saveDepositEdit() {
     ElMessage.error(`保存失败：${e.message || e}`)
   } finally { depSaving.value = false }
 }
-const saleList = computed(() => (sales.value || []).filter(s => s.customer === customer.value.name))
+// 作废单不参与客户往来账（金额已归零，留着只会让「结清/挂账」与台账口径打架）
+const saleList = computed(() => (sales.value || []).filter(s => s.customer === customer.value.name && !isVoided(s)))
 const products = computed(() => {
   const codes = new Set()
   saleList.value.forEach(s => (s.items || []).forEach(l => l.code && codes.add(l.code)))

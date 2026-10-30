@@ -171,6 +171,13 @@ export const api = {
     for (const path of ['/sales', '/purchases', '/refunds', '/receipts', '/payment-vouchers', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
     return result
   },
+  // 作废单据：单据置作废 + 其收款单/付款单一起作废，库存与预存预付同步回滚（服务端一次提交）。
+  // 作废会影响几乎所有派生数据，这里把相关缓存全部失效，避免 15 秒窗口内看到旧库存/旧欠款。
+  voidDoc: async (operation) => {
+    const result = await request('/voids', { method: 'POST', body: JSON.stringify(operation) })
+    for (const path of ['/sales', '/purchases', '/orders', '/refunds', '/receipts', '/payment-vouchers', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
+    return result
+  },
   getPurchases: () => cachedGet('/purchases'),
   savePurchases: async (purchases) => {
     const r = await request('/purchases', { method: 'POST', body: JSON.stringify({ purchases }) })

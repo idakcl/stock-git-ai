@@ -29,11 +29,19 @@ export function ensurePayments(order, field) {
   return []
 }
 
+// 作废状态：单据作废后仍留在集合里（可查、可审计），但业务上当作没发生过——
+// 库存、历史价、应收/应付、未收/未付一律归零。资金凭证（收款单/付款单）另由 status 标记作废。
+export const VOIDED = '作废'
+export const isVoided = (order) => !!order && (order.status === VOIDED || order.voided === true)
+
 // 销售单累计实收 / 采购单累计实付（兼容旧字段；末位 round2 消除累加浮点尘）
+// 作废单的流水只是存档，不再计入实收/实付
 export function receivedSumOf(sale) {
+  if (isVoided(sale)) return 0
   return round2(sum(ensurePayments(sale, 'received')))
 }
 export function paidSumOf(purchase) {
+  if (isVoided(purchase)) return 0
   return round2(sum(ensurePayments(purchase, 'paid')))
 }
 
@@ -124,6 +132,8 @@ export function settleBalance({ gross = 0, paidNow = 0, depositPay = 0, discount
 // 红字单据（退货单，total<0）：返回负数毛额（=应退款），不夹 0，也不参与优惠抵减——
 // 此前 max(0,·) 会把退货单的应付夹成 0，退货只减库存、不冲欠款（CT-20260519-0001 事故）。
 export function grossOf(order) {
+  // 作废单：业务上视为没发生过，应收/应付直接归零（库存由 rebuildStock 跳过，见 api/routes.js）
+  if (isVoided(order)) return 0
   const total = Number(order?.total || 0)
   const rate = effectiveRateOf(order)
   if (total < 0) return round2(round2(total * rate))
@@ -174,6 +184,8 @@ export function isSettledOf(unpaid, settle) {
 //   'none'   —— 金额已平且无抹零优惠：没有可恢复的欠款，不显示按钮
 //               （钱其实已收到又需要恢复欠款，应修改/删除收付款记录，而不是改挂账）
 export function settleActionOf(order, kind) {
+  // 作废单没有可改的账：既不改结清、也不撤销优惠
+  if (isVoided(order)) return 'none'
   const unpaid = netOf(order, kind)
   if (unpaid > 1e-6) return 'settle'
   if (Math.abs(unpaid) <= 1e-6 && Number(order?.discount || 0) > 0) return 'unrest'

@@ -235,7 +235,7 @@ await t('新建订单只提交 save，不碰销售单', async () => {
     assert.equal(posts[0].body.action, 'save')
     assert.equal(posts[0].body.order.kind, 'sale')
     assert.equal(posts[0].body.order.customer, '客户甲')
-    assert.deepEqual(posts[0].body.order.items, [{ code: 'P00001', name: '管件', qty: 4, price: 10, total: 40 }])
+    assert.deepEqual(posts[0].body.order.items, [{ code: 'P00001', name: '管件', qty: 4, price: 10, discountRate: 1, discount: 0, total: 40 }])
     assert.equal(state.posts.some(p => p.key === 'sales'), false, '新建订单绝不能整表写销售单')
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }

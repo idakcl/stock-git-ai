@@ -58,7 +58,10 @@
       <div class="table-wrap">
         <el-table :data="pagedList" stripe>
           <el-table-column prop="code" label="资金单据编号" width="200" show-overflow-tooltip>
-            <template #default="{ row }"><router-link :to="{ path: '/vouchers', query: { code: row.code } }" class="link" @click.stop>{{ row.code }}</router-link></template>
+            <template #default="{ row }">
+              <router-link :to="{ path: '/vouchers', query: { code: row.code } }" class="link" @click.stop>{{ row.code }}</router-link>
+              <el-tag v-if="isVoided(row)" type="info" size="small" disable-transitions class="void-tag" :title="row.voidedReason || '随源单据作废'">作废</el-tag>
+            </template>
           </el-table-column>
           <el-table-column label="类别" width="120">
             <template #default="{ row }">
@@ -98,6 +101,8 @@
     <!-- 明细抽屉：URL 保存单据编号，支持直接打开、刷新和浏览器后退。 -->
     <el-drawer v-model="drawer" :title="current ? `资金单据详情 · ${current.code}` : ''" size="min(780px, 96vw)" direction="rtl">
       <template v-if="current">
+        <el-alert v-if="isVoided(current)" type="warning" :closable="false" show-icon class="void-alert"
+          :title="`这张资金单据已作废${current.voidedAt ? `（${fmtCNTime(current.voidedAt) || current.voidedAt}）` : ''}${current.voidOf ? `，随源单据 ${current.voidOf} 一起作废` : ''}：不计入收付款合计${current.voidedReason ? `。原因：${current.voidedReason}` : ''}。`" />
         <el-descriptions :column="1" border size="small" class="vh">
           <el-descriptions-item label="资金单据编号">{{ current.code }}</el-descriptions-item>
           <el-descriptions-item label="类型">{{ current.kind === 'refund' ? (current.direction === 'to_customer' ? '退给客户' : '收供应商退款') : current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
@@ -155,6 +160,7 @@ import { downloadCSV } from '../utils/export'
 import { VOUCHER_CATEGORY } from '../utils/voucherFlow'
 import { fmtCNTime, orderTimeOf } from '../utils/time.js'
 import { isReturnId } from '../utils/refunds.js'
+import { isVoided } from '../utils/account.js'
 
 const loading = ref(true)
 const tab = ref('receipts')
@@ -211,15 +217,15 @@ watch([tab, dateRange, partyFilter, pageSize], () => { page.value = 1 })
 watch(() => filteredList.value.length, count => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(count / pageSize.value)))
 })
-const sumTotal = computed(() => filteredList.value.reduce((a, v) => a + Number(v.total || 0), 0))
+const sumTotal = computed(() => filteredList.value.filter(v => !isVoided(v)).reduce((a, v) => a + Number(v.total || 0), 0))
 // 往来单位下拉选项（收款单 + 付款单去重）
 const partyOptions = computed(() => [...new Set([...receipts.value, ...vouchers.value, ...refunds.value].map(v => v.party).filter(Boolean))])
 // 累计总览（全部，不随筛选变化）：收款单合计 / 付款单合计 / 净额
 const round2 = (n) => Math.round((Number(n) + Number.EPSILON) * 100) / 100
-const receiptSum = computed(() => (receipts.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
-const voucherSum = computed(() => (vouchers.value || []).reduce((s, v) => s + Number(v.total || 0), 0))
-const refundIn = computed(() => refunds.value.filter(v => v.category === 'refund' && v.direction === 'from_supplier').reduce((s, v) => s + v.total, 0))
-const refundOut = computed(() => refunds.value.filter(v => v.category === 'refund' && v.direction === 'to_customer').reduce((s, v) => s + v.total, 0))
+const receiptSum = computed(() => (receipts.value || []).filter(v => !isVoided(v)).reduce((s, v) => s + Number(v.total || 0), 0))
+const voucherSum = computed(() => (vouchers.value || []).filter(v => !isVoided(v)).reduce((s, v) => s + Number(v.total || 0), 0))
+const refundIn = computed(() => refunds.value.filter(v => !isVoided(v) && v.category === 'refund' && v.direction === 'from_supplier').reduce((s, v) => s + v.total, 0))
+const refundOut = computed(() => refunds.value.filter(v => !isVoided(v) && v.category === 'refund' && v.direction === 'to_customer').reduce((s, v) => s + v.total, 0))
 const netSum = computed(() => round2(receiptSum.value - voucherSum.value + refundIn.value - refundOut.value))
 
 const listColumns = [
@@ -323,6 +329,8 @@ onMounted(async () => {
 .vh { margin-bottom: 12px; }
 .drawer-toolbar { margin-bottom: 10px; }
 .v-items :deep(.el-table) { font-size: var(--fs-sub); }
+.void-tag { margin-left: 6px; vertical-align: middle; }
+.void-alert { margin-bottom: 12px; }
 .link { color: var(--color-primary); text-decoration: none; }
 .link:hover { text-decoration: underline; }
 </style>

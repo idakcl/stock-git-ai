@@ -165,6 +165,7 @@ import { matchText } from '../utils/search'
 import { orderTimeOf } from '../utils/time.js'
 import { isReturn } from '../utils/refunds.js'
 import { orderDepositSum, DRAFT } from '../utils/orders.js'
+import { isVoided } from '../utils/account.js'
 
 const PAGE_SIZE = 20
 
@@ -233,10 +234,10 @@ function inRange(date) {
 }
 
 const filteredPurchases = computed(() => (purchases.value || []).filter(p =>
-  inRange(p.date) && (!supplierFilter.value || (p.supplier || '') === supplierFilter.value))
+  !isVoided(p) && inRange(p.date) && (!supplierFilter.value || (p.supplier || '') === supplierFilter.value))
   .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 const filteredSales = computed(() => (sales.value || []).filter(s =>
-  inRange(s.date) && (!customerFilter.value || (s.customer || '') === customerFilter.value))
+  !isVoided(s) && inRange(s.date) && (!customerFilter.value || (s.customer || '') === customerFilter.value))
   .sort((a, b) => String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
 
 // 供应商 / 客户下拉选项（本期范围内出现过的）

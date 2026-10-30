@@ -5,6 +5,8 @@ import { orderTransaction } from './orders.js'
 import { amendTransaction } from './amends.js'
 import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
+import { isVoided } from '../src/utils/account.js'
+import { voidTransaction } from './voids.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -167,6 +169,8 @@ export function derive(items, suppliers, purchases, sales, customers) {
   const orderedPurchases = [...(purchases || [])].sort(byDateAsc)
   const orderedSales = [...(sales || [])].sort(byDateAsc)
   for (const p of orderedPurchases) {
+    // 作废单视为没发生过：不建档、不进历史价、不动成本价
+    if (isVoided(p)) continue
     const supName = p.supplier || ''
     let sCode = nameToCode[supName]
     if (!sCode) { const s = ensureSupplier(supName); sCode = s.code; nameToCode[supName] = sCode }
@@ -188,6 +192,7 @@ export function derive(items, suppliers, purchases, sales, customers) {
     }
   }
   for (const s of orderedSales) {
+    if (isVoided(s)) continue
     const custName = s.customer || ''
     if (custName) ensureCustomer(custName)
     for (const l of (s.items || [])) {
@@ -260,6 +265,7 @@ export function rebuildStock(purchases, sales, items) {
   // 否则会全部归到 "undefined" 这个键下，库存与成本全部算错（且 NaN 序列化成 null 污染后续计算）
   const num2 = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0 }
   for (const p of (purchases || [])) {
+    if (isVoided(p)) continue
     for (const l of (p.items || [])) {
       const code = l.code
       if (!code) continue
@@ -269,6 +275,8 @@ export function rebuildStock(purchases, sales, items) {
     }
   }
   for (const s of (sales || [])) {
+    // 作废销售单不进库存扣减：作废即回滚出库
+    if (isVoided(s)) continue
     for (const l of (s.items || [])) {
       const code = l.code
       if (!code) continue
@@ -535,6 +543,11 @@ export async function handleApi(req, url, env) {
       if (path === '/amends') {
         return json(req, env, await amendTransaction(env, body, derive, rebuildStock))
       }
+      // 作废：把单据置作废、连带作废它的收款单/付款单，并回滚库存与预存预付。
+      // 与其它业务入口一致，只收操作指令，整表读取 + 单次提交都在事务里完成。
+      if (path === '/voids') {
+        return json(req, env, await voidTransaction(env, body, derive, rebuildStock))
+      }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
         // sortOrders：与存储层落库次序同一口径，派生（库存/历史价）才不会因次序不同而每次算出不同结果
@@ -711,6 +724,9 @@ export async function handleApi(req, url, env) {
 
     return json(req, env, { error: 'Not Found' }, 404)
   } catch (e) {
-    return json(req, env, { error: e.message || String(e) }, e.status === 400 ? 400 : /GitHub (409|422)/.test(e.message || '') ? 409 : 500)
+    // 业务校验自带状态码（作废闸门 404/409 等）优先透传，前端据此给可操作的提示
+    const mapped = [400, 403, 404, 409, 422].includes(e.status) ? e.status
+      : /GitHub (409|422)/.test(e.message || '') ? 409 : 500
+    return json(req, env, { error: e.message || String(e) }, mapped)
   }
 }

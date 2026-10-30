@@ -3,7 +3,7 @@
        金额口径与单据完全一致（合计 × 折扣链 − 整单优惠），过账后两张数字必须一样，
        所以这里直接复用 utils/orders.js 的 orderAmount，绝不在弹窗里另算一套。 -->
   <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!(saving || emitting)">
-    <el-alert type="info" :closable="false" show-icon
+    <el-alert class="draft-alert" type="info" :closable="false" show-icon
       title="订单是未过账的草稿：不占库存、不计应收/应付，可以随便改、随便删。点「过账」才会生成正式单据。" />
     <el-form :model="form" label-width="110px">
       <el-form-item label="订单类型">
@@ -57,8 +57,17 @@
           <el-table-column label="单价" width="110" align="right">
             <template #default="{ row }"><el-input-number v-model="row.price" :min="0" :precision="2" size="small" v-select-on-focus /></template>
           </el-table-column>
+          <!-- 行折扣与正式单据同一字段（discountRate）与同一口径（只减钱、不改单价），
+               过账时原样搬进单据，订单金额与单据金额才不会在过账后变数 -->
+          <el-table-column label="折扣" width="100" align="right">
+            <template #default="{ row }">
+              <el-input-number v-model="row.discountRate" :min="0" :max="1" :step="0.05" :precision="2" :controls="false" size="small" v-select-on-focus />
+            </template>
+          </el-table-column>
           <el-table-column label="小计" width="100" align="right">
-            <template #default="{ row }"><span class="line-net">{{ lineTotal(row).toFixed(2) }}</span></template>
+            <template #default="{ row }">
+              <span class="line-net" :title="lineRate(row) < 1 ? `原价 ¥${lineGross(row).toFixed(2)}` : ''">{{ lineTotal(row).toFixed(2) }}</span>
+            </template>
           </el-table-column>
           <el-table-column label="" width="60">
             <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
@@ -66,11 +75,14 @@
         </el-table>
       </div>
       <div style="margin-top:8px">
-        <el-button size="small" @click="form.lines.push({ code:'', name:'', qty:1, price:0, total:0 })">添加行</el-button>
+        <el-button size="small" @click="form.lines.push({ code:'', name:'', qty:1, price:0, discountRate:1 })">添加行</el-button>
+        <span class="calc-hint" style="margin-left:12px">折扣＝折扣率：1＝原价，0.9＝九折；整单优惠请填下方「整单优惠金额」</span>
       </div>
       <div style="margin-top:12px;text-align:right">
         <b>合计：¥ {{ totalAmount.toFixed(2) }}</b>
-        <div v-if="orderRateText || Number(form.discount) > 0" class="calc-detail">
+        <div v-if="lineDiscountSum > 0 || orderRateText || Number(form.discount) > 0" class="calc-detail">
+          <span v-if="lineDiscountSum > 0">原价合计 ¥ {{ grossAmount.toFixed(2) }}</span>
+          <span v-if="lineDiscountSum > 0" class="discount">单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}</span>
           <span v-if="orderRateText" class="discount">整单折扣 {{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
           <span v-if="Number(form.discount) > 0" class="discount">整单优惠金额 -¥ {{ Number(form.discount).toFixed(2) }}</span>
         </div>
@@ -109,6 +121,7 @@ import { ref, reactive, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import PhotoUpload from './PhotoUpload.vue'
 import { round2, discountRatesTextOf } from '../utils/account.js'
+import { normalizeRate } from '../utils/catalog.js'
 import { orderAmount, orderDepositSum, validateOrder, DRAFT } from '../utils/orders.js'
 import { todayCN } from '../utils/time.js'
 
@@ -158,7 +171,11 @@ watch(() => props.modelValue, (open) => {
     form.photos = [...(row.photos || [])]
     form.discount = Number(row.discount || 0)
     form.discountRates = (row.discountRates || []).map(Number)
-    form.lines = (row.items || []).map(l => ({ code: l.code, name: l.name, qty: l.qty, price: l.price, total: round2(Number(l.qty || 0) * Number(l.price || 0)) }))
+    form.lines = (row.items || []).map(l => ({
+      code: l.code, name: l.name, qty: l.qty, price: l.price,
+      // 行折扣按正式单据同一套归一化回填（兼容早期「折扣是金额」的旧数据）
+      discountRate: normalizeRate(l, Number(l.qty || 0) * Number(l.price || 0))
+    }))
   } else {
     editingId.value = ''
     posted.value = false
@@ -170,11 +187,19 @@ watch(() => props.modelValue, (open) => {
     form.photos = []
     form.discount = 0
     form.discountRates = []
-    form.lines = [{ code:'', name:'', qty:1, price:0, total:0 }]
+    form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1 }]
   }
 })
 
-const lineTotal = (l) => round2(Number(l.qty || 0) * Number(l.price || 0))
+// 行金额三件套（与 OrderEditDialog / utils/catalog.resolveLine 同一口径）：
+// 原价＝数量×单价，折后小计＝原价×(1−折扣率)，折扣只减钱、不改单价
+const lineGross = (l) => round2(Number(l.qty || 0) * Number(l.price || 0))
+const lineRate = (l) => normalizeRate(l, lineGross(l))
+const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
+const lineTotal = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
+const grossAmount = computed(() => round2(form.lines.reduce((s, l) => s + lineGross(l), 0)))
+const lineDiscountSum = computed(() => round2(form.lines.reduce((s, l) => s + lineDiscount(l), 0)))
+// 合计＝折后小计之和（已含单项折扣），整单折扣链与整单优惠在此之上再作用
 const totalAmount = computed(() => round2(form.lines.reduce((s, l) => s + lineTotal(l), 0)))
 const effRate = computed(() => {
   const rates = (form.discountRates || []).map(Number).filter(r => Number.isFinite(r) && r > 0)
@@ -193,7 +218,10 @@ const draft = computed(() => ({
   photos: form.photos,
   discount: Number(form.discount || 0),
   discountRates: (form.discountRates || []).map(Number),
-  items: form.lines.map(l => ({ code: l.code, name: l.name, qty: Number(l.qty || 0), price: Number(l.price || 0), total: lineTotal(l) })),
+  items: form.lines.map(l => ({
+    code: l.code, name: l.name, qty: Number(l.qty || 0), price: Number(l.price || 0),
+    discountRate: lineRate(l), discount: lineDiscount(l), total: lineTotal(l)
+  })),
   status: DRAFT
 }))
 const orderAmountValue = computed(() => orderAmount(draft.value))
@@ -203,16 +231,14 @@ function onItemChange(row) {
   const found = (props.items || []).find(i => i.code === row.code)
   if (!found) return
   row.name = found.name
-  // 采购带进价、销售带售价（订单价格仍可手改）
+  // 采购带进价、销售带售价（订单价格仍可手改）；换商品不动行折扣，用户自己改过的折扣不丢
   row.price = Number(isPurchase.value ? (found.cost || found.price || 0) : (found.price || 0))
-  row.total = lineTotal(row)
 }
 function addQuickItem(val) {
   if (!val) return
   const found = (props.items || []).find(i => i.code === val)
   if (!found) return ElMessage.warning('订单只能选商品库里已有的商品')
-  const line = { code: found.code, name: found.name, qty: 1, price: Number(isPurchase.value ? (found.cost || found.price || 0) : (found.price || 0)), total: 0 }
-  line.total = lineTotal(line)
+  const line = { code: found.code, name: found.name, qty: 1, discountRate: 1, price: Number(isPurchase.value ? (found.cost || found.price || 0) : (found.price || 0)) }
   const blank = form.lines.findIndex(l => !l.code && !l.name && !(Number(l.qty) > 1) && !(Number(l.price) > 0))
   if (blank >= 0) form.lines.splice(blank, 1, line)
   else form.lines.push(line)
@@ -235,6 +261,8 @@ async function save() {
 
 <style scoped>
 :deep(.el-form-item__label){white-space:nowrap;}
+/* 顶部灰底提示条与下方表单之间留出呼吸：紧贴「订单类型」那一行时，整块看起来像被压扁了 */
+.draft-alert{margin-bottom:14px;}
 .quick-add-select{width:100%;max-width:100%;}
 .calc-hint{color:var(--text-secondary);font-weight:400;font-size:var(--fs-sub);line-height:1.5;}
 .lines-scroll{overflow-x:auto;}

@@ -116,7 +116,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
-import { receivableOf, depositSumOf, grossOf, round2 } from '../utils/account'
+import { receivableOf, depositSumOf, grossOf, round2, isVoided } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
@@ -148,7 +148,7 @@ const inPeriod = (date) => {
   return String(date || '') >= s && String(date || '') <= e
 }
 // 区间内销售单（按时间段过滤）
-const periodSales = computed(() => (sales.value || []).filter(s => inPeriod(s.date)))
+const periodSales = computed(() => (sales.value || []).filter(s => !isVoided(s) && inPeriod(s.date)))
 // 区间内销售总金额（折后成交金额合计）与最新成交日期，按客户名称归并
 const salesTotalMap = computed(() => {
   const map = {}
@@ -268,7 +268,7 @@ async function remove(row) {
   // 预删除校验：预存款余额 / 未结应收 / 名下销售单
   const dep = round2(depositMap.value[row.code] || 0)
   const recv = round2(receivableMap.value[row.name] || 0)
-  const saleCount = (sales.value || []).filter(s => s.customer === row.name).length
+  const saleCount = (sales.value || []).filter(s => s.customer === row.name && !isVoided(s)).length
   // 1) 预存款余额 > 0：硬性拦截，避免钱蒸发（必须去详情页清零/提现）
   if (dep > 0.005) {
     ElMessage.error(`该客户还有预存款余额 ¥${dep.toFixed(2)}，请先到客户详情页提现/清零后再删除，否则余额将丢失`)

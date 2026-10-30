@@ -244,7 +244,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import ProductTable from '../components/ProductTable.vue'
 import PhotoUpload from '../components/PhotoUpload.vue'
-import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf } from '../utils/account'
+import { payableOf, grossOf, paidSumOf, depositSumOf, isSettledOf, isVoided } from '../utils/account'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import { isReturn, isReturnId } from '../utils/refunds.js'
 import { appendVouchers, mapDepositVouchers } from '../utils/voucherFlow'
@@ -460,7 +460,8 @@ async function remove(row) {
   ElMessage.success('已删除')
   load()
 }
-const purchaseList = computed(() => (purchases.value || []).filter(p => p.supplier === supplier.value.name))
+// 作废单不参与供应商往来账（金额已归零）
+const purchaseList = computed(() => (purchases.value || []).filter(p => p.supplier === supplier.value.name && !isVoided(p)))
 const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateStart.value && (p.date || '') < dateStart.value) return false
   if (dateEnd.value && (p.date || '') > dateEnd.value) return false

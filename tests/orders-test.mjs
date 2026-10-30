@@ -45,7 +45,14 @@ test('校验拦住非法草稿，且不改动原快照', () => {
   assert.deepEqual(validateOrder(draft(), { items: fixture().items }), [])
   assert.match(validateOrder(draft({ items: [{ code: 'PX', qty: 1, price: 1, total: 1 }] }), { items: fixture().items })[0], /不在商品库/)
   assert.match(validateOrder(draft({ items: [{ code: 'P00001', qty: 0, price: 10, total: 0 }] }), { items: [] })[0], /数量必须大于 0/)
-  assert.match(validateOrder(draft({ items: [{ code: 'P00001', qty: 2, price: 10, total: 15 }] }), { items: [] })[0], /数量×单价不符/)
+  assert.match(validateOrder(draft({ items: [{ code: 'P00001', qty: 2, price: 10, total: 15 }] }), { items: [] })[0], /数量×单价×折扣不符/)
+  // 行折扣：小计必须是折后价，等于数量×单价时反而要被拦
+  assert.deepEqual(validateOrder(draft({ items: [{ code: 'P00001', qty: 2, price: 10, discountRate: 0.9, total: 18 }] }), { items: [] }), [])
+  assert.match(validateOrder(draft({ items: [{ code: 'P00001', qty: 2, price: 10, discountRate: 0.9, total: 20 }] }), { items: [] })[0], /折扣不符/)
+  // 行折扣与整单折扣链是两级相乘：行折后 18 × 整单 0.9 = 16.20，再减优惠 5 = 11.20
+  const lineDisc = draft({ items: [{ code: 'P00001', qty: 2, price: 10, discountRate: 0.9, total: 18 }], discountRates: [0.9], discount: 5 })
+  assert.deepEqual(validateOrder(lineDisc, { items: [] }), [])
+  assert.equal(orderAmount(lineDisc), 11.2)
   assert.match(validateOrder(draft({ customer: '  ' }))[0], /往来单位/)
   assert.match(validateOrder(draft({ date: '2026-10-29', discountRates: [1.5] }))[0], /折扣率/)
   // 订单金额与单据同口径：合计 × 折扣链 − 整单优惠

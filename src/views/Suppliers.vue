@@ -101,7 +101,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { nextEntityCode } from '../utils/code'
-import { payableOf, depositSumOf, grossOf, round2 } from '../utils/account'
+import { payableOf, depositSumOf, grossOf, round2, isVoided } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
@@ -130,7 +130,7 @@ const inPeriod = (date) => {
   return String(date || '') >= s && String(date || '') <= e
 }
 // 区间内采购单（按时间段过滤）
-const periodPurchases = computed(() => (purchases.value || []).filter(p => inPeriod(p.date)))
+const periodPurchases = computed(() => (purchases.value || []).filter(p => !isVoided(p) && inPeriod(p.date)))
 // 区间内采购总金额（折后成交金额合计）与最新成交日期，按供应商名称归并
 const purchaseTotalMap = computed(() => {
   const map = {}
@@ -250,7 +250,7 @@ async function remove(row) {
   // 预删除校验：预付款余额 / 未结应付 / 名下采购单
   const adv = round2(advanceMap.value[row.code] || 0)
   const pay = round2(payableMap.value[row.name] || 0)
-  const purchaseCount = (purchases.value || []).filter(p => p.supplier === row.name).length
+  const purchaseCount = (purchases.value || []).filter(p => p.supplier === row.name && !isVoided(p)).length
   // 1) 预付款余额 > 0：硬性拦截，避免钱蒸发（必须去详情页清零/提现）
   if (adv > 0.005) {
     ElMessage.error(`该供应商还有预付款余额 ¥${adv.toFixed(2)}，请先到供应商详情页提现/清零后再删除，否则余额将丢失`)

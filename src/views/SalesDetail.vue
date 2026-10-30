@@ -16,15 +16,18 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">显示客户信息详情</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
-            <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale)" @click="editDialog = true">编辑</el-button>
-            <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
-            <el-button v-if="found && !externalView" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'sale', source: isReturn(sale) ? undefined : sale.id } })">退货 / 退款</el-button>
+            <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || isVoided(sale)" @click="editDialog = true">编辑</el-button>
+            <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || isVoided(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
+            <el-button v-if="found && !externalView && !isVoided(sale)" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'sale', source: isReturn(sale) ? undefined : sale.id } })">退货 / 退款</el-button>
             <el-button @click="$router.push('/sales')">返回列表</el-button>
           </div>
         </div>
       </template>
       <el-alert v-if="externalView" class="external-banner" type="info" :closable="false" show-icon
         title="对外查看模式：价格与金额已隐藏，页面只读" />
+      <!-- 作废单保留在列表里可查，但业务上视为没发生过：库存已回滚、应收归零、关联收款单一起作废 -->
+      <el-alert v-if="found && isVoided(sale)" class="external-banner" type="warning" :closable="false" show-icon
+        :title="`这张单已作废${sale.voidedAt ? `（${fmtCNTime(sale.voidedAt) || sale.voidedAt}）` : ''}：库存已回滚、应收归零，关联的收款单同步作废${sale.voidedReason ? `。原因：${sale.voidedReason}` : ''}。作废不可恢复。`" />
       <div class="info">
         <span>客户：
           <router-link v-if="customerCodeMap[sale.customer]" :to="`/customer/${customerCodeMap[sale.customer]}`" class="link">{{ sale.customer }}</router-link>
@@ -64,7 +67,7 @@
             {{ settleLabel }}
           </el-tag>
           <!-- 未收 0 且无优惠时不显示；两个改账动作：改结清＝结清未收差额，改挂账＝撤销抹零优惠、恢复未收 -->
-          <el-button v-if="!externalView && !isReturn(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
+          <el-button v-if="!externalView && !isReturn(sale) && !isVoided(sale) && settleAction !== 'none'" link size="small" type="primary" class="settle-btn"
             :disabled="!found"
             @click="toggleSettle">
             {{ settleAction === 'settle' ? '改结清' : '改挂账' }}
@@ -108,7 +111,7 @@
         <div class="card-header">
           <b v-if="priceHidden">收款记录（{{ payments.length }} 笔 · 金额已隐藏）</b>
           <b v-else>收款记录（{{ payments.length }} 笔 · 累计 ¥ {{ receivedSum.toFixed(2) }} / 应收 ¥ {{ dueAmount.toFixed(2) }}<template v-if="Number(sale.discount || 0) > 0"> · 抹零优惠 ¥ {{ Number(sale.discount).toFixed(2) }}（未实际收款）</template>）</b>
-          <el-button v-if="!isReturn(sale)" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
+          <el-button v-if="!isReturn(sale) && !isVoided(sale)" type="primary" size="small" @click="payDialog = true">记录收款</el-button>
         </div>
       </template>
       <div class="table-wrap">
@@ -195,7 +198,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { receivableOf, grossOf, netOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
+import { receivableOf, grossOf, netOf, receivedSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, isVoided, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
