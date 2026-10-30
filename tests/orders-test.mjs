@@ -213,3 +213,25 @@ test('过账后派生数据自洽：客户档案、历史价、库存同源重�
   assert.equal(next.sales.length, 2)
   assert.equal(next.customers.length, 1)
 })
+
+test('备份恢复：restore 整表替换订单，形状非法一律拒绝', () => {
+  const s = fixture()
+  s.orders = [{ id: 'D1', status: DRAFT, kind: 'sale', customer: '客户甲', items: [] }]
+  const incoming = [
+    { id: 'D2', status: DRAFT, kind: 'sale', customer: '客户甲', items: [] },
+    { id: 'D3', status: POSTED, kind: 'purchase', supplier: '供应商甲', postedOrderId: 'C1', items: [] }
+  ]
+  const r = applyOrderOperation(s, { action: 'restore', orders: incoming })
+  assert.equal(r.restored, 2)
+  assert.deepEqual(r.state.orders.map(o => o.id), ['D2', 'D3'])
+  assert.equal(r.state.orders[1].status, POSTED)
+  // 快照没有被就地改
+  assert.equal(s.orders.length, 1)
+  // 空数组＝清空（备份里本来就没有草稿时，恢复结果也要一致）
+  assert.equal(applyOrderOperation(s, { action: 'restore', orders: [] }).state.orders.length, 0)
+  // 非法形状
+  assert.throws(() => applyOrderOperation(s, { action: 'restore', orders: 'x' }), /必须是数组/)
+  assert.throws(() => applyOrderOperation(s, { action: 'restore', orders: [null] }), /非对象/)
+  assert.throws(() => applyOrderOperation(s, { action: 'restore', orders: [{ id: '' }] }), /订单号/)
+  assert.throws(() => applyOrderOperation(s, { action: 'restore', orders: [{ id: 'D9' }, { id: 'D9' }] }), /重复/)
+})

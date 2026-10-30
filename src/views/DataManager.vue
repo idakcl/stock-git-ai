@@ -8,7 +8,7 @@
       </template>
 
       <el-alert type="info" :closable="false" show-icon class="intro">
-        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
+        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单、收付款单、订单草稿、退款核销单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
         <b>全量导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，操作前建议先导出一份当前数据。<br />
         <b>分类导入导出</b>：按数据类型单独导出、导入；导入时与库内现有数据<b>按编码/单号比对去重</b>，已存在的自动跳过，只追加新记录，不覆盖已有数据。
       </el-alert>
@@ -23,7 +23,7 @@
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导出备份</b></template>
-        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单及各自的预存款/预付款流水）。</p>
+        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单、订单草稿、退款/核销单，以及客户/供应商的预存款、预付款流水）。</p>
         <el-button type="primary" :loading="exporting" @click="doExport">导出全部数据</el-button>
       </el-card>
 
@@ -60,6 +60,8 @@
             <el-descriptions-item label="供应商">{{ pending.counts.suppliers }} 条</el-descriptions-item>
             <el-descriptions-item label="销售单">{{ pending.counts.sales }} 单</el-descriptions-item>
             <el-descriptions-item label="采购单">{{ pending.counts.purchases }} 单</el-descriptions-item>
+            <el-descriptions-item v-if="pending.counts.orders != null" label="订单草稿">{{ pending.counts.orders }} 单</el-descriptions-item>
+            <el-descriptions-item v-if="pending.counts.refunds != null" label="退款/核销">{{ pending.counts.refunds }} 单</el-descriptions-item>
           </el-descriptions>
           <div class="import-bar">
             <el-button type="danger" :loading="importing" @click="doImport">确认导入（覆盖现有数据）</el-button>
@@ -72,7 +74,7 @@
       <el-card shadow="never" class="panel">
         <template #header><b>分类导入导出（按编码/单号去重）</b></template>
         <p class="desc">
-          五种数据类型各自独立导出、导入。导入时先与库内现有数据比对：<b class="ok-text">编码/单号已存在的自动跳过</b>，
+          九种数据类型各自独立导出、导入（含订单草稿与退款/核销单）。导入时先与库内现有数据比对：<b class="ok-text">编码/单号已存在的自动跳过</b>，
           客户/供应商还会按名称查重（防止同名多码把一家单位拆成两份档案），只追加真正的新记录，已有数据不会被覆盖或删除。
         </p>
         <el-table :data="typeRows" border size="small" class="type-table">
@@ -186,7 +188,7 @@ const DATA_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
 const BACKUP_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
 const KEY_LABELS = {
   items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单',
-  receipts: '收款单', 'payment-vouchers': '付款单'
+  receipts: '收款单', 'payment-vouchers': '付款单', orders: '订单草稿', refunds: '退款/核销单'
 }
 const MAX_SIZE = 30 * 1024 * 1024   // 30MB 上限：正常备份在几百 KB~几 MB
 
@@ -198,7 +200,9 @@ const TYPES = [
   { key: 'sales', label: '销售单', unit: '单' },
   { key: 'purchases', label: '采购单', unit: '单' },
   { key: 'receipts', label: '收款单', unit: '单' },
-  { key: 'payment-vouchers', label: '付款单', unit: '单' }
+  { key: 'payment-vouchers', label: '付款单', unit: '单' },
+  { key: 'orders', label: '订单草稿', unit: '单' },
+  { key: 'refunds', label: '退款/核销单', unit: '单' }
 ]
 const typeRows = ref(TYPES.map(t => ({ ...t, count: null, exporting: false })))
 
@@ -209,7 +213,9 @@ const FETCHERS = {
   sales: () => api.getSales(),
   purchases: () => api.getPurchases(),
   receipts: () => api.getReceipts(),
-  'payment-vouchers': () => api.getPaymentVouchers()
+  'payment-vouchers': () => api.getPaymentVouchers(),
+  orders: () => api.getOrders(),
+  refunds: () => api.getRefunds()
 }
 
 // 页面打开时拉一次各类型库内数量（走 15 秒内存缓存，不重复请求）
@@ -267,7 +273,12 @@ function displayNameOf(key, rec) {
   if (rec.name != null && String(rec.name)) return String(rec.name)
   if (key === 'purchases' && rec.supplier) return String(rec.supplier)
   if (key === 'sales' && rec.customer) return String(rec.customer)
-  if ((key === 'receipts' || key === 'payment-vouchers') && rec.party) return String(rec.party)
+  if (key === 'orders') return String(rec.customer || rec.supplier || rec.remark || '—')
+  if (key === 'receipts' || key === 'payment-vouchers' || key === 'refunds') {
+    if (rec.party) return String(rec.party)
+    if (rec.customer) return String(rec.customer)
+    if (rec.supplier) return String(rec.supplier)
+  }
   return '—'
 }
 
@@ -399,15 +410,15 @@ async function doNormalize() {
 async function doExport() {
   exporting.value = true
   try {
-    const [items, customers, suppliers, sales, purchases, receipts, paymentVouchers] = await Promise.all([
+    const [items, customers, suppliers, sales, purchases, receipts, paymentVouchers, orders, refunds] = await Promise.all([
       api.getItems(), api.getCustomers(), api.getSuppliers(), api.getSales(), api.getPurchases(),
-      api.getReceipts(), api.getPaymentVouchers()
+      api.getReceipts(), api.getPaymentVouchers(), api.getOrders(), api.getRefunds()
     ])
     const payload = {
       app: 'stock-git-ai',
       version: 1,
       exportedAt: new Date().toISOString(),
-      data: { items, customers, suppliers, sales, purchases, receipts, 'payment-vouchers': paymentVouchers }
+      data: { items, customers, suppliers, sales, purchases, receipts, 'payment-vouchers': paymentVouchers, orders, refunds }
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -418,7 +429,7 @@ async function doExport() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length}`)
+    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length} · 订单草稿 ${orders.length} · 退款/核销 ${refunds.length}`)
   } catch (e) {
     ElMessage.error(`导出失败：${e.message || '网络异常'}`)
   } finally {
@@ -451,7 +462,10 @@ function onFileChange(file, list) {
         sizeText: f.size > 1024 * 1024 ? `${(f.size / 1024 / 1024).toFixed(2)} MB` : `${(f.size / 1024).toFixed(1)} KB`,
         counts: {
           items: d.items.length, customers: d.customers.length, suppliers: d.suppliers.length,
-          sales: d.sales.length, purchases: d.purchases.length
+          sales: d.sales.length, purchases: d.purchases.length,
+          // 订单/退款是后期加入备份集合的，旧备份没有这两个键 → 摘要里不显示、导入时也不动
+          orders: Array.isArray(d.orders) ? d.orders.length : null,
+          refunds: Array.isArray(d.refunds) ? d.refunds.length : null
         }
       }
     } catch (e) {
@@ -481,7 +495,9 @@ async function doImport() {
   // 覆盖摘要：核心 5 类必含；收款单/付款单若备份中存在才一并提示（旧备份可能不含）
   const summaryKeys = DATA_KEYS.concat(
     Array.isArray(p.data.receipts) ? ['receipts'] : [],
-    Array.isArray(p.data['payment-vouchers']) ? ['payment-vouchers'] : []
+    Array.isArray(p.data['payment-vouchers']) ? ['payment-vouchers'] : [],
+    Array.isArray(p.data.orders) ? ['orders'] : [],
+    Array.isArray(p.data.refunds) ? ['refunds'] : []
   )
   const summary = summaryKeys.map(k => `${KEY_LABELS[k]} ${Array.isArray(p.data[k]) ? p.data[k].length : 0}`).join('、')
   try {
@@ -503,6 +519,9 @@ async function doImport() {
     // 收款单/付款单：旧备份可能不含这两者，存在才整体覆盖，避免清空调已产生的单据
     if (Array.isArray(p.data.receipts)) await api.saveReceipts(p.data.receipts)
     if (Array.isArray(p.data['payment-vouchers'])) await api.savePaymentVouchers(p.data['payment-vouchers'])
+    // 订单草稿与退款/核销单：旧备份可能不含，存在才整体覆盖（否则会无端清空现有草稿/凭证）
+    if (Array.isArray(p.data.orders)) await api.restoreOrders(p.data.orders)
+    if (Array.isArray(p.data.refunds)) await api.restoreRefunds(p.data.refunds)
     ElMessage.success('导入完成，页面即将刷新')
     setTimeout(() => window.location.reload(), 800)
   } catch (e) {

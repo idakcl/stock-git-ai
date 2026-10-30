@@ -9,6 +9,31 @@ export async function refundTransaction(env, input, derive, rebuildStock) {
   const tx = await openTransaction(env, keys, { optional: ['refunds'] })
   const { state } = tx
 
+  // 备份恢复：整表替换退款/核销凭证（全量备份导入用）。
+  // 退款凭证只是资金/核销台账，库存与单据由 sales/purchases 决定，因此不跑 derive。
+  if (input.action === 'restore') {
+    const list = input.refunds
+    const fail = (message) => { const e = new Error(message); e.status = 400; throw e }
+    if (!Array.isArray(list)) fail('退款凭证数据必须是数组')
+    if (list.length > 5000) fail('退款凭证超过 5000 条上限，请分批导入')
+    const seen = new Set()
+    for (const v of list) {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) fail('退款凭证数据中存在非对象记录')
+      const code = String(v.code || '').trim()
+      if (!code) fail('退款凭证数据中存在缺少编号的记录')
+      if (seen.has(code)) fail(`退款凭证编号重复：${code}`)
+      seen.add(code)
+    }
+    const next = { ...state, refunds: list.map(v => ({ ...v })) }
+    const r = await commitTransaction(tx, {
+      next,
+      message: `refund: restore ${list.length}`,
+      logEntry: { source: 'refund', action: 'restore', count: list.length }
+    })
+    if (r.unchanged) return { ok: true, restored: list.length, unchanged: true }
+    return { ok: true, restored: list.length, commit: r.sha }
+  }
+
   const result = input.action === 'backfill' ? backfillHistoricalRefunds(state) : applyRefundOperation(state, input)
   if (result.duplicate) return { ok: true, code: result.code, duplicate: true }
   const next = result.state

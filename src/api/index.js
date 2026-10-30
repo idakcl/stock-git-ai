@@ -178,6 +178,18 @@ export const api = {
     for (const path of ['/sales', '/purchases', '/orders', '/refunds', '/receipts', '/payment-vouchers', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)
     return result
   },
+  // 备份恢复：整表替换订单草稿（备份导入用；与 saveXxx 的整表语义一致，但走操作接口）
+  restoreOrders: async (orders) => {
+    const r = await request('/orders', { method: 'POST', body: JSON.stringify({ action: 'restore', orders }) })
+    invalidate('/orders')
+    return r
+  },
+  // 备份恢复：整表替换退款/核销凭证（不触发库存派生，凭证只是台账）
+  restoreRefunds: async (refunds) => {
+    const r = await request('/refunds', { method: 'POST', body: JSON.stringify({ action: 'restore', refunds }) })
+    invalidate('/refunds')
+    return r
+  },
   getPurchases: () => cachedGet('/purchases'),
   savePurchases: async (purchases) => {
     const r = await request('/purchases', { method: 'POST', body: JSON.stringify({ purchases }) })

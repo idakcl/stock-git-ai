@@ -110,6 +110,24 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
   const action = input?.action
   const find = id => state.orders.find(o => o.id === id)
 
+  // 备份恢复：整表替换订单集合（全量备份导入用）。
+  // 只做「形状」校验，不改金额/状态——备份里是什么就写回什么，恢复后与导出时一致。
+  if (action === 'restore') {
+    const list = input.orders
+    if (!Array.isArray(list)) fail('订单数据必须是数组')
+    if (list.length > 5000) fail('订单数量超过 5000 条上限，请分批导入')
+    const seen = new Set()
+    for (const o of list) {
+      if (!o || typeof o !== 'object' || Array.isArray(o)) fail('订单数据中存在非对象记录')
+      const id = String(o.id || '').trim()
+      if (!id) fail('订单数据中存在缺少订单号的记录')
+      if (seen.has(id)) fail(`订单号重复：${id}`)
+      seen.add(id)
+    }
+    state.orders = list.map(o => ({ ...o }))
+    return { state, code: '', restored: list.length }
+  }
+
   if (action === 'save') {
     const draft = input.order || {}
     const errors = validateOrder(draft, { items: state.items })

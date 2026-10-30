@@ -14,7 +14,7 @@
 //   invalid     —— 非对象或主键为空的记录：[{ record, reason }]
 // 文件内部重复同样去重（batchKeys/batchNames），不会把同一文件里的重复记录写两份。
 
-export const IMPORT_KEYS = ['items', 'customers', 'suppliers', 'purchases', 'sales', 'receipts', 'payment-vouchers']
+export const IMPORT_KEYS = ['items', 'customers', 'suppliers', 'purchases', 'sales', 'receipts', 'payment-vouchers', 'orders', 'refunds']
 
 const KEY_FIELDS = {
   items: 'code',
@@ -23,7 +23,9 @@ const KEY_FIELDS = {
   purchases: 'id',
   sales: 'id',
   receipts: 'code',
-  'payment-vouchers': 'code'
+  'payment-vouchers': 'code',
+  orders: 'id',
+  refunds: 'code'
 }
 
 // 这些类型在主键之外还按名称查重

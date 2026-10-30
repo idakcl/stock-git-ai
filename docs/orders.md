@@ -45,7 +45,7 @@
 
 ### 接口
 `GET /api/orders` → 订单数组（**文件不存在返回 `[]`**，首次保存订单由事务自动建文件）。
-`POST /api/orders` → **操作接口，不是整表覆盖**，`action` 取 `save` / `deposit` / `post` / `unpost` / `delete` / `clearDrafts`：
+`POST /api/orders` → **操作接口，不是整表覆盖**，`action` 取 `save` / `deposit` / `post` / `unpost` / `delete` / `clearDrafts` / `restore`：
 
 ```json
 { "action": "save",   "order": { "kind": "sale", "customer": "客户甲", "date": "2026-10-29",
@@ -58,12 +58,17 @@
 { "action": "unpost",  "orderId": "D20261029…" }
 { "action": "delete",  "orderId": "D20261029…" }
 { "action": "clearDrafts" }
+{ "action": "restore", "orders": [ /* 全量订单数组 */ ] }
 ```
 
 - `clearDrafts`：一次请求删掉**全部纯草稿**，返回 `{ removed, skipped }`（`skipped` = 保留下来的张数）。
   它不绕过单张删除的两条硬约束——**已过账的不删**（要先撤销过账，否则那条正式单据会变成孤儿）、
   **收过订金的不删**（订金凭证已开）。因此它是幂等的：再调一次 `removed` 为 0、不会产生空提交。
   设计动机：给「清空草稿」按钮用，几十张草稿各发一次请求就是几十次 git 提交，既慢又会刷屏提交历史。
+- `restore`：**仅供「数据管理 → 全量导入」恢复备份**，整表替换 `orders.json`（传 `[]` 即清空）。
+  校验与其它写入同口径：必须是数组、≤ 5000 条、每条是对象且 `id` 非空不重复，否则 400 不落库。
+  它**不跑 `derive()` / `rebuildStock()`**——订单是草稿，本来就不参与库存与应收派生；与目标内容完全一致时返回 `{ ok: true, unchanged: true }`，不产生空提交。
+  旧备份文件里没有 `orders` 键时前端不会调用它，现有草稿保持不动。
 
 服务端返回 `{ ok, code, orderId?, removedDocId? }`；`code` 按操作含义不同（存草稿/删 = 订单号，过账 = 新单据号，收订金 = 凭证号），前端只用它做提示，落库结果一律以重新拉取为准。
 校验函数 `validateOrder(order, { items })` 前后端共用（同一份 `src/utils/orders.js`），杜绝「界面能提交、服务端拒」；
@@ -146,8 +151,8 @@
 
 ## 四、测试
 纯 Node（不碰线上仓）：
-- `node tests/orders-test.mjs`（11 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、
-  订金开凭证 + 过账搬成首笔流水、孤儿订单两个兜底分支、清空草稿的保留规则。
+- `node tests/orders-test.mjs`（12 项）状态机与订金：草稿不占库存、过账生成单据并派生、撤销三闸门、
+  订金开凭证 + 过账搬成首笔流水、孤儿订单两个兜底分支、清空草稿的保留规则、`restore` 整表替换与非法形状拒绝。
 - `node tests/amend-test.mjs`（9 项）`diffOrderLines` / `refundPreview` / `applyAmendOperation`：
   退货行按行索引分摊、改价拒绝、混合单价拒绝、幂等 `requestId`、补差沿用原单价。
 - `node tests/orders-api-test.mjs`（15 项）以 `tests/fake-github.mjs` 为底跑 `/api/orders`、`/api/amends` 全链路，

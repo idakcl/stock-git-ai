@@ -64,6 +64,8 @@ kind = sale / purchase；请求标识为一次操作唯一 UUID，网络重试�
 
 action=backfill 只处理 CT-20260519-0001/CT-20260519-0002（原 T20260519120000001/T20260519120000002）。已于数据仓提交 74a3c2e 执行：TK-20260519-0001 金额 8618；TK-20260519-0002 金额 302；方向均 from_supplier，总额 8920。仅改 purchases.json（按年分片后为 purchases-2026.json）的 payments、refunds.json、logs.json；原金额、库存、明细、结算状态未变。重复执行不新增单据。
 
+action=restore：仅供「数据管理 → 全量导入」恢复备份，请求体 `{ "action": "restore", "refunds": [全量凭证数组] }`，整表替换 refunds.json（传 [] 即清空）。校验与其它写入同口径：必须是数组、≤ 5000 条、每条是对象且 code 非空不重复，否则 400 不落库；内容与库内一致时返回 `{ ok: true, restored, unchanged: true }`，不产生空提交。退款/核销是凭证、不影响库存，故 restore 不触发派生；旧备份没有 refunds 键时前端不调用它，现有凭证保持不动。`POST /api/import-merge` 也接受 key=refunds，按 code 去重后追加。
+
 ## 与初版方案的修正与边界
 
 不把退货抵扣当优惠，不把非现金核销当退款流水；正常收付款函数保留旧口径，退货抵扣通过独立入口显式选择，不在普通「记一笔」中静默抵扣。退款不是折让；目前不提供独立无货折让、预存款直接退款、作废冲红或现金银行账户功能。
@@ -76,7 +78,7 @@ action=backfill 只处理 CT-20260519-0001/CT-20260519-0002（原 T2026051912000
 
 ## 验证与发布状态
 
-已通过 `node --test refund-test.mjs`（11 项）、`node deposit-test.mjs`（9 项断言）、`git diff --check`、`npm run build`。构建只有主包体积警告。
+已通过 `node --test refund-test.mjs`（11 项）、`node deposit-test.mjs`（9 项断言）、`node tests/backup-api-test.mjs`（8 项，含退款 restore 与 import-merge 去重）、`git diff --check`、`npm run build`。构建只有主包体积警告。
 
 浏览器验收脚本：`refund-browser-test.mjs`，需要环境可加载 Playwright 及 Chromium，并先启动 `npm run dev -- --host 0.0.0.0 --port 5173`，然后运行 `node refund-browser-test.mjs`。API 全部使用隔离内存数据，不接触生产数据。
 

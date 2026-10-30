@@ -110,8 +110,9 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/sales` | `{"sales":[全量数组]}` | 同上，并为单里出现的新客户自动建档 |
 | `/normalize` | `{}` | 全量重跑派生，修复编码/历史价/库存漂移。**幂等，改完数据仓后调一次即可** |
 | `/import` | `{"text":"<整份 JSON 的字符串>"}` | 见下方「导入」 |
-| `/import-merge` | `{"key":"items","records":[...]}` | 按主键去重后**追加**，不覆盖已有数据；`key` 可取 `items / customers / suppliers / purchases / sales / receipts / payment-vouchers`，主键为编码（档案、资金单据）或单号（单据），客户/供应商另按名称查重；返回各项计数 `{ ok, added, skippedKey, skippedName, invalid, total }` |
-| `/orders` | `{"action": "save" / "deposit" / "post" / "unpost" / "delete" / "clearDrafts", …}` | **操作接口，不是整表覆盖**，请求体形状与闸门规则见 [docs/orders.md](docs/orders.md)。只有 `post` / `unpost` 才跑 `derive()` + `rebuildStock()`（存草稿、收订金不重写 200KB 的 `items.json`） |
+| `/import-merge` | `{"key":"items","records":[...]}` | 按主键去重后**追加**，不覆盖已有数据；`key` 可取 `items / customers / suppliers / purchases / sales / receipts / payment-vouchers / orders / refunds`，主键为编码（档案、资金单据、退款凭证）或单号（单据、订单），客户/供应商另按名称查重；返回各项计数 `{ ok, added, skippedKey, skippedName, invalid, total }` |
+| `/orders` | `{"action": "save" / "deposit" / "post" / "unpost" / "delete" / "clearDrafts" / "restore", …}` | **操作接口，不是整表覆盖**，请求体形状与闸门规则见 [docs/orders.md](docs/orders.md)。只有 `post` / `unpost` 才跑 `derive()` + `rebuildStock()`（存草稿、收订金不重写 200KB 的 `items.json`）；`restore` 仅供备份恢复，整表替换 `orders` 且不派生 |
+| `/refunds` | `{"action": "create" / "settle" / "backfill" / "restore", …}` | **操作接口**，见 [docs/refunds.md](docs/refunds.md)；`restore` 仅供备份恢复，整表替换退款/核销凭证（退款是凭证、不影响库存，故不派生） |
 | `/amends` | `{"kind","requestId","sourceOrderId","party","date","reason","mode","refundLines":[{index,qty}],"amendLines":[{code,name,unit,qty,price}]}` | **操作接口**：原单不动，减少的商品生成退货单（复用退款四档资金处理）、增加的商品生成补差单，一次提交落库；`requestId` 幂等，金额一律服务端重算 |
 | `/voids` | `{"kind":"sale"\|"purchase","id":"单据号","reason":"可选"}` | **操作接口**：整单作废并同步作废关联的 `SK-`/`FK-`，一次提交回滚库存/应收；重复作废幂等；子单/核销/合并凭证未拆时 `409`。详见 [docs/void.md](docs/void.md) |
 | `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
@@ -126,7 +127,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 - 金额请自己保证 2 位小数；服务端 `derive` 会收敛浮点残留，但不会替你四舍五入 `payments[].amount`。
 - 不要写 `payments[].mid`（前端一次性定位标记，落库前会被剥掉）；写 `items[].purchaseHistory` 也会被剥掉。
 
-**导入接口 `/import`**：`text` 是**字符串**（整份 JSON 文本），识别键 `items / suppliers / customers / purchases / sales / receipts / payment-vouchers`，逐个**整表覆盖**（传哪些键覆盖哪些，未传的不动）；`stock` 键会被忽略（库存一律由单据重建）。上限：文本 1MB、单类 5000 条、记录必须是对象，否则 400 中止。非 JSON 文本走行式解析，仅识别 `商品: 编码 名称 单位`、`供应商: 编码 名称`、`客户: 编码 名称` 三种行。每次导入会往 `logs.json` 追加一条 `{time, source:"ai", results}`。
+**导入接口 `/import`**：`text` 是**字符串**（整份 JSON 文本），识别键 `items / suppliers / customers / purchases / sales / receipts / payment-vouchers`，逐个**整表覆盖**（传哪些键覆盖哪些，未传的不动）；`stock` 键会被忽略（库存一律由单据重建）。上限：文本 1MB、单类 5000 条、记录必须是对象，否则 400 中止。非 JSON 文本走行式解析，仅识别 `商品: 编码 名称 单位`、`供应商: 编码 名称`、`客户: 编码 名称` 三种行。每次导入会往 `logs.json` 追加一条 `{time, source:"ai", results}`。**订单草稿与退款/核销单不在 `/import` 的识别键里**（它们是操作型集合，没有整表写接口），「数据管理 → 全量导入」由前端在写完其余 7 类后，分别调用 `POST /api/orders` / `POST /api/refunds` 的 `restore` 动作整表写回。
 
 ### 资金单据（`SK-` / `FK-`）结构
 ```json
@@ -242,6 +243,7 @@ console.log('已生成收款单', code, '｜本单未收', due)
 > 生产代码请优先复用 `src/utils/voucherFlow.js`（`allocVoucherCodes` / `attachPaymentVouchers` / `savePaymentWithVouchers` / `voucherNotices`）——编号预分配、`settle` 计算、失败分 `stage` 提示都已处理好，且是可单测的纯逻辑。
 
 ### 对接前必读的变更
+- **2026-10-30｜备份纳入订单与退款**：数据管理「全量导出 / 导入」由 7 类扩为 **9 类**（新增 `orders` / `refunds` 键），分类导入导出同样多出「订单草稿 / 退款核销单」两行；写回走 `POST /api/orders` / `POST /api/refunds` 的 `restore`（整表替换、形状校验、内容相同不提交），`/import-merge` 新增 `orders`（按 `id`）/ `refunds`（按 `code`）去重。**旧备份没有这两个键时前端不调用 restore，现有草稿与退款凭证保持不动。**
 - **2026-10-30｜单据作废上线**：`POST /api/voids` 作废销售单/采购单，并同步作废关联的 `SK-`/`FK-`。单据与凭证都保留（`status:"作废"`），但库存、应收应付、实收实付、历史价、往来账、看板/报表全部按 0 处理。**脚本统计必须先过滤作废单**；合并收款的凭证、有退货子单/核销记录的单会被 `409` 拦下。详见 [docs/void.md](docs/void.md)。
 - **2026-10-30｜明细行折扣**：订单与正式单据的 `items[]` 增加 `discountRate` / `discount` / `total`（折后）三件套，订单弹窗每行可单独折扣；过账时原样搬进单据。
 - **2026-10-29｜新增订单与单据变更两个操作接口**：`GET/POST /api/orders`（草稿住 `orders.json`，**文件不存在返回 `[]`**，不参与库存与应收派生）与 `POST /api/amends`（已动过钱的单增减商品 → 生成 `XT-`/`CT-` 退货单 + `XA-`/`CA-` 补差单，原单不动）。**两者都不是整表覆盖**，脚本按「读全量 → 改一条 → 写回全量」的老套路调它们会直接 400。销售/采购单可能开始出现 `type: 'sale-amend'` / `'purchase-amend'` 与 `sourceOrderId`、`fromOrderId` 字段，统计时注意：补差单是正数正常单，退货单是负数红字，两者都算进「单族」的净成交。详见 [docs/orders.md](docs/orders.md)。
@@ -264,8 +266,8 @@ console.log('已生成收款单', code, '｜本单未收', due)
 - **录入校验不得静默**：明细里的空白行（未选商品且未填任何值）不再拦下整单，「快速添加」会优先填入第一个空白行而不是追加，避免残留空行导致「点保存没反应」；填了数量/单价却没选商品的行会指明第几行。校验提示统一停留 5 秒。
 - **多文件写入说明**：保存采购单/销售单会分步写入 `purchases/sales.json` 及派生文件（`items/suppliers/stock.json`，共 4 次提交），GitHub Contents API 无跨文件事务，理论上存在"主单据已存、派生文件失败"的部分写入。派生逻辑（`derive`/`rebuildStock`）是**由单据重建的纯函数、幂等**，此时页面会明确提示"请重新保存一次该单据自动修复"，不会悄悄丢数据。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
-- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（11 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/orders-api-test.mjs`（15 项，`/api/orders` 与 `/api/amends` 全链路）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
-- **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（14 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片 + 清空草稿 + 菜单顺序 + 菜单角标对齐）、`node tests/void-browser-test.mjs`（9 项，作废按钮/确认框 + 作废标记 + 详情页锁写 + 凭证打标与合计 + 订单行折扣 + 提示间距）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
+- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（12 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿 / `restore` 整表恢复）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/orders-api-test.mjs`（15 项，`/api/orders` 与 `/api/amends` 全链路）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）、`node tests/backup-api-test.mjs`（8 项，备份恢复：`restore` 订单/退款一次提交且不动库存、空表清空、非法/重复整表拒绝、`import-merge` 对订单与退款按单号/凭证号去重）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
+- **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（14 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片 + 清空草稿 + 菜单顺序 + 菜单角标对齐）、`node tests/void-browser-test.mjs`（9 项，作废按钮/确认框 + 作废标记 + 详情页锁写 + 凭证打标与合计 + 订单行折扣 + 提示间距）、`node tests/backup-browser-test.mjs`（5 项，备份：分类表含订单/退款行、全量导出 JSON 含 9 类、全量导入按序调用含两个 `restore`、旧备份不含订单/退款时不误清、分类导入订单按单号去重）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
 
 ## 读取性能优化（Phase 0）
 
@@ -596,11 +598,12 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 时间段筛选位于页签上方，对「单据列表」和「来往账」同时生效。
 
 ### 数据备份与恢复（数据管理页）
-- **全量导出 / 导入**：五类数据打包为一个 JSON 备份文件；导入为**整表覆盖**语义，面向定期存档、换设备恢复。
-- **分类导入导出**：商品 / 客户 / 供应商 / 采购单 / 销售单**各自独立**导出（单类型 JSON）与导入；导入走 `POST /api/import-merge`（**合并去重，不覆盖**）：
-  - 商品 / 客户 / 供应商按**编码**查重，采购单 / 销售单按**单号**查重；客户 / 供应商额外按**名称**查重（防止同名多码把一家单位拆成两份档案）；
+- **全量导出 / 导入**：**九类数据**（商品 / 客户 / 供应商 / 销售单 / 采购单 / 收款单 / 付款单 / 订单草稿 / 退款核销单）打包为一个 JSON 备份文件；导入为**整表覆盖**语义，面向定期存档、换设备恢复。导入顺序固定：主数据 → 单据 → 资金单据 → 订单/退款，其中订单与退款走 `restore` 动作整表写回。
+- **旧备份兼容**：订单与退款是后加入的集合。旧备份文件里没有 `orders` / `refunds` 键时，摘要不显示这两行、导入**也不动**现有草稿与退款凭证；只有键存在（哪怕是 `[]`）才覆盖——空数组表示「备份时确实没有」，会一并清空。
+- **分类导入导出**：九类数据**各自独立**导出（单类型 JSON）与导入；导入走 `POST /api/import-merge`（**合并去重，不覆盖**）：
+  - 商品 / 客户 / 供应商按**编码**查重，采购单 / 销售单 / 订单草稿按**单号**查重，退款/核销单按**凭证号**查重；客户 / 供应商额外按**名称**查重（防止同名多码把一家单位拆成两份档案）；
   - 导入前前端先用同一份 `src/utils/dedupe.js` 纯函数做**比对预览**（将新增 / 重复跳过 / 无效及逐条明细），确认后才写库；服务端落库前会重新比对一次，以服务端结果为准；
-  - 重复与无效记录自动跳过，只追加新记录；单据类导入后自动 `derive()` + `rebuildStock()` 重建库存、历史价与档案链接，并过 `normalizeOrderPayments` 防实付漏算；
+  - 重复与无效记录自动跳过，只追加新记录；单据类导入后自动 `derive()` + `rebuildStock()` 重建库存、历史价与档案链接，并过 `normalizeOrderPayments` 防实付漏算；订单草稿与退款凭证只是档案/凭证，导入不触发派生（草稿不占库存、退款不影响库存）；
   - 单次上限 5000 条。
 
 ### 清空数据（独立菜单项，位于「系统」分组）
