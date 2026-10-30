@@ -247,7 +247,7 @@ await t('草稿列表可过账：确认后提交 post', async () => {
     discount: 0, discountRates: [], items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }], deposits: [] }]
   const { page, context, errors, state } = await open('/orders', s)
   try {
-    await page.getByRole('button', { name: '过账' }).first().click()
+    await page.getByRole('button', { name: '过账', exact: true }).first().click()
     await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
     await page.waitForTimeout(400)
     const post = (state.posts || []).find(p => p.key === 'orders')
@@ -264,6 +264,10 @@ await t('已过账订单禁止编辑/删除，只提供撤销过账', async () =
     date: '2026-10-29', discount: 0, discountRates: [], items: [{ code: 'P00001', name: '管件', qty: 4, price: 10, total: 40 }], deposits: [] }]
   const { page, context, errors } = await open('/orders', s)
   try {
+    // 列表默认只看未过账订单，已过账的要先切到「显示全部订单」
+    await page.locator('.filter-row .el-select').first().click()
+    await page.getByRole('option', { name: '显示全部订单' }).click()
+    await page.waitForTimeout(200)
     const ops = page.locator('.ops-col button')
     assert.equal(await ops.nth(0).isDisabled(), true, '已过账不能编辑')
     assert.equal(await ops.nth(1).isDisabled(), true, '已过账不能收订金')
@@ -292,7 +296,7 @@ await t('看板显示待过账订单数并带订金', async () => {
   } finally { await context.close() }
 })
 
-await t('清空草稿：按钮只算纯草稿，确认后提交一次 clearDrafts', async () => {
+await t('清空未过账订单：按钮只算纯草稿，确认后提交一次 clearDrafts', async () => {
   const s = seed()
   const base = { kind: 'sale', customer: '客户甲', date: '2026-10-29', discount: 0, discountRates: [],
     items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }] }
@@ -306,17 +310,17 @@ await t('清空草稿：按钮只算纯草稿，确认后提交一次 clearDraft
   ]
   const { page, context, errors, state } = await open('/orders', s)
   try {
-    const btn = page.getByRole('button', { name: /清空草稿/ })
-    assert.match((await btn.innerText()).replace(/\s+/g, ''), /清空草稿（2）/, '只数得出真会删掉的那两张')
+    const btn = page.getByRole('button', { name: /清空未过账订单/ })
+    assert.match((await btn.innerText()).replace(/\s+/g, ''), /清空未过账订单（2）/, '只数得出真会删掉的那两张')
     await btn.click()
     const box = page.locator('.el-message-box')
     const text = (await box.innerText()).replace(/\s+/g, ' ')
-    assert.match(text, /删除 2 张草稿/, `确认框要报清张数：${text}`)
-    assert.match(text, /另有 2 张不会被删/, '要说清哪些不删')
+    assert.match(text, /删除 2 张未过账订单/, `确认框要报清张数：${text}`)
+    assert.match(text, /另有 1 张未过账订单因已收订金会保留/, '要说清哪些不删')
     await box.getByRole('button', { name: '全部删除' }).click()
     await page.waitForTimeout(400)
     const posts = (state.posts || []).filter(p => p.key === 'orders')
-    assert.equal(posts.length, 1, '清空草稿只应发一次请求（不是每张一次）')
+    assert.equal(posts.length, 1, '清空未过账订单只应发一次请求（不是每张一次）')
     assert.equal(posts[0].body.action, 'clearDrafts')
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
@@ -329,7 +333,7 @@ await t('没有可清空的草稿时按钮禁用', async () => {
     items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }] }]
   const { page, context, errors } = await open('/orders', s)
   try {
-    assert.equal(await page.getByRole('button', { name: /清空草稿/ }).isDisabled(), true, '全是已过账单时不能清空')
+    assert.equal(await page.getByRole('button', { name: /清空未过账订单/ }).isDisabled(), true, '全是已过账单时不能清空')
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

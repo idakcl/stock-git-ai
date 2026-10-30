@@ -25,7 +25,7 @@ export async function orderTransaction(env, input, derive, rebuildStock) {
 
   const r = await commitTransaction(tx, {
     next,
-    message: `order: ${input.action} ${result.code || input.orderId || (result.removed != null ? `${result.removed} drafts` : result.restored != null ? `${result.restored} orders` : '')}`.trim(),
+    message: `order: ${input.action} ${result.code || input.orderId || (result.removed != null ? `${result.removed} orders` : result.restored != null ? `${result.restored} orders` : '')}`.trim(),
     logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed }
   })
   if (r.unchanged) return { ok: true, code: result.code, unchanged: true, removed: result.removed || 0, skipped: result.skipped || 0, restored: result.restored }

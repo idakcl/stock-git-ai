@@ -3,12 +3,13 @@
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <b>订单（未过账）</b>
+          <b>订单</b>
           <div class="header-ops">
-            <!-- 清空草稿：一次请求删干净，避免几十张草稿各写一次 git 提交；
-                 已过账与已收订金的订单不在其中（前者连着正式单据、后者凭证已开） -->
-            <el-button type="danger" :disabled="!draftCount || busy || loading" @click="clearDrafts">
-              清空草稿{{ draftCount ? `（${draftCount}）` : '' }}
+            <!-- 清空未过账订单：一次请求删干净，避免几十张草稿各写一次 git 提交；
+                 已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮 -->
+            <el-button type="danger" :disabled="!draftCount || busy || loading"
+              title="删除未过账且未收订金的订单；已过账 / 已收订金的会保留" @click="clearDrafts">
+              清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
             <el-button type="primary" @click="openCreate">新建订单</el-button>
           </div>
@@ -19,11 +20,11 @@
       <el-input v-model="keyword" clearable placeholder="搜索订单号 / 往来单位 / 商品" class="search-input" />
       <div class="filter-row">
         <span class="filter-label">状态</span>
-        <el-radio-group v-model="status">
-          <el-radio-button value="all">全部</el-radio-button>
-          <el-radio-button value="draft">草稿</el-radio-button>
-          <el-radio-button value="posted">已过账</el-radio-button>
-        </el-radio-group>
+        <el-select v-model="status" style="width:170px">
+          <el-option value="all" label="显示全部订单" />
+          <el-option value="draft" label="仅显示未过账订单" />
+          <el-option value="posted" label="仅显示已过账订单" />
+        </el-select>
         <span class="filter-label">类型</span>
         <el-radio-group v-model="kind">
           <el-radio-button value="all">全部</el-radio-button>
@@ -37,9 +38,20 @@
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
         <el-button :disabled="loading" @click="load">刷新</el-button>
       </div>
-      <TableToolbar filename="订单" title="订单" :subtitle="subtitle" :columns="exportColumns" :rows="paged" />
+      <!-- 勾选后批量操作：打印列表 / 打印详情（可直接打印或隐藏金额）/ 批量删除 -->
+      <div class="export-bar">
+        <el-button size="small" :disabled="!selected.length" @click="printSelectedList">打印勾选订单列表</el-button>
+        <el-button size="small" :disabled="!selected.length" @click="openDetailPrint">打印勾选订单详情页</el-button>
+        <el-button size="small" :disabled="!paged.length" @click="exportPageCsv">导出CSV（当前页）</el-button>
+        <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
+          删除勾选{{ selected.length ? `（${selected.length}）` : '' }}
+        </el-button>
+        <span class="sel-hint">已勾选 {{ selected.length }} 单 / 本页 {{ paged.length }} 单</span>
+      </div>
       <div class="table-wrap">
-        <el-table :data="paged" stripe show-summary :summary-method="summaryAmount">
+        <el-table ref="tableRef" :data="paged" row-key="id" stripe show-summary :summary-method="summaryAmount"
+          @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="46" reserve-selection />
           <el-table-column label="订单号" width="210" class-name="id-col">
             <template #default="{ row }">
               <router-link :to="`/order/${row.id}`" class="link">{{ row.id }}</router-link>
@@ -129,6 +141,19 @@
         <el-button type="primary" :loading="saving" @click="submitDeposit">确认收订金</el-button>
       </template>
     </el-dialog>
+
+    <!-- 打印勾选订单详情页：直接打印 or 隐藏金额打印（单价、折扣、合计、订金等全部金额都不出现） -->
+    <el-dialog v-model="detailPrintDialog" title="打印勾选订单详情页" width="420" :close-on-click-modal="false">
+      <div class="print-choice">
+        <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独一页。</p>
+        <el-button type="primary" class="print-btn" @click="printSelectedDetails(false)">直接打印</el-button>
+        <el-button class="print-btn" @click="printSelectedDetails(true)">隐藏金额打印</el-button>
+        <p class="print-note">隐藏金额会把单价、折扣、行金额、订单金额、订金、未收/未付等所有金额信息一并去掉。</p>
+      </div>
+      <template #footer>
+        <el-button @click="detailPrintDialog = false">取消</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -140,11 +165,10 @@ import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
 import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
-import { downloadCSV, printA4 } from '../utils/export'
+import { downloadCSV, printA4, printA4Sections } from '../utils/export'
 import { orderAmount, orderDepositSum, DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
-import TableToolbar from '../components/TableToolbar.vue'
 
 const PAGE_SIZE = 60
 
@@ -160,7 +184,8 @@ const saving = ref(false)
 // 用 route.query.kw 预填关键词，落地就是一行，不用用户在几百张草稿里手搜。
 const route = useRoute()
 const keyword = ref(String(route.query?.kw || ''))
-const status = ref('all')
+// 默认只看未过账订单；已过账的要切到「仅显示已过账订单」或「显示全部订单」才看得到
+const status = ref('draft')
 const kind = ref('all')
 const dateStart = ref('')
 const dateEnd = ref('')
@@ -170,6 +195,9 @@ const editingOrder = ref(null)
 const depositDialog = ref(false)
 const depositOrder = ref(null)
 const depositForm = ref({ amount: 0, date: todayCN(), remark: '' })
+const tableRef = ref(null)
+const selected = ref([])
+const detailPrintDialog = ref(false)
 
 const partyOf = (row) => (row && row.kind === 'purchase' ? row.supplier : row && row.customer) || ''
 const depositSumOf = (row) => orderDepositSum(row)
@@ -192,20 +220,24 @@ const filtered = computed(() => list.value
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 // 可清空的草稿数：与后端 clearDrafts 的判据一一对应（未过账 + 没收过订金），按钮上的数字就是「真会删掉的张数」
 const draftCount = computed(() => list.value.filter(o => o.status !== POSTED && orderDepositSum(o) === 0).length)
-const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)))
-watch([keyword, status, kind, dateStart, dateEnd], () => { page.value = 1 })
+// 换筛选条件后旧勾选可能已经不在列表里，直接清空，避免「看不见的单被打印/删除」
+watch([keyword, status, kind, dateStart, dateEnd], () => {
+  page.value = 1
+  tableRef.value?.clearSelection()
+  selected.value = []
+})
 
 const summaryAmount = ({ columns }) => {
   const rows = filtered.value
-  return columns.map((c, idx) => {
-    if (idx === 0) return `合计（${rows.length} 单，草稿 ${rows.filter(r => r.status === DRAFT).length}）`
+  return columns.map((c) => {
+    if (c.label === '订单号') return `合计（${rows.length} 单，未过账 ${rows.filter(r => r.status !== POSTED).length}）`
     if (c.label === '订单金额') return rows.reduce((s, r) => s + orderAmount(r), 0).toFixed(2)
     return ''
   })
 }
+const STATUS_TEXT = { all: '显示全部订单', draft: '仅显示未过账订单', posted: '仅显示已过账订单' }
 const subtitle = computed(() => {
-  const parts = [`共 ${filtered.value.length} 单`, `导出当前第 ${page.value}/${pageCount.value} 页`]
-  if (status.value !== 'all') parts.push(status.value === 'draft' ? '仅草稿' : '仅已过账')
+  const parts = [`共 ${filtered.value.length} 单`, STATUS_TEXT[status.value]]
   if (kind.value !== 'all') parts.push(kind.value === 'purchase' ? '仅采购' : '仅销售')
   if (dateStart.value || dateEnd.value) parts.push(`${dateStart.value || '不限'} ~ ${dateEnd.value || '不限'}`)
   if (keyword.value) parts.push('已按关键词筛选')
@@ -286,6 +318,88 @@ function printOrder(row) {
   printA4(title, orderLineColumns, items, `共 ${items.length} 项商品 · ${row.status}`, orderHeaderFields(row))
 }
 
+// ---- 勾选后的批量操作 ----
+function onSelectionChange(rows) { selected.value = rows }
+// 勾选的订单可能跨页（表格开了 reserve-selection），统一按时间倒序排列后再打印
+const selectedSorted = computed(() => [...selected.value].sort((a, b) =>
+  String(orderTimeOf(b)).localeCompare(String(orderTimeOf(a))) || String(b.id || '').localeCompare(String(a.id || ''))))
+
+function exportPageCsv() {
+  if (!paged.value.length) return ElMessage.warning('当前页没有可导出的订单')
+  downloadCSV('订单.csv', exportColumns, paged.value)
+  ElMessage.success(`已导出当前页 ${paged.value.length} 行`)
+}
+
+function printSelectedList() {
+  const rows = selectedSorted.value
+  if (!rows.length) return ElMessage.warning('请先勾选订单')
+  const total = round2(rows.reduce((s, r) => s + orderAmount(r), 0))
+  printA4('订单列表', exportColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`)
+}
+
+function openDetailPrint() {
+  if (!selected.value.length) return ElMessage.warning('请先勾选订单')
+  detailPrintDialog.value = true
+}
+
+// 隐藏金额的明细列：只保留编码/名称/数量，单价、折扣率、折扣金额、折后金额一律不出现
+const maskedLineColumns = [
+  { label: '编码', prop: 'code' },
+  { label: '名称', value: r => lineDisplayName(r, nameMap.value) },
+  { label: '数量', value: r => Number(r.qty || 0) }
+]
+// 隐藏金额的单头：订单号、业务单号、往来单位、日期、状态、关联单据、备注，不含任何金额
+const maskedHeaderFields = (row) => {
+  const fields = [
+    ['订单号', row.id],
+    ['业务单号', row.no && row.no !== row.id ? row.no : '—'],
+    [row.kind === 'purchase' ? '供应商' : '客户', partyOf(row) || '—'],
+    ['日期', row.date],
+    ['状态', row.status]
+  ]
+  if (row.postedOrderId) fields.push(['关联单据', row.postedOrderId])
+  fields.push(['备注', row.remark || '—'])
+  return fields
+}
+
+// 每张订单单独一页；masked=true 时所有金额字段（单价/折扣/合计/订金/未收）都不进打印
+function printSelectedDetails(masked) {
+  const rows = selectedSorted.value
+  if (!rows.length) return ElMessage.warning('请先勾选订单')
+  const sections = rows.map(row => {
+    const items = row.items || []
+    return {
+      title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
+      subtitle: `共 ${items.length} 项商品 · ${row.status}${masked ? ' · 金额已隐藏' : ''}`,
+      headerFields: masked ? maskedHeaderFields(row) : orderHeaderFields(row),
+      columns: masked ? maskedLineColumns : orderLineColumns,
+      rows: items
+    }
+  })
+  detailPrintDialog.value = false
+  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情')
+}
+
+// 批量删除：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量
+async function removeSelected() {
+  const rows = selected.value
+  if (!rows.length) return
+  try {
+    await ElMessageBox.confirm(
+      `将批量删除勾选的 ${rows.length} 张订单（已过账 / 已收订金的会自动跳过），删除后不可恢复。`,
+      '删除勾选订单', { type: 'warning', confirmButtonText: `删除 ${rows.length} 张` }
+    )
+  } catch { return }
+  busy.value = true
+  try {
+    const r = await api.orderOperation({ action: 'deleteMany', orderIds: rows.map(o => o.id) })
+    ElMessage.success(`已删除 ${r.removed || 0} 张订单${r.skipped ? `，跳过 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    tableRef.value?.clearSelection()
+    selected.value = []
+    await load()
+  } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
+}
+
 async function load() {
   loading.value = true
   try {
@@ -295,6 +409,9 @@ async function load() {
     customerOptions.value = cu || []
     supplierOptions.value = sup || []
     ready.value = true
+    // 数据重新拉取后旧的勾选对象已经过期（可能已删除/已过账），统一清空
+    tableRef.value?.clearSelection()
+    selected.value = []
   } catch (e) {
     ElMessage.error({ message: `订单数据加载失败（${e.message || '网络异常'}），请退出本页重新进入`, duration: 6000 })
   } finally { loading.value = false }
@@ -377,23 +494,26 @@ async function remove(row) {
   } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
 }
 
-// 清空草稿：只删「未过账 + 没收过订金」的单，数量在按钮上已经写清楚，确认框再报一次保留了多少张
+// 清空未过账订单：只删「未过账 + 没收过订金」的单（未过账但收过订金的凭证已开，删了会成孤儿），
+// 按钮上的数字就是真会删掉的张数，确认框再把保留原因说清楚
 async function clearDrafts() {
   const n = draftCount.value
   if (!n) return
-  const kept = list.value.length - n
+  const keptDeposit = list.value.filter(o => o.status !== POSTED && orderDepositSum(o) > 0).length
   try {
     await ElMessageBox.confirm(
-      `将删除 ${n} 张草稿订单，删除后不可恢复。${kept ? `另有 ${kept} 张不会被删（已过账 / 已收订金的订单）。` : ''}`,
-      '清空草稿', { type: 'warning', confirmButtonText: '全部删除' }
+      `将删除 ${n} 张未过账订单，删除后不可恢复。${keptDeposit ? `另有 ${keptDeposit} 张未过账订单因已收订金会保留；` : ''}已过账订单不受影响。`,
+      '清空未过账订单', { type: 'warning', confirmButtonText: '全部删除' }
     )
   } catch { return }
   busy.value = true
   try {
     const r = await api.orderOperation({ action: 'clearDrafts' })
-    ElMessage.success(`已清空 ${r.removed || 0} 张草稿${r.skipped ? `，保留 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    ElMessage.success(`已清空 ${r.removed || 0} 张未过账订单${r.skipped ? `，保留 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    tableRef.value?.clearSelection()
+    selected.value = []
     await load()
-  } catch (e) { fail(e, '清空草稿失败') } finally { busy.value = false }
+  } catch (e) { fail(e, '清空未过账订单失败') } finally { busy.value = false }
 }
 
 onMounted(load)
@@ -407,6 +527,13 @@ onMounted(load)
 .filter-label{color:var(--text-regular);font-size:var(--fs-base);}
 .filter-sep{color:var(--text-secondary);}
 .pager{margin-top:12px;justify-content:flex-end;}
+/* 勾选后的批量操作栏（原 TableToolbar 换成勾选驱动） */
+.export-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;}
+.sel-hint{color:var(--text-secondary);font-size:var(--fs-sub);}
+.print-choice{display:flex;flex-direction:column;gap:8px;}
+.print-hint{margin:0 0 4px;color:var(--text-regular);}
+.print-btn{margin-left:0!important;}
+.print-note{margin:8px 0 0;color:var(--text-secondary);font-size:var(--fs-sub);line-height:1.6;}
 .link{color:var(--color-primary);cursor:pointer;}
 .none{color:var(--text-placeholder);}
 .paid{color:var(--color-success);font-weight:600;}

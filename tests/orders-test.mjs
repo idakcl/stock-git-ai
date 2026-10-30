@@ -189,6 +189,40 @@ test('清空草稿：一次请求删掉全部纯草稿，已过账与已收订�
   assert.equal(s.orders.length, 5)
 })
 
+test('批量删除：一次请求删多张，已过账/已收订金/不存在的自动跳过', () => {
+  let s = fixture()
+  const ids = []
+  for (let i = 0; i < 3; i++) { const r = saveOrder(s, draft()); s = r.state; ids.push(r.code) }
+  const withDeposit = saveOrder(s, draft())
+  s = applyOrderOperation(withDeposit.state, { action: 'deposit', orderId: withDeposit.code, amount: 5, date: '2026-10-29' }).state
+  const posted = saveOrder(s, draft())
+  s = applyOrderOperation(posted.state, { action: 'post', orderId: posted.code }).state
+  assert.equal(s.orders.length, 5)
+
+  // 混着勾：3 张纯草稿 + 已收订金 + 已过账 + 一个不存在的号（重复勾选同一张也只算一次）
+  const r = applyOrderOperation(s, {
+    action: 'deleteMany',
+    orderIds: [...ids, ids[0], withDeposit.code, posted.code, 'D-NOPE']
+  })
+  assert.equal(r.removed, 3)
+  assert.equal(r.skipped, 3)
+  assert.deepEqual(r.state.orders.map(o => o.id).sort(), [withDeposit.code, posted.code].sort())
+  // 单据集合不受影响
+  assert.deepEqual(r.state.sales.map(o => o.id), s.sales.map(o => o.id))
+  // 快照不被就地修改
+  assert.equal(s.orders.length, 5)
+
+  // 全都不能删时直接报错，而不是静默返回 0
+  assert.throws(() => applyOrderOperation(s, {
+    action: 'deleteMany', orderIds: [withDeposit.code, posted.code]
+  }), /都不能删除/)
+  assert.throws(() => applyOrderOperation(s, { action: 'deleteMany', orderIds: [] }), /请选择/)
+  // 孤儿订单（过账单据已被删）与单张删除同一口径，允许删
+  const orphanDocId = s.orders.find(o => o.id === posted.code).postedOrderId
+  const orphan = { ...s, sales: s.sales.filter(o => o.id !== orphanDocId) }
+  assert.equal(applyOrderOperation(orphan, { action: 'deleteMany', orderIds: [posted.code] }).removed, 1)
+})
+
 test('orderToOrderDoc 与 canUnpost 单独可用（前端预览同一份实现）', () => {
   const doc = orderToOrderDoc({ kind: 'sale', customer: '客户甲', date: '2026-10-29', no: 'DD-01', items: [line('P00001', '管件', 2, 10)], deposits: [{ date: '2026-10-29', amount: 20, voucher: 'SK-20261029-0009' }] }, 'X9')
   assert.equal(doc.no, 'DD-01')                  // 订单填过业务单号就沿用

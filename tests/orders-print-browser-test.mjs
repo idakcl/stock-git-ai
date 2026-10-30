@@ -150,6 +150,10 @@ await t('已过账订单的打印单头显示关联单据', async () => {
   const posted = order({ status: '已过账', postedOrderId: 'X202610281100000001' })
   const { page, context, errors } = await open(seed([posted]))
   try {
+    // 列表默认只看未过账订单，已过账的要先切到「显示全部订单」
+    await page.locator('.filter-row .el-select').first().click()
+    await page.getByRole('option', { name: '显示全部订单' }).click()
+    await page.waitForTimeout(200)
     await page.evaluate(() => {
       window.__printed = null
       window.open = () => {

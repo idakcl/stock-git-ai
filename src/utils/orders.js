@@ -219,6 +219,34 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     return { state, code: order.id }
   }
 
+  // 批量删除：勾选多张订单后一次提交，只写一次 orders.json。
+  // 判据与单张删除完全一致：已过账且单据还在、或已收过订金的，跳过后在 skipped 里报数，
+  // 不让批量入口绕过单张删除的两条硬约束。全部都不允许删时直接报错，避免「点了没反应」。
+  if (action === 'deleteMany') {
+    const ids = Array.isArray(input.orderIds)
+      ? [...new Set(input.orderIds.map(v => String(v || '').trim()).filter(Boolean))]
+      : []
+    if (!ids.length) fail('请选择要删除的订单')
+    if (ids.length > 500) fail('一次最多删除 500 张订单')
+    const removable = []
+    let skipped = 0
+    for (const id of ids) {
+      const order = find(id)
+      if (!order) { skipped++; continue }
+      if (order.status === POSTED) {
+        const { listKey } = orderKeys(order.kind)
+        const exists = (state[listKey] || []).some(o => o.id === order.postedOrderId)
+        if (exists) { skipped++; continue }
+      }
+      if (orderDepositSum(order) > 0) { skipped++; continue }
+      removable.push(id)
+    }
+    if (!removable.length) fail('勾选的订单都不能删除：已过账的需先撤销过账，收过订金的需先处理订金')
+    const drop = new Set(removable)
+    state.orders = state.orders.filter(o => !drop.has(o.id))
+    return { state, code: '', removed: removable.length, skipped }
+  }
+
   // 清空草稿：一次请求删掉全部「纯草稿」，避免几十张草稿各发一次请求、各写一次 git 提交。
   // 两条不删的硬约束与单张删除完全一致，不能让批量入口绕过它们：
   //   ① 已过账的要先撤销过账（它连着一条正式单据）；
