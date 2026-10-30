@@ -37,8 +37,8 @@ const t = async (name, fn) => {
   catch (e) { fail++; console.log('  ✗ ' + name + '\n      ' + (e.message || e).split('\n').join('\n      ')) }
 }
 
-async function open(path, state) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } })
+async function open(path, state, viewport = { width: 1280, height: 900 }) {
+  const context = await browser.newContext({ viewport })
   await context.addInitScript(() => sessionStorage.setItem('stock.auth.token', 'isolated-test'))
   await context.route('**/api/**', async route => {
     const request = route.request(), pathname = new URL(request.url()).pathname
@@ -341,6 +341,47 @@ await t('菜单：订单排在采购上方（业务链起点优先）', async ()
     const at = (name) => texts.findIndex(t => t.includes(name))
     assert.ok(at('订单') >= 0 && at('采购') >= 0, `业务菜单里应同时有订单和采购：${texts.join(' | ')}`)
     assert.ok(at('订单') < at('采购'), `订单应排在采购上方：${texts.join(' | ')}`)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+await t('菜单：应付排在应收上方，两颗角标都与文字同一行', async () => {
+  const s = seed()
+  // 一张未收清的销售、一张未付清的采购、一张草稿订单 → 三颗角标同时出现
+  s.purchases = [{ id: 'C1', date: '2026-10-20', supplier: '供应商甲', total: 100, discount: 0, paid: 0,
+    settle: '挂账', payments: [], photos: [], items: [{ code: 'P00001', name: '管件', unit: '个', qty: 1, price: 100, total: 100 }] }]
+  s.suppliers = [{ code: 'S00001', name: '供应商甲' }]
+  s.orders = [{ id: 'D20261029000000019', kind: 'sale', status: '草稿', customer: '客户甲', date: '2026-10-29',
+    discount: 0, discountRates: [], items: [], deposits: [] }]
+  const { page, context, errors } = await open('/', s, { width: 390, height: 844 })
+  try {
+    await page.locator('.menu-btn').click()
+    const drawer = page.locator('.el-drawer')
+    await drawer.waitFor()
+    await drawer.locator('.el-sub-menu__title', { hasText: '资金' }).click()
+    await page.waitForTimeout(300)
+    // 量的是角标与文字的几何中线：el-badge 是「绝对定位的 sup + 零高度盒子」，
+    // 在这个 flex 菜单项里会掉到文字下沿（手机上看着就是「角标换行了」），这里直接按像素守住。
+    const rows = await drawer.locator('.el-menu-item:visible').evaluateAll(nodes => nodes.map((n) => {
+      const item = n.getBoundingClientRect()
+      const span = [...n.querySelectorAll('span')].find(x => !x.classList.contains('menu-badge'))
+      const badge = n.querySelector('.menu-badge')
+      const sr = span && span.getBoundingClientRect(), br = badge && badge.getBoundingClientRect()
+      return { text: (span ? span.textContent : n.textContent).trim(), spanMid: sr && sr.top + sr.height / 2,
+        badgeMid: br && br.top + br.height / 2, badgeTop: br && br.top, badgeBottom: br && br.bottom,
+        itemTop: item.top, itemBottom: item.bottom, badgeRight: br && br.right, itemRight: item.right }
+    }))
+    const order = rows.map(r => r.text)
+    const payableAt = order.indexOf('应付款管理'), receivableAt = order.indexOf('应收款管理')
+    assert.ok(payableAt >= 0 && receivableAt >= 0, `资金组应同时有应付/应收：${order.join(' | ')}`)
+    assert.ok(payableAt < receivableAt, `应付款管理应排在应收款管理上方：${order.join(' | ')}`)
+    for (const name of ['订单', '应付款管理', '应收款管理']) {
+      const r = rows.find(x => x.text === name)
+      assert.ok(r && r.badgeMid != null, `${name} 应有角标（夹具已造出待办）`)
+      assert.ok(Math.abs(r.badgeMid - r.spanMid) <= 1.5, `${name} 角标应与文字中线对齐：偏差 ${(r.badgeMid - r.spanMid).toFixed(1)}px`)
+      assert.ok(r.badgeTop >= r.itemTop && r.badgeBottom <= r.itemBottom, `${name} 角标不得越出菜单项上下沿`)
+      assert.ok(r.badgeRight <= r.itemRight && r.badgeRight > r.itemRight - 40, `${name} 角标应靠右且留在菜单项内`)
+    }
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

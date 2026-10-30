@@ -31,7 +31,7 @@
       <el-menu-item index="/orders">
         <el-icon><Tickets /></el-icon>
         <span>订单</span>
-        <el-badge v-if="draftOrders" :value="draftOrders" type="warning" :max="99" class="menu-badge" />
+        <span v-if="draftOrders" class="menu-badge warn">{{ badgeText(draftOrders) }}</span>
       </el-menu-item>
       <el-menu-item index="/purchases">
         <el-icon><Download /></el-icon>
@@ -52,15 +52,16 @@
         <el-icon><Money /></el-icon>
         <span>资金</span>
       </template>
-      <el-menu-item index="/receivables">
-        <el-icon><Wallet /></el-icon>
-        <span>应收款管理</span>
-        <el-badge v-if="receivableOpen" :value="receivableOpen" type="danger" :max="99" class="menu-badge" />
-      </el-menu-item>
+      <!-- 应付在前、应收在后：与「先付供应商、后收客户」的实际经营节奏一致（用户按用眼习惯要求对调） -->
       <el-menu-item index="/payables">
         <el-icon><CreditCard /></el-icon>
         <span>应付款管理</span>
-        <el-badge v-if="payableOpen" :value="payableOpen" type="danger" :max="99" class="menu-badge" />
+        <span v-if="payableOpen" class="menu-badge">{{ badgeText(payableOpen) }}</span>
+      </el-menu-item>
+      <el-menu-item index="/receivables">
+        <el-icon><Wallet /></el-icon>
+        <span>应收款管理</span>
+        <span v-if="receivableOpen" class="menu-badge">{{ badgeText(receivableOpen) }}</span>
       </el-menu-item>
       <el-menu-item index="/current">
         <el-icon><Postcard /></el-icon>
@@ -103,6 +104,8 @@ const receivableOpen = ref(0)
 const payableOpen = ref(0)
 // 订单菜单角标：还没过账的草稿数（过账前不占库存、不进往来账，容易忘）
 const draftOrders = ref(0)
+// 角标文案：超过 99 显示 99+，与 el-badge 的 :max="99" 同一口径
+const badgeText = n => (Number(n) > 99 ? '99+' : String(n))
 
 onMounted(async () => {
   try {
@@ -140,5 +143,27 @@ onMounted(async () => {
   border-radius: 6px;
 }
 .menu :deep(.el-sub-menu .el-menu-item) { padding-left: 44px !important; }
-.menu-badge { margin-left: auto; }
+/* 菜单角标：原先用 el-badge，但它是「默认插槽 + 绝对定位的 sup」结构——这里没有插槽内容，
+   el-badge 本体就是个零高度盒子，sup 相对它 top:0 + translateY(-50%) 定位，在 flex 菜单项里
+   会掉到文字下沿（手机上 3 颗像素的偏移就被看成一整行）。改成自己画一颗胶囊：
+   垂直居中由 flex 的 align-items:center 保证，靠右由 margin-left:auto 保证。 */
+.menu-badge {
+  margin-left: auto;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.menu-badge.warn { background: var(--color-warning); }
+
 </style>
