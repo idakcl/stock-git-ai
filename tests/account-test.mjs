@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import {
   grossOf, payableOf, receivableOf, netOf, paidSumOf, receivedSumOf,
   overpaidOf, settleActionOf, isSettledOf, settleBalance,
-  discountRatesOf, effectiveRateOf, discountRatesTextOf, discountAmountOf, discountedTotalOf
+  discountRatesOf, effectiveRateOf, discountRatesTextOf, discountAmountOf, discountedTotalOf, allocateNetOf, round2
 } from '../src/utils/account.js'
 
 let pass = 0, fail = 0
@@ -155,6 +155,17 @@ await t('红字单据：折后仍为负、折扣额夹 0，且不参与整单优
   assert.equal(discountAmountOf(ret), 0)
   assert.equal(grossOf(ret), -90)
   assert.equal(overpaidOf({ ...ret, payments: [{ amount: -90 }] }, 'payable'), 0)
+})
+await t('整单折扣按行摊开：各行净额合计恰等于整单折后金额', () => {
+  assert.deepEqual(allocateNetOf([18, 5], 0.95), [17.1, 4.75])
+  // 尾差由最后一行吸收：3 行各 0.01，整单 ×0.95，合计仍为 0.03 的 95%
+  const nets = allocateNetOf([0.01, 0.01, 0.01], 0.95)
+  assert.equal(round2(nets.reduce((s, n) => s + n, 0)), 0.03)
+  assert.equal(round2(0.03 * 0.95), 0.03)
+  // 无折扣或非法折扣率：原样返回
+  assert.deepEqual(allocateNetOf([1, 2], 1), [1, 2])
+  assert.deepEqual(allocateNetOf([1, 2], 0), [1, 2])
+  assert.deepEqual(allocateNetOf([], 0.9), [])
 })
 
 console.log(`\n${pass} passed, ${fail} failed`)

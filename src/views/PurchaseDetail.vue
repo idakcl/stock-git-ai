@@ -48,7 +48,7 @@
         <template v-if="!priceHidden">
           <span>合计：¥ {{ Number(purchase.total || 0).toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
           <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
-          <span v-if="orderRate">整单折扣：{{ orderRate }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
+          <span v-if="orderRate" class="order-discount">整单折扣：<b>{{ orderRate }}</b>（减 ¥{{ discountAmount.toFixed(2) }}）</span>
           <span v-if="hasDiscount">折后金额：¥ {{ discountedTotal.toFixed(2) }}</span>
           <span>优惠：¥ {{ Number(purchase.discount || 0).toFixed(2) }}<template v-if="Number(purchase.discount || 0) > 0">（抹零优惠，未实际付款）</template></span>
           <span>应付：¥ {{ dueAmount.toFixed(2) }}</span>
@@ -94,13 +94,16 @@
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100"  align="right"/>
           <el-table-column v-if="!priceHidden" prop="_price" label="本次单价" width="100"  align="right"/>
-          <el-table-column v-if="!priceHidden" label="本次折扣" width="100" align="right">
+          <el-table-column v-if="!priceHidden && hasLineDiscount" label="本次折扣" width="100" align="right">
             <template #default="{ row }">
               <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`${row._discountRate != null && row._discountRate < 1 ? `折扣率 ${row._discountRate} · ` : ''}原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100"  align="right"/>
+          <el-table-column v-if="!priceHidden && orderRate" label="折后金额（含整单折扣）" width="180" align="right">
+            <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
+          </el-table-column>
         </template>
       </ProductTable>
     </el-card>
@@ -197,7 +200,7 @@ import OrderPhotoDialog from '../components/OrderPhotoDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import OrderEditDialog from '../components/OrderEditDialog.vue'
 import PaymentDialog from '../components/PaymentDialog.vue'
-import { payableOf, grossOf, netOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, isVoided } from '../utils/account'
+import { payableOf, grossOf, netOf, paidSumOf, ensurePayments, depositSumOf, isSettledOf, settleActionOf, syncPayments, round2, discountRatesTextOf, discountAmountOf, discountedTotalOf, effectiveRateOf, allocateNetOf, isVoided } from '../utils/account'
 import { downloadCSV, printA4 } from '../utils/export'
 import { applyDepositFlows, removeDepositFlows } from '../utils/deposit'
 import { lineDisplayName } from '../utils/catalog'
@@ -354,10 +357,18 @@ async function toggleSettle() {
 // 明细行原价合计与单项折扣合计（合计字段为折后金额）
 const grossSum = computed(() => (purchase.value.items || []).reduce((s, l) => s + Number(l.qty || 0) * Number(l.price || 0), 0))
 const lineDiscountSum = computed(() => (purchase.value.items || []).reduce((s, l) => s + Number(l.discount || 0), 0))
+// 没有行级折扣时不显示「本次折扣」列（打印/导出同样隐藏），避免整列都是 0.00
+const hasLineDiscount = computed(() => (purchase.value.items || []).some(l => {
+  const r = Number(l.discountRate)
+  return Number(l.discount || 0) > 0 || (Number.isFinite(r) && r > 0 && r < 1)
+}))
 
 const detailItems = computed(() => {
   const nameMap = Object.fromEntries((items.value || []).map(i => [i.code, i.name || '']))
-  return (purchase.value.items || []).map(line => {
+  const lines = purchase.value.items || []
+  // 摊完整单折扣后的行金额：各行合计 = 单头折后金额
+  const nets = allocateNetOf(lines.map(l => Number(l.total || 0)), effectiveRateOf(purchase.value))
+  return lines.map((line, idx) => {
     const base = (items.value || []).find(i => i.code === line.code) || {}
     return {
       ...base,
@@ -372,7 +383,8 @@ const detailItems = computed(() => {
       _price: line.price,
       _discount: Number(line.discount || 0),
       _discountRate: line.discountRate,
-      _total: line.total
+      _total: line.total,
+      _net: nets[idx]
     }
   })
 })
@@ -396,7 +408,7 @@ const externalView = ref(false)
 // 页面上的单价/折扣/金额列、单头金额、付款金额同步隐藏（导出与打印沿用同一规则）
 const priceHidden = computed(() => hidePrice.value || externalView.value)
 const tablePriceColumns = computed(() => (priceHidden.value || !showSellPrice.value) ? [] : [{ prop: 'price', label: '售价' }])
-const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额']
+const PRICE_LABELS = ['进价', '售价', '本次单价', '本次折扣', '本次金额', '折后金额（含整单折扣）']
 const exportColumns = computed(() => {
   let cols = [
     { label: '编码', prop: 'code' },
@@ -407,8 +419,9 @@ const exportColumns = computed(() => {
     { label: '售价', value: r => (r.price == null || r.price === '' ? '' : Number(r.price).toFixed(2)) },
     { label: '本次数量', prop: '_qty' },
     { label: '本次单价', value: r => (r._price == null || r._price === '' ? '' : Number(r._price).toFixed(2)) },
-    { label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') },
+    ...(hasLineDiscount.value ? [{ label: '本次折扣', value: r => (Number(r._discount) ? Number(r._discount).toFixed(2) : '') }] : []),
     { label: '本次金额', value: r => (r._total == null || r._total === '' ? '' : Number(r._total).toFixed(2)) },
+    ...(orderRate.value ? [{ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) }] : []),
     { label: '备注', prop: 'remark' }
   ]
   // 与页面表格同步：未勾选「显示售价 / 显示进价」时，导出/打印一律不带该档案价列（本单价看「本次单价」）
@@ -435,7 +448,7 @@ const docHeaderFields = computed(() => {
     ['合计', `¥${Number(o.total || 0).toFixed(2)}`]
   ]
   if (lineDiscountSum.value > 0) fields.push(['原价合计', `¥${grossSum.value.toFixed(2)}（单项折扣 -¥${lineDiscountSum.value.toFixed(2)}）`])
-  if (orderRate.value) fields.push(['整单折扣', `${orderRate.value}（减 ¥${discountAmount.value.toFixed(2)}）`])
+  if (orderRate.value) fields.push(['整单折扣', `${orderRate.value}（减 ¥${discountAmount.value.toFixed(2)}）`, 'hl'])
   if (hasDiscount.value) fields.push(['折后金额', `¥${discountedTotal.value.toFixed(2)}`])
   fields.push(
     ['优惠', `¥${Number(o.discount || 0).toFixed(2)}${Number(o.discount || 0) > 0 ? '（抹零优惠，未实际付款）' : ''}`],
@@ -614,6 +627,8 @@ onMounted(async () => {
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color:var(--text-regular); font-size:var(--fs-base); align-items: center; }
 .external-banner { margin-bottom: 12px; }
 .price-hidden-note { color: var(--text-secondary); }
+.order-discount { background: #fff7e6; border: 1px solid #f0c78a; color: #b26a00; padding: 2px 8px; border-radius: 4px; }
+.order-discount b { font-weight: 700; }
 .settle-cell { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .remark-cell { display: inline-flex; align-items: center; gap: 4px; }
 .settle-btn { margin-left: 2px; }

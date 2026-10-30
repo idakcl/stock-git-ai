@@ -104,6 +104,23 @@ export function discountedTotalOf(order) {
   return round2(total * effectiveRateOf(order))
 }
 
+// 把整单折扣摊到每一行：输入各行「行折后金额」（已含单项折扣），返回各行再乘整单等效折扣率后的金额。
+// 采用累计四舍五入，保证各行净额合计恰好等于整单折后金额（末行吸收尾差），
+// 避免每行单独 ×0.95 后四舍五入、各行之和与单头金额差一分钱。
+export function allocateNetOf(baseTotals = [], rate = 1) {
+  const r = Number(rate)
+  const safeRate = Number.isFinite(r) && r > 0 ? r : 1
+  let cum = 0
+  let allocated = 0
+  return (baseTotals || []).map(v => {
+    cum += Number(v || 0)
+    const target = round2(cum * safeRate)
+    const net = round2(target - allocated)
+    allocated = target
+    return net
+  })
+}
+
 // 结清模式「实收/抵扣/优惠」平衡：在保持未付款=0 的前提下，按锚点字段计算另一字段。
 // 这是录入弹窗「以用户手填金额为最优先基准」的唯一计算入口，纯函数便于单测。
 //   anchor='paid' | 'deposit'（实收或抵扣为基准）→ 优惠金额 = 毛额 − 实收合计

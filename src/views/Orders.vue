@@ -169,7 +169,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { lineDisplayName, itemNameMap, normalizeRate } from '../utils/catalog'
-import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
+import { round2, discountRatesTextOf, effectiveRateOf, allocateNetOf } from '../utils/account'
 import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, orderKeys } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
@@ -278,17 +278,39 @@ const linesNetTotal = (row) => round2((row.items || []).reduce((s, l) => s + lin
 const linesDiscountTotal = (row) => round2((row.items || []).reduce((s, l) => s + lineDiscount(l), 0))
 const orderRateDiscount = (row) => Math.max(0, round2(linesNetTotal(row) * (1 - effectiveRateOf(row))))
 const owedOf = (row) => Math.max(0, round2(orderAmount(row) - depositSumOf(row)))
+// 行级折扣：有才打印「折扣率 / 折扣金额」两列
+const hasLineDiscountOf = (row) => (row.items || []).some(l => {
+  const r = Number(l.discountRate)
+  return Number(l.discount || 0) > 0 || (Number.isFinite(r) && r > 0 && r < 1)
+})
+// 明细行附加「摊完整单折扣后的金额」，各行合计与单头折后金额一致
+const lineRowsWithNet = (row) => {
+  const items = row.items || []
+  const nets = allocateNetOf(items.map(lineTotal), effectiveRateOf(row))
+  return items.map((l, i) => ({ ...l, _net: nets[i] }))
+}
 
-// 单张订单的明细列：订单行没有单位/备注，只打真实的字段
-const orderLineColumns = [
-  { label: '编码', prop: 'code' },
-  { label: '名称', value: r => lineDisplayName(r, nameMap.value) },
-  { label: '数量', value: r => Number(r.qty || 0) },
-  { label: '单价', value: r => Number(r.price || 0).toFixed(2) },
-  { label: '折扣率', value: r => lineRate(r).toFixed(2) },
-  { label: '折扣金额', value: r => lineDiscount(r).toFixed(2) },
-  { label: '折后金额', value: r => lineTotal(r).toFixed(2) }
-]
+// 单张订单的明细列：订单行没有单位/备注，只打真实的字段；
+// 没有行折扣时隐藏「折扣率 / 折扣金额」，有整单折扣时追加「折后金额（含整单折扣）」
+const orderLineColumnsFor = (row) => {
+  const cols = [
+    { label: '编码', prop: 'code' },
+    { label: '名称', value: r => lineDisplayName(r, nameMap.value) },
+    { label: '数量', value: r => Number(r.qty || 0) },
+    { label: '单价', value: r => Number(r.price || 0).toFixed(2) }
+  ]
+  if (hasLineDiscountOf(row)) {
+    cols.push(
+      { label: '折扣率', value: r => lineRate(r).toFixed(2) },
+      { label: '折扣金额', value: r => lineDiscount(r).toFixed(2) }
+    )
+  }
+  cols.push({ label: '本次金额', value: r => lineTotal(r).toFixed(2) })
+  if (discountRatesTextOf(row)) {
+    cols.push({ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) })
+  }
+  return cols
+}
 
 // 单头信息：与屏幕上的口径一致；业务单号单独一行，打印出去能对上客户/供应商那边的单号
 const orderHeaderFields = (row) => {
@@ -303,7 +325,7 @@ const orderHeaderFields = (row) => {
   if (linesDiscountTotal(row) > 0) {
     fields.push(['原价合计', `¥${linesGrossTotal(row).toFixed(2)}（单项折扣 -¥${linesDiscountTotal(row).toFixed(2)}）`])
   }
-  if (discountRatesTextOf(row)) fields.push(['整单折扣', `${discountRatesTextOf(row)}（减 ¥${orderRateDiscount(row).toFixed(2)}）`])
+  if (discountRatesTextOf(row)) fields.push(['整单折扣', `${discountRatesTextOf(row)}（减 ¥${orderRateDiscount(row).toFixed(2)}）`, 'hl'])
   if (Number(row.discount || 0) > 0) fields.push(['整单优惠', `¥${Number(row.discount).toFixed(2)}`])
   fields.push(
     ['订单金额', `¥${orderAmount(row).toFixed(2)}`],
@@ -317,7 +339,7 @@ const orderHeaderFields = (row) => {
 function exportOrderCsv(row) {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
-  downloadCSV(`${row.kind === 'purchase' ? '采购' : '销售'}订单-${row.id}.csv`, orderLineColumns, items, orderHeaderFields(row))
+  downloadCSV(`${row.kind === 'purchase' ? '采购' : '销售'}订单-${row.id}.csv`, orderLineColumnsFor(row), lineRowsWithNet(row), orderHeaderFields(row))
   ElMessage.success(`已导出 ${items.length} 行`)
 }
 
@@ -325,7 +347,7 @@ function printOrder(row) {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumns, items, `共 ${items.length} 项商品`, orderHeaderFields(row))
+  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row))
 }
 
 // ---- 勾选后的批量操作 ----
@@ -381,8 +403,8 @@ function printSelectedDetails(masked) {
       title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
       subtitle: `共 ${items.length} 项商品`,
       headerFields: masked ? maskedHeaderFields(row) : orderHeaderFields(row),
-      columns: masked ? maskedLineColumns : orderLineColumns,
-      rows: items
+      columns: masked ? maskedLineColumns : orderLineColumnsFor(row),
+      rows: masked ? items : lineRowsWithNet(row)
     }
   })
   detailPrintDialog.value = false

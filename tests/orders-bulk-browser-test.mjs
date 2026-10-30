@@ -219,7 +219,11 @@ await t('直接打印：每张订单一页，金额与单价都在', async () =>
     assert.equal((html.match(/<div class="sub">共 1 项商品<\/div>/g) || []).length, 2, '两张单副标题都只有项数')
     assert.doesNotMatch(html, /<div class="sub">[^<]*未过账/)
     assert.match(html, /单价/)
-    assert.match(html, /折扣率/)
+    // 这些单没有行折扣，也没有整单折扣：折扣率/折扣金额列与折后金额列都不打印
+    assert.doesNotMatch(html, /折扣率/)
+    assert.doesNotMatch(html, /折扣金额/)
+    assert.doesNotMatch(html, /折后金额（含整单折扣）/)
+    assert.match(html, /本次金额/)
     assert.match(html, /订单金额：<\/b>¥20\.00/)
     assert.match(html, /¥/)
     assert.deepEqual(errors, [], '页面不得报错')

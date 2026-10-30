@@ -45,7 +45,7 @@
         <template v-if="!priceHidden">
           <span>合计：¥ {{ netSum.toFixed(2) }}<template v-if="lineDiscountSum > 0">（已含单项折扣）</template></span>
           <span v-if="lineDiscountSum > 0">原价合计：¥ {{ grossSum.toFixed(2) }}（单项折扣 -¥ {{ lineDiscountSum.toFixed(2) }}）</span>
-          <span v-if="orderRateText">整单折扣：{{ orderRateText }}（减 ¥{{ discountAmount.toFixed(2) }}）</span>
+          <span v-if="orderRateText" class="order-discount">整单折扣：<b>{{ orderRateText }}</b>（减 ¥{{ discountAmount.toFixed(2) }}）</span>
           <span v-if="hasDiscount">折后金额：¥ {{ discountedTotal.toFixed(2) }}</span>
           <span>整单优惠：¥ {{ Number(order.discount || 0).toFixed(2) }}</span>
           <span>订单金额：¥ {{ totalAmount.toFixed(2) }}</span>
@@ -75,13 +75,16 @@
         <template #extra>
           <el-table-column prop="_qty" label="本次数量" width="100" align="right" />
           <el-table-column v-if="!priceHidden" prop="_price" label="本次单价" width="100" align="right" />
-          <el-table-column v-if="!priceHidden" label="本次折扣" width="100" align="right">
+          <el-table-column v-if="!priceHidden && hasLineDiscount" label="本次折扣" width="100" align="right">
             <template #default="{ row }">
               <span v-if="Number(row._discount || 0) > 0" class="discount" :title="`折扣率 ${row._discountRate} · 原价 ¥${(Number(row._qty || 0) * Number(row._price || 0)).toFixed(2)}`">-{{ Number(row._discount).toFixed(2) }}</span>
               <span v-else class="none">—</span>
             </template>
           </el-table-column>
           <el-table-column v-if="!priceHidden" prop="_total" label="本次金额" width="100" align="right" />
+          <el-table-column v-if="!priceHidden && hasOrderDiscount" label="折后金额（含整单折扣）" width="180" align="right">
+            <template #default="{ row }">{{ Number(row._net || 0).toFixed(2) }}</template>
+          </el-table-column>
         </template>
       </ProductTable>
     </el-card>
@@ -139,7 +142,7 @@ import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, DRAFT, POSTED } from '../utils/orders.js'
-import { round2, discountRatesTextOf, effectiveRateOf } from '../utils/account'
+import { round2, discountRatesTextOf, effectiveRateOf, allocateNetOf } from '../utils/account'
 import { lineDisplayName, normalizeRate } from '../utils/catalog'
 import { downloadCSV, printA4 } from '../utils/export'
 import { fmtCNTime, orderTimeOf } from '../utils/time.js'
@@ -172,23 +175,29 @@ const lineRate = (l) => normalizeRate(l, lineGross(l))
 const lineDiscount = (l) => round2(lineGross(l) * (1 - lineRate(l)))
 const lineTotal = (l) => Math.max(0, round2(lineGross(l) - lineDiscount(l)))
 
-const detailItems = computed(() => (order.value.items || []).map(line => {
-  const base = (items.value || []).find(i => i.code === line.code) || {}
-  return {
-    ...base,
-    code: line.code,
-    name: lineDisplayName(line, nameMap.value),
-    unit: base.unit || '',
-    // 售价 / 进价 取自商品档案，与「本次单价」区分：订单谈的是本单价，档案价只作参照
-    price: base.price,
-    cost: base.cost,
-    _qty: Number(line.qty || 0),
-    _price: Number(line.price || 0),
-    _discountRate: lineRate(line),
-    _discount: lineDiscount(line),
-    _total: lineTotal(line)
-  }
-}))
+const detailItems = computed(() => {
+  const lines = order.value.items || []
+  const nets = allocateNetOf(lines.map(lineTotal), effectiveRateOf(order.value))
+  return lines.map((line, idx) => {
+    const base = (items.value || []).find(i => i.code === line.code) || {}
+    return {
+      ...base,
+      code: line.code,
+      name: lineDisplayName(line, nameMap.value),
+      unit: base.unit || '',
+      // 售价 / 进价 取自商品档案，与「本次单价」区分：订单谈的是本单价，档案价只作参照
+      price: base.price,
+      cost: base.cost,
+      _qty: Number(line.qty || 0),
+      _price: Number(line.price || 0),
+      _discountRate: lineRate(line),
+      _discount: lineDiscount(line),
+      _total: lineTotal(line),
+      // 摊完整单折扣后的行金额（各行合计 = 单头折后金额）
+      _net: nets[idx]
+    }
+  })
+})
 
 const grossSum = computed(() => round2((order.value.items || []).reduce((s, l) => s + lineGross(l), 0)))
 const lineDiscountSum = computed(() => round2((order.value.items || []).reduce((s, l) => s + lineDiscount(l), 0)))
@@ -200,6 +209,9 @@ const totalAmount = computed(() => orderAmount(order.value))
 const depositSum = computed(() => orderDepositSum(order.value))
 const owed = computed(() => Math.max(0, round2(totalAmount.value - depositSum.value)))
 const hasDiscount = computed(() => Boolean(orderRateText.value) || lineDiscountSum.value > 0)
+// 明细是否有行级折扣：没有就不显示「折扣率/本次折扣」列（打印同样隐藏）
+const hasLineDiscount = computed(() => lineDiscountSum.value > 0)
+const hasOrderDiscount = computed(() => Boolean(orderRateText.value))
 
 // ---- 勾选项：与销售/采购详情页同一口径 ----
 const hidePrice = ref(false)
@@ -227,12 +239,17 @@ const exportColumns = computed(() => {
   }
   cols.push({ label: '本次数量', value: r => Number(r._qty || 0) })
   if (!priceHidden.value) {
-    cols.push(
-      { label: '本次单价', value: r => Number(r._price || 0).toFixed(2) },
-      { label: '折扣率', value: r => Number(r._discountRate || 1).toFixed(2) },
-      { label: '本次折扣', value: r => Number(r._discount || 0).toFixed(2) },
-      { label: '本次金额', value: r => Number(r._total || 0).toFixed(2) }
-    )
+    cols.push({ label: '本次单价', value: r => Number(r._price || 0).toFixed(2) })
+    if (hasLineDiscount.value) {
+      cols.push(
+        { label: '折扣率', value: r => Number(r._discountRate || 1).toFixed(2) },
+        { label: '本次折扣', value: r => Number(r._discount || 0).toFixed(2) }
+      )
+    }
+    cols.push({ label: '本次金额', value: r => Number(r._total || 0).toFixed(2) })
+    if (hasOrderDiscount.value) {
+      cols.push({ label: '折后金额（含整单折扣）', value: r => Number(r._net || 0).toFixed(2) })
+    }
   }
   return cols
 })
@@ -256,7 +273,7 @@ const docHeaderFields = computed(() => {
   if (!priceHidden.value) {
     fields.push(['合计', `¥${netSum.value.toFixed(2)}`])
     if (lineDiscountSum.value > 0) fields.push(['原价合计', `¥${grossSum.value.toFixed(2)}（单项折扣 -¥${lineDiscountSum.value.toFixed(2)}）`])
-    if (orderRateText.value) fields.push(['整单折扣', `${orderRateText.value}（减 ¥${discountAmount.value.toFixed(2)}）`])
+    if (orderRateText.value) fields.push(['整单折扣', `${orderRateText.value}（减 ¥${discountAmount.value.toFixed(2)}）`, 'hl'])
     if (hasDiscount.value) fields.push(['折后金额', `¥${discountedTotal.value.toFixed(2)}`])
     fields.push(
       ['整单优惠', `¥${Number(order.value.discount || 0).toFixed(2)}`],
@@ -338,6 +355,8 @@ onMounted(load)
 .info { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 12px; color: var(--text-regular); font-size: var(--fs-base); align-items: center; }
 .external-banner { margin-bottom: 12px; }
 .price-hidden-note { color: var(--text-secondary); }
+.order-discount { background: #fff7e6; border: 1px solid #f0c78a; color: #b26a00; padding: 2px 8px; border-radius: 4px; }
+.order-discount b { font-weight: 700; }
 .remark-cell { display: inline-flex; align-items: center; gap: 4px; }
 .remark-btn { margin-left: 2px; }
 .photos-block { margin-bottom: 12px; }
