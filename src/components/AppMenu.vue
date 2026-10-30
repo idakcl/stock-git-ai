@@ -75,6 +75,14 @@
     </el-sub-menu>
 
     <el-menu-item-group title="系统">
+      <el-menu-item index="/profile">
+        <el-icon><UserFilled /></el-icon>
+        <span>用户信息</span>
+      </el-menu-item>
+      <el-menu-item index="/shares">
+        <el-icon><Link /></el-icon>
+        <span>外链分享</span>
+      </el-menu-item>
       <el-menu-item index="/data">
         <el-icon><FolderOpened /></el-icon>
         <span>数据备份</span>
@@ -91,7 +99,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

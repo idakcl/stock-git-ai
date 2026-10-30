@@ -14,11 +14,19 @@ export function joinLimited(list, max = 3) {
   return arr.length > max ? arr.slice(0, max).join('、') + '…' : arr.join('、')
 }
 
-/** 过滤掉空值字段，统一为 [label, value(, tone)] 数组；tone='hl' 时加边框高亮 */
+/** 过滤掉空值字段，统一为 [label, value(, tone)] 数组；tone='hl' 加框强调，'xl' 放大两倍 */
 const normFields = (headerFields) => (headerFields || [])
   .filter(([label, value]) => value != null && String(value) !== '')
 const fieldHtml = ([label, value, tone]) =>
   `<div class="f${tone ? ' ' + escHtml(tone) : ''}"><b>${escHtml(label)}：</b>${escHtml(value)}</div>`
+
+// 打印落款（用户信息等）：跟在明细表下方，不参与表格布局
+const footerHtml = (footerFields) => {
+  const list = normFields(footerFields)
+  if (!list.length) return ''
+  return '<div class="foot">' + list.map(([label, value]) =>
+    `<span class="fi"><b>${escHtml(label)}：</b>${escHtml(value)}</span>`).join('') + '</div>'
+}
 
 /** 生成 CSV 文本（带 BOM，Excel 打开不乱码）；headerFields 为单头信息 [[标签,值],...]，渲染在表头上方 */
 export function buildCSV(columns, rows, headerFields = []) {
@@ -53,6 +61,9 @@ const printStyle = `
   .fields { display: flex; flex-wrap: wrap; gap: 2px 24px; border: 1px solid #999; padding: 6px 10px; margin-bottom: 10px; font-size: 12px; }
   .fields .f { min-width: 200px; line-height: 1.7; }
   .fields .f.hl { border: 1.5px solid #000; background: #f2f2f2; font-weight: 700; font-size: 13px; padding: 1px 8px; }
+  .fields .f.xl { font-size: 24px; font-weight: 800; line-height: 1.35; }
+  .foot { margin-top: 10px; padding-top: 6px; border-top: 1px solid #666; display: flex; flex-wrap: wrap; gap: 2px 24px; font-size: 12px; }
+  .foot .fi { min-width: 180px; line-height: 1.7; }
   table { width: 100%; border-collapse: collapse; }
   th, td { border: 1px solid #666; padding: 4px 6px; text-align: left; vertical-align: top; }
   th { background: #eee; }
@@ -77,7 +88,8 @@ const sectionHtml = (sec) => {
   return (sec.title ? '<h2>' + escHtml(sec.title) + '</h2>' : '') +
     (sec.subtitle ? '<div class="sub">' + escHtml(sec.subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    tableHtml(sec.columns, sec.rows)
+    tableHtml(sec.columns, sec.rows) +
+    footerHtml(sec.footerFields)
 }
 
 /**
@@ -101,8 +113,8 @@ export function printA4Sections(sections, docTitle = '') {
   setTimeout(() => { w.print() }, 300)
 }
 
-/** 打开 A4 排版的新窗口并调用打印；headerFields 为单头信息 [[标签,值],...]，渲染在标题与表格之间 */
-export function printA4(title, columns, rows, subtitle = '', headerFields = []) {
+/** 打开 A4 排版的新窗口并调用打印；headerFields 为单头信息 [[标签,值],...]，footerFields 打印在明细表下方 */
+export function printA4(title, columns, rows, subtitle = '', headerFields = [], footerFields = []) {
   const w = window.open('', '_blank')
   if (!w) return
   const fieldsHtml = normFields(headerFields).map(fieldHtml).join('')
@@ -111,7 +123,7 @@ export function printA4(title, columns, rows, subtitle = '', headerFields = []) 
     printStyle + '</style></head><body><h2>' + escHtml(title) + '</h2>' +
     (subtitle ? '<div class="sub">' + escHtml(subtitle) + '</div>' : '') +
     (fieldsHtml ? '<div class="fields">' + fieldsHtml + '</div>' : '') +
-    tableHtml(columns, rows) + '</body></html>'
+    tableHtml(columns, rows) + footerHtml(footerFields) + '</body></html>'
   )
   w.document.close()
   w.focus()

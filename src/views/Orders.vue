@@ -328,7 +328,8 @@ const orderHeaderFields = (row) => {
   if (discountRatesTextOf(row)) fields.push(['整单折扣', `${discountRatesTextOf(row)}（减 ¥${orderRateDiscount(row).toFixed(2)}）`, 'hl'])
   if (Number(row.discount || 0) > 0) fields.push(['整单优惠', `¥${Number(row.discount).toFixed(2)}`])
   fields.push(
-    ['订单金额', `¥${orderAmount(row).toFixed(2)}`],
+    // 订单金额放大到两倍：批量打印多张订单详情时，一眼能看清每张单的成交金额
+    ['订单金额', `¥${orderAmount(row).toFixed(2)}`, 'xl'],
     ['已收订金', `¥${depositSumOf(row).toFixed(2)}`],
     [row.kind === 'purchase' ? '未付' : '未收', `¥${owedOf(row).toFixed(2)}`],
     ['备注', row.remark || '—']

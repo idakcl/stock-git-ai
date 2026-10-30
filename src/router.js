@@ -20,6 +20,9 @@ import ClearData from './views/ClearData.vue'
 import CurrentAccounts from './views/CurrentAccounts.vue'
 import Vouchers from './views/Vouchers.vue'
 import Returns from './views/Returns.vue'
+import Profile from './views/Profile.vue'
+import Shares from './views/Shares.vue'
+import ShareView from './views/ShareView.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -42,7 +45,11 @@ const routes = [
   { path: '/clear', component: ClearData },
   { path: '/current', component: CurrentAccounts },
   { path: '/vouchers', component: Vouchers },
-  { path: '/returns', component: Returns }
+  { path: '/returns', component: Returns },
+  { path: '/profile', component: Profile },
+  { path: '/shares', component: Shares },
+  // 外链分享页：公开访问，不经过登录与后台布局（meta.public 由 App.vue 识别）
+  { path: '/share/:token', component: ShareView, meta: { public: true } }
 ]
 
 export default createRouter({

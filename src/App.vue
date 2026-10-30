@@ -1,6 +1,9 @@
 <template>
+  <!-- 公开页面（外链分享）：不需要登录，也不渲染后台菜单与布局 -->
+  <router-view v-if="isPublic" />
+
   <!-- 未登录：只显示登录页，不渲染业务数据 -->
-  <Login v-if="!authed" @success="authed = true" />
+  <Login v-else-if="!authed" @success="authed = true" />
 
   <!-- 已登录：主界面 -->
   <el-container v-else class="layout">
@@ -62,16 +65,19 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Menu, SwitchButton } from '@element-plus/icons-vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import AppMenu from './components/AppMenu.vue'
 import Login from './views/Login.vue'
 import { api, auth } from './api'
 import { cnDateTime } from './utils/time.js'
 
 const router = useRouter()
+const route = useRoute()
+// 公开页面（meta.public）：外链分享页不登录也能看，不能渲染后台布局
+const isPublic = computed(() => !!route.meta.public)
 
 const drawer = ref(false)
 // 左下角版本标识：由 vite.config.js 注入「短 sha · 提交时间」，同一提交重复构建字节一致
@@ -83,6 +89,8 @@ let clockTimer = 0
 const authed = ref(false)
 
 async function check() {
+  // 公开页面不需要会话自检：带着过期票据去调 /session 只会触发一次无意义的「登录已过期」提示
+  if (isPublic.value) return
   if (!auth.get()) { authed.value = false; return }
   try {
     const r = await api.verify()

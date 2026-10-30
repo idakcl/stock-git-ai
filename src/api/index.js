@@ -206,6 +206,22 @@ export const api = {
   },
   getStock: () => cachedGet('/stock'),
   getLogs: () => request('/logs'),
+  // 用户信息（打印落款）：独立文件，保存后失效缓存即可
+  getProfile: () => cachedGet('/profile'),
+  saveProfile: async (profile) => {
+    const r = await request('/profile', { method: 'POST', body: JSON.stringify(profile) })
+    invalidate('/profile')
+    return r
+  },
+  // 外链分享：列表带单据摘要；建链/取消/改时效统一走同一个操作接口
+  getShares: () => cachedGet('/shares'),
+  shareOperation: async (operation) => {
+    const r = await request('/shares', { method: 'POST', body: JSON.stringify(operation) })
+    invalidate('/shares')
+    return r
+  },
+  // 公开分享内容：token 即凭据，无需登录（分享页只读）
+  getShare: (token) => request(`/share/${encodeURIComponent(token)}`),
   // 数据整理：后端重跑全量派生，修复历史单据乱码编码并重建历史价/库存/供应商链接。
   // 全部衍生数据已重写，统一失效缓存，避免 15 秒窗口内看到旧编码
   normalizeData: async () => {

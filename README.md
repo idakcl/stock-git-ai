@@ -16,6 +16,8 @@
 - `src/utils/voucher.js` — 资金单据编码生成（`SK-`/`FK-YYYYMMDD-NNNN`）
 - `src/utils/voucherFlow.js` — **收付款 → 资金单据联动的唯一入口**（纯逻辑，不含 UI）
 - `src/utils/account.js` — 全站唯一账务公式（应收/未收/结清判定）
+- `src/utils/clipboard.js` — 复制链接（Clipboard API + 局域网 http 回退 `execCommand`）与分享链接拼接
+- `src/utils/export.js` — 导出 / 打印排版：`printA4()` / `printA4Sections()`，单头字段带 `tone`（`hl` 加框强调、`xl` 字号两倍），`footerFields` 输出商品列表底部的用户信息落款
 - `src/utils/orders.js` — 订单（草稿）状态机与校验：`validateOrder` / `orderAmount` / `orderToOrderDoc` / `canUnpost` / `applyOrderOperation`（前端预览与服务端落库共用）
 - `src/utils/amend.js` — 单据变更口径：`moneyTouched` / `diffOrderLines` / `refundPreview` / `applyAmendOperation`（同上，共用一份实现）
 - `src/utils/dedupe.js` — 导入去重（前端预览与后端落库共用）
@@ -23,6 +25,8 @@
 - `api/tx.js` — 「读固定快照 → 纯函数算 → 一次提交发布」的事务骨架（退款 / 订单 / 变更共用）
 - `api/orders.js` / `api/amends.js` — 订单、变更两个操作接口的事务入口
 - `api/auth.js` — 登录票据（HMAC）与 CORS 白名单
+- `api/profile.js` — 用户信息（打印落款用的联系名称/电话/地址/备注）读写与字段裁剪
+- `api/shares.js` — 外链分享：令牌生成、时效、取消、公开只读读取与脱敏载荷
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
 - `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
 - `wrangler.json` — Cloudflare Workers 配置
@@ -95,8 +99,15 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/orders` | 订单数组 | **文件不存在时返回 `[]`**（见「订单（预售 / 预订）与过账」）；草稿不在 `purchases` / `sales` 里，因此不占库存、不进应收应付 |
 | `/logs` | 数组 | 最近 200 条导入/合并日志，`source` 为 `ai` 或 `merge` |
 | `/session` | `{ ok }` | 票据自检 |
+| `/profile` | `{ name, phone, address, remark }` | 用户信息（打印落款用），未填过返回四个空字符串 |
+| `/shares` | `{ shares: [...] }` | 外链分享列表（含已过期 / 已作废 / 单据已删除的记录），按创建时间倒序 |
 
 返回体是**裸数组 / 裸对象**（不包 `data` 壳）；失败统一是 `{"error":"中文原因"}` + 4xx/5xx，脚本按 `res.ok` 判断即可。
+
+### 公开读接口（GET，**不需要票据**）
+| 路径 | 返回 | 说明 |
+|---|---|---|
+| `/share/<token>` | 只读载荷 `{ readOnly, kind, share, doc, lines, totals }` | 供 `/share/:token` 公开页展示。**只返回单据的展示口径**：`token` 为 36 位十六进制随机串，格式不合法直接 `404`；已过期 `410`；单据被删除或作废 `404`。**不含**进价 `cost`、`payments` 流水、照片、往来单位的联系方式等内部字段。|
 
 ### 写接口（POST，均需票据）
 | 路径 | 请求体 | 落库后的额外动作 |
@@ -115,6 +126,8 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/refunds` | `{"action": "create" / "settle" / "backfill" / "restore", …}` | **操作接口**，见 [docs/refunds.md](docs/refunds.md)；`restore` 仅供备份恢复，整表替换退款/核销凭证（退款是凭证、不影响库存，故不派生） |
 | `/amends` | `{"kind","requestId","sourceOrderId","party","date","reason","mode","refundLines":[{index,qty}],"amendLines":[{code,name,unit,qty,price}]}` | **操作接口**：原单不动，减少的商品生成退货单（复用退款四档资金处理）、增加的商品生成补差单，一次提交落库；`requestId` 幂等，金额一律服务端重算 |
 | `/voids` | `{"kind":"sale"\|"purchase","id":"单据号","reason":"可选"}` | **操作接口**：整单作废并同步作废关联的 `SK-`/`FK-`，一次提交回滚库存/应收；重复作废幂等；子单/核销/合并凭证未拆时 `409`。详见 [docs/void.md](docs/void.md) |
+| `/profile` | `{"name","phone","address","remark"}` | 整份覆盖写入 `profile.json`；服务端逐字段裁剪空白并限长（40 / 60 / 160 / 200），多余字段丢弃 |
+| `/shares` | `{"action": "create" / "cancel" / "update", …}` | **操作接口**，见 [docs/shares.md](docs/shares.md)。`create` 需要 `{kind, docId, days}`（`days` 取 `1/7/30`，`0` 为长期），同一张单已有有效链接时**复用**并返回 `reused: true`；`cancel` 需要 `{token}`；`update` 需要 `{token, days}`（按「现在」重新起算）|
 | `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
 | `/stock` | 任意 | **403**：库存为派生数据，禁止直写 |
 
@@ -677,6 +690,21 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 ### 编码自动流水
 商品 / 供应商 / 客户在「新增」表单中，**编码默认按流水号自动预填**（取同类现有最大序号 +1：`P00001` / `S00001` / `C00001`），可手动修改。
 
+### 用户信息与打印落款
+- 「系统 → 用户信息」（`/profile`，`src/views/Profile.vue`）保存自己的**联系名称 / 电话 / 地址 / 备注**，存数据仓 `profile.json`（单份覆盖，不是列表）。四个字段服务端限长 40 / 60 / 160 / 200 并裁空白，页面带「打印落款预览」，所见即所印。
+- 销售单、采购单、订单详情页顶部都有「**显示用户信息**」勾选框：勾选后落款出现在商品列表**下方**，打印（A4）与页面同一位置、同一口径（`printA4()` 第 6 参 `footerFields` → `.foot` / `.fi`）。
+- 落款字段全空时不产生落款块（不印一排空标签），并提示「尚未填写用户信息，请到「系统 → 用户信息」补充」；取消勾选后页面与打印一起消失。
+
+### 外链分享（只读）
+详见 [docs/shares.md](docs/shares.md)。要点：
+- 销售单 / 采购单 / 订单详情页的「**分享**」按钮生成只读链接 `https://<站点>/share/<token>`，对方打开只能看，**没有任何编辑入口**，也不需要登录。作废单不显示分享入口。
+- 分享只保存「指向哪张单」，不复制单据内容：单据改名、改金额即时生效；单据被删除或作废时链接自动 `404`，不会出现两份数据对不上。
+- 「系统 → **外链分享**」（`/shares`）统一汇总三类单据的全部链接，可**复制链接、查看二维码、改时效、取消**；有效期支持 1 / 7 / 30 天与长期有效。
+
+### 打印排版（字号与折扣呈现）
+- 单头字段可带强调样式：`tone = 'hl'` 加框强调（整单折扣用），`tone = 'xl'` 字号放大到两倍（基础 12px → 24px，加粗），**订单金额**在订单详情与订单列表打印中统一用 `xl`。
+- 单头无值字段自动过滤；明细没有行折扣时打印隐藏「折扣率 / 本次折扣」两列，有整单折扣时保留「折后金额（含整单折扣）」列，行合计与单头折后金额分文不差（`allocateNetOf()` 累计取整）。
+
 ## 本地开发
 ```bash
 npm install
@@ -730,7 +758,7 @@ npx wrangler secret put SESSION_SECRET    # 会话签名密钥（随机串即可
 ### 安全设计
 | 措施 | 说明 |
 |---|---|
-| 全站鉴权 | 除 `/api/login` 外，所有读、写接口均校验 `Authorization: Bearer <票据>` |
+| 全站鉴权 | 除 `/api/login`、`/api/session` 与公开的 `/api/share/<token>` 外，所有读、写接口均校验 `Authorization: Bearer <票据>` |
 | 票据签名 | HMAC-SHA256 自签票据，含过期时间；密钥在 Secret 中，前端不可见 |
 | 常量时间比对 | 密码与签名比对均为常量时间，避免时序侧信道 |
 | 登录节流 | 同一来源连续失败 6 次锁定 15 分钟，返回剩余尝试次数 |

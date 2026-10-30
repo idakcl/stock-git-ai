@@ -7,6 +7,8 @@ import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 import { isVoided } from '../src/utils/account.js'
 import { voidTransaction } from './voids.js'
+import { readProfile, saveProfile } from './profile.js'
+import { listShares, readPublicShare, shareOperation } from './shares.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -418,6 +420,16 @@ export async function handleApi(req, url, env) {
   if (path === '/session' && method === 'GET') {
     return json(req, env, { ok: await verifyToken(bearer(req), env) })
   }
+  // 外链分享的公开读取：token 即凭据，无需登录；只返回脱敏后的展示数据。
+  // 必须放在登录校验之前，别人拿到链接就能看（但只能看，不能改）。
+  if (path.startsWith('/share/') && method === 'GET') {
+    try {
+      const token = decodeURIComponent(path.slice('/share/'.length))
+      return json(req, env, await readPublicShare(env, token))
+    } catch (e) {
+      return json(req, env, { error: e.message || '分享链接无效' }, e.status || 500)
+    }
+  }
 
   // 其余接口一律要求登录态
   if (!(await verifyToken(bearer(req), env))) {
@@ -461,6 +473,10 @@ export async function handleApi(req, url, env) {
     if (path === '/orders' && method === 'GET') return json(req, env, await readOptionalArray(env, 'orders.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
+    // 用户信息：打印落款用，单独一个文件；缺失按空资料处理
+    if (path === '/profile' && method === 'GET') return json(req, env, await readProfile(env))
+    // 外链分享列表：带单据摘要（单据已删除/作废也会列出，便于取消）
+    if (path === '/shares' && method === 'GET') return json(req, env, { shares: await listShares(env) })
 
     // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端
     if (path === '/upload' && method === 'POST') {
@@ -491,6 +507,15 @@ export async function handleApi(req, url, env) {
 
     if (method === 'POST') {
       const body = await req.json()
+
+      // 用户信息（联系名称/电话/地址/备注）：只写 profile.json，不触发任何派生数据
+      if (path === '/profile') {
+        return json(req, env, { ok: true, profile: await saveProfile(env, body) })
+      }
+      // 外链分享：建链 / 取消 / 改有效期。只动 shares.json，与单据数据完全解耦。
+      if (path === '/shares') {
+        return json(req, env, await shareOperation(env, body))
+      }
 
       if (path === '/items') {
         // 整表覆盖前先剥掉历史采购价：items.json 已不再保存该字段，

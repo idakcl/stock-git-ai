@@ -14,8 +14,10 @@
             <el-checkbox v-if="!priceHidden" v-model="showHistory" class="opt-cb">展开历史价与商品档案</el-checkbox>
             <el-checkbox v-model="externalView" class="opt-cb">对外查看（隐藏价格·只读）</el-checkbox>
             <el-checkbox v-model="showPartyInfo" class="opt-cb">{{ isPurchase ? '显示供应商信息详情' : '显示客户信息详情' }}</el-checkbox>
+            <el-checkbox v-model="showProfile" class="opt-cb">显示用户信息</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
+            <el-button v-if="found && !externalView" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || order.status === POSTED" @click="editDialog = true">编辑</el-button>
             <el-button @click="$router.push('/orders')">返回列表</el-button>
           </div>
@@ -87,6 +89,16 @@
           </el-table-column>
         </template>
       </ProductTable>
+      <!-- 用户信息落款：勾选后显示在商品列表底部，打印时跟在同一位置 -->
+      <div v-if="showProfile" class="print-foot">
+        <template v-if="hasProfile">
+          <span v-if="profile.name">联系名称：{{ profile.name }}</span>
+          <span v-if="profile.phone">电话：{{ profile.phone }}</span>
+          <span v-if="profile.address">地址：{{ profile.address }}</span>
+          <span v-if="profile.remark">备注：{{ profile.remark }}</span>
+        </template>
+        <span v-else class="none">尚未填写用户信息，请到「系统 → 用户信息」补充</span>
+      </div>
     </el-card>
 
     <el-card v-if="!externalView && deposits.length" class="dep-card">
@@ -129,11 +141,15 @@
     <!-- 轻量补备注：与销售/采购详情页同一入口，只改 remark 字段 -->
     <OrderRemarkDialog v-model="remarkDialog" :order="order"
       placeholder="例如：客户要求月底前交货、发票待补、尾款下周付…" @saved="onRemarkSaved" />
+
+    <!-- 外链分享：生成只读链接，可设时效、查看二维码、随时取消 -->
+    <ShareDialog v-model="shareDialog" kind="order" :doc-id="order.id"
+      :title="`${isPurchase ? '采购' : '销售'}订单 ${order.id}`" />
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { api } from '../api'
@@ -141,6 +157,7 @@ import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
+import ShareDialog from '../components/ShareDialog.vue'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, DRAFT, POSTED } from '../utils/orders.js'
 import { round2, discountRatesTextOf, effectiveRateOf, allocateNetOf } from '../utils/account'
 import { lineDisplayName, normalizeRate } from '../utils/catalog'
@@ -156,6 +173,20 @@ const loading = ref(true)
 const saving = ref(false)
 const editDialog = ref(false)
 const remarkDialog = ref(false)
+const shareDialog = ref(false)
+// 用户信息落款：勾选后显示在商品列表底部，并随打印一起输出
+const showProfile = ref(false)
+const profile = ref({})
+const hasProfile = computed(() => ['name', 'phone', 'address', 'remark'].some(k => String(profile.value[k] || '').trim()))
+const profileFields = computed(() => (showProfile.value ? [
+  ['联系名称', profile.value.name],
+  ['电话', profile.value.phone],
+  ['地址', profile.value.address],
+  ['备注', profile.value.remark]
+] : []))
+watch(showProfile, v => {
+  if (v && !hasProfile.value) ElMessage.warning('尚未填写用户信息，请到「系统 → 用户信息」补充')
+})
 
 const found = computed(() => orders.value.some(o => o.id === route.params.id))
 const order = computed(() => orders.value.find(o => o.id === route.params.id) || {
@@ -277,7 +308,8 @@ const docHeaderFields = computed(() => {
     if (hasDiscount.value) fields.push(['折后金额', `¥${discountedTotal.value.toFixed(2)}`])
     fields.push(
       ['整单优惠', `¥${Number(order.value.discount || 0).toFixed(2)}`],
-      ['订单金额', `¥${totalAmount.value.toFixed(2)}`],
+      // 订单金额是这张单最关键的结论：打印时字号放大到两倍（与订单列表打印同一口径）
+      ['订单金额', `¥${totalAmount.value.toFixed(2)}`, 'xl'],
       ['已收订金', `¥${depositSum.value.toFixed(2)}`],
       [isPurchase.value ? '未付' : '未收', `¥${owed.value.toFixed(2)}`]
     )
@@ -295,7 +327,7 @@ function doExport() {
 function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本订单暂无商品明细')
   const title = `${isPurchase.value ? '采购' : '销售'}订单 ${order.value.id}`
-  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value)
+  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value)
 }
 
 // 保存备注：只走 remark action，单号/金额/明细/凭证一律不碰
@@ -330,11 +362,14 @@ async function onFormSaved({ draft, isEdit }) {
 async function load() {
   loading.value = true
   try {
-    const [o, it, cu, sup] = await Promise.all([api.getOrders(), api.getItems(), api.getCustomers(), api.getSuppliers()])
+    const [o, it, cu, sup, pf] = await Promise.all([
+      api.getOrders(), api.getItems(), api.getCustomers(), api.getSuppliers(), api.getProfile().catch(() => ({}))
+    ])
     orders.value = o || []
     items.value = it || []
     customers.value = cu || []
     suppliers.value = sup || []
+    profile.value = pf || {}
   } catch (e) {
     ElMessage.error({ message: `订单加载失败（${e.message || '网络异常'}），请返回列表重试`, duration: 6000 })
   } finally { loading.value = false }
@@ -362,4 +397,5 @@ onMounted(load)
 .photos-block { margin-bottom: 12px; }
 .photos-title { font-weight: 600; margin-bottom: 6px; color: var(--color-primary); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dep-card { margin-top: 12px; }
+.print-foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color); display: flex; flex-wrap: wrap; gap: 4px 24px; color: var(--text-regular); font-size: var(--fs-sub); }
 </style>
