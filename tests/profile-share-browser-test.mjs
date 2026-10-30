@@ -230,15 +230,17 @@ await t('取消勾选后落款从页面和打印一起消失', async () => {
   } finally { await context.close() }
 })
 
-console.log('\n打印字号：订单金额放大两倍')
+console.log('\n打印字号：订单金额＝正文的 1.2 倍并加粗')
 
-await t('订单详情打印单头「订单金额」用 xl 样式（24px）', async () => {
+await t('订单详情打印单头「订单金额」用 xl 样式（13.2px＝11px×1.2）', async () => {
   const { page, context, errors } = await open(`/order/${ORDER_ID}`, { orders: [order()], profile: {} })
   try {
     await capturePrint(page)
     const html = await printed(page)
     assert.match(html, /<div class="f xl"><b>订单金额：<\/b>/)
-    assert.match(html, /\.fields \.f\.xl \{ font-size: 24px/, '打印样式需内置 2 倍字号规则')
+    // 以前是 24px（正文 12px 的 2 倍），用户反馈太大：改成 1.2 倍 + 加粗，且随纸张基准字号推导
+    assert.match(html, /\.fields \.f\.xl \{ font-size: 13\.2px; font-weight: 800/, '打印样式需内置「正文 1.2 倍 + 加粗」规则')
+    assert.doesNotMatch(html, /font-size: 24px/, '2 倍字号规则必须已废除')
     // 其余字段不受影响
     assert.doesNotMatch(html, /<div class="f xl"><b>客户：/)
     assert.deepEqual(errors, [], '页面不得报错')

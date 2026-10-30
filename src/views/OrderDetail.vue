@@ -16,7 +16,8 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">{{ isPurchase ? '显示供应商信息详情' : '显示客户信息详情' }}</el-checkbox>
             <el-checkbox v-model="showProfile" class="opt-cb">显示用户信息</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
-            <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
+            <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
+            <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
             <el-button v-if="found && !externalView" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || order.status === POSTED" @click="editDialog = true">编辑</el-button>
             <el-button @click="$router.push('/orders')">返回列表</el-button>
@@ -332,10 +333,10 @@ function doExport() {
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
 
-function doPrint() {
+function doPrint(paper = 'A4') {
   if (!detailItems.value.length) return ElMessage.warning('本订单暂无商品明细')
   const title = `${isPurchase.value ? '采购' : '销售'}订单 ${order.value.id}`
-  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value)
+  printA4(title, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper)
 }
 
 // 保存备注：只走 remark action，单号/金额/明细/凭证一律不碰

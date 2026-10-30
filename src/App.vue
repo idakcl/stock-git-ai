@@ -5,6 +5,13 @@
   <!-- 未登录：只显示登录页，不渲染业务数据 -->
   <Login v-else-if="!authed" @success="authed = true" />
 
+  <!-- 独立开单标签页（meta.standalone）：新开浏览器标签页只渲染开单表单，不渲染应用外壳。
+       必须排在登录检查之后：票据过期时这个标签页也要能落到登录页，
+       否则用户只会对着一个提交不出去的空白开单窗。 -->
+  <div v-else-if="isStandalone" class="standalone">
+    <router-view />
+  </div>
+
   <!-- 已登录：主界面 -->
   <el-container v-else class="layout">
     <el-header class="header">
@@ -78,6 +85,8 @@ const router = useRouter()
 const route = useRoute()
 // 公开页面（meta.public）：外链分享页不登录也能看，不能渲染后台布局
 const isPublic = computed(() => !!route.meta.public)
+// 独立开单标签页（meta.standalone）：新开标签页只渲染开单表单，跳过登录检查与应用外壳
+const isStandalone = computed(() => !!route.meta.standalone)
 
 const drawer = ref(false)
 // 左下角版本标识：由 vite.config.js 注入「短 sha · 提交时间」，同一提交重复构建字节一致
@@ -233,6 +242,8 @@ body {
 ::-webkit-scrollbar-thumb:hover { background:var(--text-placeholder); background-clip: content-box; }
 
 /* ==================== 布局 ==================== */
+/* 独立开单标签页：100% 宽高、无 padding、背景与正常页面一致；只渲染 <router-view> 内容 */
+.standalone { width: 100%; height: 100%; padding: 0; margin: 0; background: var(--bg-page); }
 .layout { height: 100%; flex-direction: column; }
 .body { flex: 1; min-height: 0; }
 

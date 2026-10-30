@@ -2,7 +2,9 @@
   <div class="export-bar">
     <slot />
     <el-button size="small" :disabled="!rows.length" @click="doExport">导出CSV</el-button>
-    <el-button size="small" :disabled="!rows.length" @click="doPrint">打印(A4)</el-button>
+    <el-button size="small" :disabled="!rows.length" @click="doPrint('A4')">打印(A4)</el-button>
+    <!-- A5 小票/小单纸张：同一份内容按 A5 版面重新排（字号与每页行数都另算一套） -->
+    <el-button size="small" :disabled="!rows.length" @click="doPrint('A5')">打印(A5)</el-button>
   </div>
 </template>
 
@@ -31,10 +33,10 @@ function doExport() {
   ElMessage.success(`已导出 ${props.rows.length} 行`)
 }
 
-function doPrint() {
+function doPrint(paper = 'A4') {
   const cols = props.printColumns || props.columns
   if (!cols.length) return ElMessage.warning('未定义导出列')
-  printA4(props.title, cols, props.rows, props.subtitle)
+  printA4(props.title, cols, props.rows, props.subtitle, [], [], paper)
 }
 </script>
 

@@ -187,6 +187,15 @@ const optionLabel = (p) => p.label || `${p.name}${p.code ? ` (${p.code})` : ''}`
 const deposits = computed(() => props.order?.deposits || [])
 const depositSum = computed(() => orderDepositSum(props.order))
 
+// 明细行回填：正式订单与「从模板导入」的预填草稿共用同一套映射，避免两处口径漂移
+const mapLine = (l) => ({
+  code: l.code, name: l.name, qty: l.qty, price: l.price,
+  // 行折扣按正式单据同一套归一化回填（兼容早期「折扣是金额」的旧数据）
+  discountRate: normalizeRate(l, Number(l.qty || 0) * Number(l.price || 0)),
+  // 多级折扣链：如果原行有 discountRates 数组，保留它
+  discountRates: Array.isArray(l.discountRates) && l.discountRates.length ? l.discountRates.map(Number) : []
+})
+
 // 打开时整表重建：草稿回填，新建给一行空明细
 watch(() => props.modelValue, (open) => {
   if (!open) return
@@ -204,25 +213,24 @@ watch(() => props.modelValue, (open) => {
     form.photos = [...(row.photos || [])]
     form.discount = Number(row.discount || 0)
     form.discountRates = (row.discountRates || []).map(Number)
-    form.lines = (row.items || []).map(l => ({
-      code: l.code, name: l.name, qty: l.qty, price: l.price,
-      // 行折扣按正式单据同一套归一化回填（兼容早期「折扣是金额」的旧数据）
-      discountRate: normalizeRate(l, Number(l.qty || 0) * Number(l.price || 0)),
-      // 多级折扣链：如果原行有 discountRates 数组，保留它
-      discountRates: Array.isArray(l.discountRates) && l.discountRates.length ? l.discountRates.map(Number) : []
-    }))
+    form.lines = (row.items || []).map(mapLine)
   } else {
+    // 没有 id 的 order 是「预填草稿」（订单页「从模板导入」传进来的那份）：
+    // 字段照搬，但仍按新建处理（editingId 为空 → 保存走 save 新增，不覆盖任何已有订单）
+    const d = row || {}
     editingId.value = ''
     posted.value = false
-    form.kind = 'sale'
-    form.party = ''
-    form.date = todayCN()
-    form.no = ''
-    form.remark = ''
-    form.photos = []
-    form.discount = 0
-    form.discountRates = []
-    form.lines = [{ code:'', name:'', qty:1, price:0, discountRate:1, discountRates:[] }]
+    form.kind = d.kind === 'purchase' ? 'purchase' : 'sale'
+    form.party = d.kind === 'purchase' ? (d.supplier || '') : (d.customer || '')
+    form.date = d.date || todayCN()
+    form.no = d.no || ''
+    form.remark = d.remark || ''
+    form.photos = [...(d.photos || [])]
+    form.discount = Number(d.discount || 0)
+    form.discountRates = (d.discountRates || []).map(Number)
+    form.lines = (d.items || []).map(mapLine)
+    // 空白新建：给一行空明细，保证刚打开就能直接选商品
+    if (!d.items || !d.items.length) form.lines = [{ code: '', name: '', qty: 1, price: 0, discountRate: 1, discountRates: [] }]
   }
 })
 

@@ -85,20 +85,9 @@ async function waitFormGone(page) {
   await page.locator('.el-dialog:visible').first().waitFor({ state: 'detached', timeout: 5000 })
 }
 
-console.log('\n销售单：列表 → 新页面开单')
-
-await t('列表页有「新页面开单」按钮，点击后换到 /sales/new 并整页显示表单', async () => {
-  const { page, context, errors } = await open('/sales', seed())
-  try {
-    assert.equal(await page.getByRole('button', { name: '新页面开单' }).count(), 1)
-    await page.getByRole('button', { name: '新页面开单' }).click()
-    await page.waitForURL('**/sales/new')
-    await assertFullscreen(page, '应切换到整页模式')
-    // 整页模式只留表单：列表卡片必须隐藏
-    assert.equal(await page.locator('.card-header').count(), 0, '整页模式不应再渲染销售列表')
-    assert.deepEqual(errors, [], '页面不得报错')
-  } finally { await context.close() }
-})
+// 「新页面开单」必须是真·新开浏览器标签页（window.open）：那部分由 tests/entry-newtab-browser-test.mjs 覆盖，
+// 本文件只管整页表单自身：/xxx/new 直达、表单继承、保存链路、出口文案。
+console.log('\n销售单：整页开单（/sales/new）')
 
 await t('直接访问 /sales/new：数据取齐后自动开整页表单，出口文案是「返回」', async () => {
   const { page, context, errors } = await open('/sales/new', seed())

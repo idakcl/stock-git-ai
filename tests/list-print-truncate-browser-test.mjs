@@ -121,7 +121,7 @@ await t('勾选后打印只留前 3 个名称 + 省略号', async () => {
   try {
     await page.locator('.el-table__row', { hasText: 'D202610281000000001' }).first().locator('.el-checkbox__inner').click()
     await capturePrint(page)
-    await page.getByRole('button', { name: '打印勾选订单列表' }).click()
+    await page.getByRole('button', { name: '打印勾选订单列表', exact: true }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /管件、弯头、三通…/)

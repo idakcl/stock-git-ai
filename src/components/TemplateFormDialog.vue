@@ -86,7 +86,7 @@ const props = defineProps({
   saving: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['update:modelValue', 'save'])
+const emit = defineEmits(['update:modelValue', 'saved'])
 
 const visible = computed({
   get: () => props.modelValue,
@@ -205,7 +205,10 @@ function save() {
       discountRate: Number(l.discountRate ?? 1)
     }))
   }
-  emit('save', { id: props.template?.id, template })
+  // 事件名必须是 saved：父组件 OrderTemplates.vue 监听的是 @saved。
+  // 以前这里叫 'save'，父组件的监听器永远不触发，POST 根本没发出去 ——
+  // 表现就是「订单模板保存不了」：点保存看似没反应，弹窗也停在原地。
+  emit('saved', { id: props.template?.id, template })
 }
 </script>
 

@@ -211,7 +211,7 @@ await t('打印样式声明 thead=table-header-group（跨页重复商品表头�
   } finally { await context.close() }
 })
 
-await t('80 行明细打印：表头在 thead、合计不混进表头（跨页时每页都带列名）', async () => {
+await t('80 行明细打印：按每页 40 行分片，每片自带表头、序号接续', async () => {
   const many = {
     ...saleDoc(),
     total: 800, discountRates: [0.9],
@@ -221,12 +221,15 @@ await t('80 行明细打印：表头在 thead、合计不混进表头（跨页�
   try {
     await capturePrint(page)
     const html = await printed(page)
-    // 只有一处 thead，且包含全部列名：Chrome 打印时会自动在每页顶部重复
+    // 明细不再是一整张表：切成「首页 34 + 40 + 6」三片，每片都带 <thead>，
+    // 表头因此物理存在于每一页，不依赖浏览器是否实现 table-header-group
+    const chunks = (html.match(/<table class="pg/g) || []).length
+    assert.equal(chunks, 3, '80 行应切成 3 片')
+    assert.equal((html.match(/<thead>/g) || []).length, chunks, '每片都要有自己的表头')
     const thead = /<thead>([\s\S]*?)<\/thead>/.exec(html)[1]
     assert.match(thead, /本次单价/)
     assert.match(thead, /本次金额/)
-    assert.equal((html.match(/<thead>/g) || []).length, 1)
-    assert.match(html, /<tbody>[\s\S]*80[\s\S]*<\/tbody>/)
+    assert.match(html, /<td class="idx">80<\/td>/, '序号必须跨片接续到 80')
   } finally { await context.close() }
 })
 
@@ -239,7 +242,8 @@ await t('真·PDF：140 行明细跨多页，每页都带商品表头（Chromium
   try {
     await capturePrint(page)
     const html = await printed(page)
-    assert.equal((html.match(/<thead>/g) || []).length, 1, '打印 HTML 只有一处表头')
+    const chunks = (html.match(/<table class="pg/g) || []).length
+    assert.ok(chunks >= 2, '140 行必须分片')
     // 用真实 Chromium 打印引擎渲染该 HTML 成 PDF，再逐页取文本核对表头每页都在
     const probe = await browser.newPage()
     await probe.setContent(html)

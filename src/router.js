@@ -33,16 +33,17 @@ const routes = [
   { path: '/customers', component: Customers },
   { path: '/customer/:code', component: CustomerDetail },
   { path: '/purchases', component: Purchases },
-  // 新页面开单（meta.entry）：复用列表页组件，靠 meta 把列表隐藏、开单表单整页显示。
-  // 复用而不是新写页面：开单要用的整表数据、单号生成、整表覆盖红线、资金单据联动都在列表页里，
-  // 再写一套就是两份保存链路，金额口径漂移就是错账。
-  { path: '/purchases/new', component: Purchases, meta: { entry: true } },
+  // 新页面开单（meta.entry + meta.standalone）：新开浏览器标签页，只渲染开单表单，不渲染应用外壳（菜单/头部）。
+  // 复用列表页组件：开单要用的整表数据、单号生成、整表覆盖红线、资金单据联动都在列表页里，
+  // 再写一套就是两份保存链路，金额口径漂移就是错账。meta.standalone 由 App.vue 识别，
+  // 跳过布局直接渲染 <router-view>。
+  { path: '/purchases/new', component: Purchases, meta: { entry: true, standalone: true } },
   { path: '/purchase/:id', component: PurchaseDetail },
   { path: '/sales', component: Sales },
-  { path: '/sales/new', component: Sales, meta: { entry: true } },
+  { path: '/sales/new', component: Sales, meta: { entry: true, standalone: true } },
   { path: '/sale/:id', component: SalesDetail },
   { path: '/orders', component: Orders },
-  { path: '/orders/new', component: Orders, meta: { entry: true } },
+  { path: '/orders/new', component: Orders, meta: { entry: true, standalone: true } },
   { path: '/order/:id', component: OrderDetail },
   { path: '/templates', component: OrderTemplates },
   { path: '/stock', component: Stock },

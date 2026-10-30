@@ -13,6 +13,7 @@
               title="删除未过账且未收订金的订单；已过账 / 已收订金的会保留" @click="clearDrafts">
               清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
+            <el-button @click="openTemplatePicker">从模板导入</el-button>
             <el-button type="primary" @click="openCreate">新建订单</el-button>
             <el-button @click="openEntryPage">新页面开单</el-button>
           </div>
@@ -43,7 +44,8 @@
       </div>
       <!-- 勾选后批量操作：打印列表 / 打印详情（可直接打印或隐藏金额）/ 批量删除 -->
       <div class="export-bar">
-        <el-button size="small" :disabled="!selected.length" @click="printSelectedList">打印勾选订单列表</el-button>
+        <el-button size="small" :disabled="!selected.length" @click="printSelectedList('A4')">打印勾选订单列表</el-button>
+        <el-button size="small" :disabled="!selected.length" @click="printSelectedList('A5')">打印勾选订单列表(A5)</el-button>
         <el-button size="small" :disabled="!selected.length" @click="openDetailPrint">打印勾选订单详情页</el-button>
         <el-button size="small" :disabled="!paged.length" @click="exportPageCsv">导出CSV（当前页）</el-button>
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
@@ -94,7 +96,7 @@
               <router-link v-if="row.postedOrderId" :to="`${row.kind === 'purchase' ? '/purchase/' : '/sale/'}${row.postedOrderId}`" class="link posted-link">{{ row.postedOrderId }}</router-link>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="540" class-name="ops-col">
+          <el-table-column label="操作" width="640" class-name="ops-col">
             <template #default="{ row }">
               <el-button size="small" type="primary" :disabled="row.status === POSTED" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="success" :disabled="row.status === POSTED" @click="openDeposit(row)">收订金</el-button>
@@ -102,7 +104,8 @@
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
               <el-button size="small" plain @click="openRemark(row)">备注</el-button>
-              <el-button size="small" plain @click="printOrder(row)">打印</el-button>
+              <el-button size="small" plain @click="printOrder(row, 'A4')">打印</el-button>
+              <el-button size="small" plain @click="printOrder(row, 'A5')">打印(A5)</el-button>
               <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>
             </template>
           </el-table-column>
@@ -162,13 +165,54 @@
     <!-- 打印勾选订单详情页：直接打印 or 隐藏金额打印（单价、折扣、合计、订金等全部金额都不出现） -->
     <el-dialog v-model="detailPrintDialog" title="打印勾选订单详情页" width="420" :close-on-click-modal="false">
       <div class="print-choice">
-        <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独一页。</p>
+        <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独起一页（明细超过一页时自动续页并重复表头）。</p>
+        <!-- 纸张在这里选一次，两个打印按钮共用：批量打印时没人想为同一批单点两遍 -->
+        <div class="print-paper">
+          <span class="filter-label">纸张</span>
+          <el-radio-group v-model="printPaper">
+            <el-radio-button value="A4">A4</el-radio-button>
+            <el-radio-button value="A5">A5</el-radio-button>
+          </el-radio-group>
+        </div>
         <el-button type="primary" class="print-btn" @click="printSelectedDetails(false)">直接打印</el-button>
         <el-button class="print-btn" @click="printSelectedDetails(true)">隐藏金额打印</el-button>
         <p class="print-note">隐藏金额会把单价、折扣、行金额、订单金额、订金、未收/未付等所有金额信息一并去掉。</p>
       </div>
       <template #footer>
         <el-button @click="detailPrintDialog = false">取消</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 从订单模板导入：选一个模板 → 把它的商品明细预填进「新建订单」表单，
+         客户/日期/整单折扣仍在表单里现场填，导入后可以先改再保存（不是直接落库） -->
+    <el-dialog v-model="templatePicker" title="从订单模板导入" width="680" :close-on-click-modal="false">
+      <el-table v-loading="templatesLoading" :data="templates" max-height="360"
+        empty-text="还没有模板，请先到「订单模板」页新建">
+        <el-table-column label="模板名称" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.name }}</template>
+        </el-table-column>
+        <el-table-column label="类型" width="90">
+          <template #default="{ row }">
+            <el-tag :type="row.kind === 'purchase' ? 'info' : 'success'" size="small" disable-transitions>
+              {{ row.kind === 'purchase' ? '采购' : '销售' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="商品数" width="90" align="right">
+          <template #default="{ row }">{{ (row.items || []).length }}</template>
+        </el-table-column>
+        <el-table-column label="金额" width="120" align="right">
+          <template #default="{ row }">¥ {{ templateAmount(row).toFixed(2) }}</template>
+        </el-table-column>
+        <el-table-column label="操作" width="110">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" @click="importTemplate(row)">导入</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <el-button @click="$router.push('/templates')">去维护模板</el-button>
+        <el-button @click="templatePicker = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -220,6 +264,12 @@ const depositForm = ref({ amount: 0, date: todayCN(), remark: '' })
 const tableRef = ref(null)
 const selected = ref([])
 const detailPrintDialog = ref(false)
+// 批量打印详情页的纸张：选一次，直接打印 / 隐藏金额打印都用它
+const printPaper = ref('A4')
+// 从模板导入：模板列表按需拉一次（打开选择框时才请求，不拖慢订单列表首屏）
+const templatePicker = ref(false)
+const templates = ref([])
+const templatesLoading = ref(false)
 const remarkDialog = ref(false)
 const remarkOrder = ref(null)
 
@@ -364,11 +414,11 @@ function exportOrderCsv(row) {
   ElMessage.success(`已导出 ${items.length} 行`)
 }
 
-function printOrder(row) {
+function printOrder(row, paper = 'A4') {
   const items = row.items || []
   if (!items.length) return ElMessage.warning('该订单没有商品明细')
   const title = `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`
-  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row))
+  printA4(title, orderLineColumnsFor(row), lineRowsWithNet(row), `共 ${items.length} 项商品`, orderHeaderFields(row), [], paper)
 }
 
 // ---- 勾选后的批量操作 ----
@@ -383,11 +433,11 @@ function exportPageCsv() {
   ElMessage.success(`已导出当前页 ${paged.value.length} 行`)
 }
 
-function printSelectedList() {
+function printSelectedList(paper = 'A4') {
   const rows = selectedSorted.value
   if (!rows.length) return ElMessage.warning('请先勾选订单')
   const total = round2(rows.reduce((s, r) => s + orderAmount(r), 0))
-  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`)
+  printA4('订单列表', printColumns, rows, `勾选 ${rows.length} 单 · 订单金额合计 ¥${total.toFixed(2)}`, [], [], paper)
 }
 
 function openDetailPrint() {
@@ -429,7 +479,7 @@ function printSelectedDetails(masked) {
     }
   })
   detailPrintDialog.value = false
-  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情')
+  printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', printPaper.value)
 }
 
 // 批量删除：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量
@@ -483,6 +533,60 @@ async function load() {
 function openCreate() { editingOrder.value = null; dialog.value = true }
 function openEdit(row) { editingOrder.value = row; dialog.value = true }
 function openRemark(row) { remarkOrder.value = row; remarkDialog.value = true }
+
+// ---- 从订单模板导入 ----
+// 模板只存「数量 / 单价 / 行折扣率」，金额一律按订单口径现场算，
+// 与订单模板页、转订单三条路径共用同一算法，不存在两套数字。
+function templateAmount(tpl) {
+  const items = (tpl.items || []).map(l => {
+    const gross = round2(Number(l.qty || 0) * Number(l.price || 0))
+    const rate = normalizeRate(l, gross)
+    return { ...l, total: Math.max(0, round2(gross - round2(gross * (1 - rate)))) }
+  })
+  return orderAmount({ items, discountRates: [], discount: 0 })
+}
+
+async function openTemplatePicker() {
+  templatePicker.value = true
+  // 已经取过就不再打接口：订单页是高频页，模板列表在一次进入里基本不会变
+  if (templates.value.length || templatesLoading.value) return
+  templatesLoading.value = true
+  try {
+    const r = await api.getTemplates()
+    // 接口给的是 { templates: [...] } 包裹结构（与 /shares 一致），不是裸数组
+    templates.value = (r && r.templates) || []
+  } catch (e) {
+    ElMessage.error(`模板加载失败：${e.message || '网络异常'}`)
+  } finally {
+    templatesLoading.value = false
+  }
+}
+
+// 导入 = 用模板明细预填「新建订单」表单（不带 id，所以表单仍按新建处理）：
+// 客户、日期、整单折扣都留给用户现场填，改完再保存，不会一点就落库
+function importTemplate(tpl) {
+  const items = (tpl.items || []).map(l => {
+    const gross = round2(Number(l.qty || 0) * Number(l.price || 0))
+    const rate = normalizeRate(l, gross)
+    return {
+      code: l.code, name: l.name, unit: l.unit,
+      qty: Number(l.qty || 0), price: Number(l.price || 0),
+      discountRate: rate,
+      discountRates: Array.isArray(l.discountRates) && l.discountRates.length ? l.discountRates.map(Number) : []
+    }
+  })
+  if (!items.length) return ElMessage.warning('该模板没有商品明细')
+  templatePicker.value = false
+  editingOrder.value = {
+    kind: tpl.kind === 'purchase' ? 'purchase' : 'sale',
+    date: todayCN(),
+    items,
+    discountRates: [],
+    discount: 0,
+    remark: `来自模板「${tpl.name}」`
+  }
+  dialog.value = true
+}
 
 // 整页开单的进出：列表页点「新页面开单」时组件实例被复用，靠 watch(entry) 打开表单；
 // 直接访问 /orders/new 走 onMounted（数据取齐后再开）；表单一关就回列表。

@@ -43,20 +43,24 @@
 
 **`GET /api/templates`**（需票据）
 
-返回模板数组，按创建时间倒序：
+返回**包裹结构**（与 `/api/shares` 一致，不是裸数组），模板按创建时间倒序：
 
 ```json
-[
-  {
-    "id": "T...",
-    "name": "常用管件组合",
-    "kind": "sale",
-    "items": [...],
-    "createdAt": "...",
-    "updatedAt": "..."
-  }
-]
+{
+  "templates": [
+    {
+      "id": "T...",
+      "name": "常用管件组合",
+      "kind": "sale",
+      "items": [...],
+      "createdAt": "...",
+      "updatedAt": "..."
+    }
+  ]
+}
 ```
+
+> 前端必须取 `r.templates`。把整个响应对象直接交给 `el-table :data`，表格渲染不出任何行，表现就是「模板保存不了」——保存其实成功了，只是列表永远空白。
 
 ### 写接口
 
@@ -103,6 +107,7 @@
 | 业务 → 订单模板（`/templates`） | `src/views/OrderTemplates.vue` | 模板列表：新建、编辑、删除、复制、一键转订单、打印、打印空表 |
 | 模板编辑弹窗 | `src/components/TemplateFormDialog.vue` | 新增/编辑模板：选商品、填数量/单价/折扣率 |
 | 一键转订单弹窗 | 内嵌在 `OrderTemplates.vue` | 选客户/供应商、日期、业务单号后生成订单 |
+| 订单列表 → 从模板导入 | `src/views/Orders.vue` | 选一份模板把明细**预填进新建订单表单**（不落库），客户/日期/整单折扣现场填 |
 
 ## 五、一键转订单
 
@@ -117,20 +122,23 @@
 - 每行小计 = `qty × price × discountRate`（复用 `normalizeRate` 与 `round2`）
 - 订单金额 = Σ 行小计（无整单折扣时）
 - 模板本身不存金额，生成订单时按订单口径重算
+- **模板行没有 `total` 字段**：`orderAmount()` 只认行上的 `total`，所以列表金额、转订单金额、导入表单合计三处都必须先把每行小计补出来再调用它。直接丢原样明细会算出 ¥ 0.00。
 
 ## 六、打印与空表打印
 
+行上每份模板给四个按钮：`打印` / `打印(A5)` / `空表` / `空表(A5)`。纸张是 `printA4(…, paper)` 的第 7 个参数（`'A4' | 'A5'`，默认 A4），版面规则见 README「打印排版」。
+
 ### 正常打印
 
-调用 `printA4(title, columns, rows, subtitle, headerFields)`，列包含：
+调用 `printA4(title, columns, rows, subtitle, headerFields, [], paper)`，列包含：
 - 编码、商品名称、单位、数量、单价、折扣、小计
-- `headerFields` 显示合计金额
+- `headerFields` 用 `tone = 'xl'` 显示合计金额（基准字号 × 1.2 并加粗）
 
 ### 空表打印
 
 空表 = 只有商品名称（和编码/单位），**不出现数量、单价、任何金额**。用于手写。
 
-调用 `printA4(title, columns, rows, subtitle)`，列只包含：
+调用 `printA4(title, columns, rows, subtitle, [], [], paper)`，列只包含：
 - 编码、商品名称、单位
 - **不传 `headerFields`**（避免金额字段泄露）
 
@@ -138,7 +146,7 @@
 
 ## 七、测试
 
-`tests/templates-test.mjs`（纯 Node 接口测试）覆盖：
+- `tests/templates-test.mjs`（纯 Node 接口测试）覆盖：
 - 空列表
 - 创建（含字段裁剪与超长拒绝）
 - 更新
@@ -148,10 +156,18 @@
 - 非法 kind / 空明细 / 数量或单价非法的拒绝
 - 生成订单时的金额口径（模板 2 件×10 元、行折 0.9 → 小计 18）
 
-跑法：
+- `tests/templates-import-browser-test.mjs`（Playwright 浏览器实测）覆盖需求侧的两个回归与导入链路：
+  - 保存：点「保存」必须真的发出 `POST /api/templates`（弹窗 emit 名必须是 `saved`，父组件监听 `@saved`）；编辑走 `update` 并带原 `id`；校验不过不发请求。
+  - 列表：`{templates:[…]}` 包裹结构要渲染出行，金额＝660（不是 ¥ 0.00）。
+  - 打印：A4 / A5 的 `@page size`、空表不出现数量/单价/小计与任何金额。
+  - 导入：订单页「从模板导入」预填明细与备注，保存仍走 `POST /orders` 的 `save` 且不带 `id`。
+
+跑法（浏览器用例需要 dev server）：
 
 ```bash
 node tests/templates-test.mjs
+npx vite --port 5173 --strictPort --host 127.0.0.1 &
+node tests/templates-import-browser-test.mjs
 ```
 
 ## 八、与现有约定的对齐

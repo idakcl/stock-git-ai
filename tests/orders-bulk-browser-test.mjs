@@ -79,6 +79,9 @@ const capturePrint = (page) => page.evaluate(() => {
   }
 })
 
+// 只看打印出来的正文：样式块里的注释不算内容泄露
+const printBody = (html) => html.replace(/<style>[\s\S]*?<\/style>/g, '')
+
 const fixtures = () => [
   order({ id: 'D202610281000000001', no: 'HT-001', items: [line('P00001', '管件', 2, 10)] }),
   order({ id: 'D202610281000000002', items: [line('P00002', '弯头', 3, 5)] }),
@@ -161,7 +164,7 @@ await t('只打印勾选的订单，未勾选的不出现', async () => {
     await checkRow(page, 'D202610281000000001')
     await checkRow(page, 'D202610281000000002')
     assert.match(await page.locator('.sel-hint').innerText(), /已勾选 2 单/)
-    await page.getByRole('button', { name: '打印勾选订单列表' }).click()
+    await page.getByRole('button', { name: '打印勾选订单列表', exact: true }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /订单列表/)
@@ -171,7 +174,8 @@ await t('只打印勾选的订单，未勾选的不出现', async () => {
     assert.doesNotMatch(html, /D202610281000000003/)
     assert.doesNotMatch(html, /X202610281000000001/, '已过账单据不在这批勾选里')
     assert.match(html, /业务单号/)
-    assert.match(html, /订单金额/)
+    // 「订单金额」要在正文里出现，不能只被样式注释满足
+    assert.match(printBody(html), /订单金额/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })
@@ -190,7 +194,7 @@ await t('打印订单列表时只保留前 3 个商品名，其余用省略号',
   try {
     await capturePrint(page)
     await checkRow(page, 'D202610281000000010')
-    await page.getByRole('button', { name: '打印勾选订单列表' }).click()
+    await page.getByRole('button', { name: '打印勾选订单列表', exact: true }).click()
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /管件、弯头、三通…/, '前 3 个保留并追加省略号')
@@ -253,9 +257,12 @@ await t('隐藏金额打印：单价、折扣、合计、订金、未收全部�
     assert.match(html, /<th class="idx">序号<\/th>/)
     assert.equal((html.match(/<td class="idx">1<\/td>/g) || []).length, 2, '两张单各一行，都从 1 开始编号')
     // 所有金额与内部状态都不能出现：¥ 符号、金额/状态列与字段一个都不留
-    assert.doesNotMatch(html, /¥/, '不得出现任何金额符号')
+    // printBody：剥掉 <style> 再看内容。export.js 的样式里有「订单金额」这类说明注释，
+    // 泄露检查针对的是印出来的字，不是 CSS 注释。
+    const body = printBody(html)
+    assert.doesNotMatch(body, /¥/, '不得出现任何金额符号')
     for (const word of ['单价', '折扣率', '折扣金额', '折后金额', '订单金额', '已收订金', '原价合计', '整单折扣', '整单优惠', '未收', '未付', '状态']) {
-      assert.doesNotMatch(html, new RegExp(word), `不得出现「${word}」`)
+      assert.doesNotMatch(body, new RegExp(word), `不得出现「${word}」`)
     }
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }

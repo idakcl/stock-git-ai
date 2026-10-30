@@ -16,7 +16,8 @@
             <el-checkbox v-model="showPartyInfo" class="opt-cb">显示客户信息详情</el-checkbox>
             <el-checkbox v-model="showProfile" class="opt-cb">显示用户信息</el-checkbox>
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
-            <el-button :disabled="!found" @click="doPrint">打印(A4)</el-button>
+            <el-button :disabled="!found" @click="doPrint('A4')">打印(A4)</el-button>
+            <el-button :disabled="!found" @click="doPrint('A5')">打印(A5)</el-button>
             <el-button v-if="found && !externalView && !isVoided(sale)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(sale) || isVoided(sale)" @click="editDialog = true">编辑</el-button>
             <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(sale) || isVoided(sale) || sales.some(o => o.sourceOrderId === sale.id)" @click="removeOrder">删除</el-button>
@@ -500,9 +501,9 @@ function doExport() {
   downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
-function doPrint() {
+function doPrint(paper = 'A4') {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value)
+  printA4(`销售单 ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, paper)
 }
 
 async function onPaySaved(updated, payload) {

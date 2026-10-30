@@ -35,12 +35,14 @@
       <el-table-column label="创建时间" width="170">
         <template #default="{ row }">{{ fmtCNTime(row.createdAt) || '—' }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="420" class-name="ops-col">
+      <el-table-column label="操作" width="600" class-name="ops-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="openConvert(row)">转订单</el-button>
           <el-button size="small" @click="openEdit(row)">编辑</el-button>
-          <el-button size="small" plain @click="printTemplate(row, false)">打印</el-button>
-          <el-button size="small" plain @click="printTemplate(row, true)">空表</el-button>
+          <el-button size="small" plain @click="printTemplate(row, false, 'A4')">打印</el-button>
+          <el-button size="small" plain @click="printTemplate(row, false, 'A5')">打印(A5)</el-button>
+          <el-button size="small" plain @click="printTemplate(row, true, 'A4')">空表</el-button>
+          <el-button size="small" plain @click="printTemplate(row, true, 'A5')">空表(A5)</el-button>
           <el-button size="small" @click="duplicate(row)">复制</el-button>
           <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
         </template>
@@ -124,26 +126,22 @@ const convertForm = ref({ kind: 'sale', party: '', date: '', no: '' })
 const partyLabel = computed(() => convertForm.value.kind === 'purchase' ? '供应商' : '客户')
 const partyOptions = computed(() => convertForm.value.kind === 'purchase' ? supplierOptions.value : customerOptions.value)
 
-// 模板金额：按订单口径重算（合计 × 折扣链 − 整单优惠）
+// 模板金额：按订单口径重算（合计 × 折扣链 − 整单优惠）。
+// 必须先给每行补出 total：orderAmount 的行合计只认 l.total 字段，
+// 而模板存的是 qty/price/discountRate（没有 total），直接丢进去会算出 ¥0.00。
 function templateAmount(tpl) {
-  const order = { items: tpl.items || [], discountRates: [], discount: 0 }
-  return orderAmount(order)
+  const items = (tpl.items || []).map(l => {
+    const gross = round2(Number(l.qty || 0) * Number(l.price || 0))
+    const rate = normalizeRate(l, gross)
+    return { ...l, total: Math.max(0, round2(gross - round2(gross * (1 - rate)))) }
+  })
+  return orderAmount({ items, discountRates: [], discount: 0 })
 }
 
-// 转订单时的金额（与 templateAmount 一致，但用 convertForm 的 kind）
+// 转订单弹窗里显示的金额：与模板列表同一口径，都走 templateAmount
 const convertAmount = computed(() => {
   if (!convertTemplate.value) return 0
-  const items = (convertTemplate.value.items || []).map(it => ({
-    ...it,
-    total: (() => {
-      const gross = round2(Number(it.qty || 0) * Number(it.price || 0))
-      const rate = normalizeRate(it, gross)
-      const discount = round2(gross * (1 - rate))
-      return Math.max(0, round2(gross - discount))
-    })()
-  }))
-  const order = { items, discountRates: [], discount: 0 }
-  return orderAmount(order)
+  return templateAmount(convertTemplate.value)
 })
 
 async function load() {
@@ -155,7 +153,9 @@ async function load() {
       api.getCustomers(),
       api.getSuppliers()
     ])
-    templates.value = tpls || []
+    templates.value = (tpls && tpls.templates) || []
+    // 上面这行必须是 .templates：接口和 /shares 一样返回 { templates: [...] } 包裹结构，
+    // 直接把整个对象丢给 el-table 的 :data，表格永远渲染不出行 —— 看着就是「模板保存不了」
     itemOptions.value = items || []
     customerOptions.value = customers || []
     supplierOptions.value = suppliers || []
@@ -273,8 +273,8 @@ async function doConvert() {
   }
 }
 
-// 打印模板：empty=true 时只打印商品名称/编码/单位，不出现数量/单价/金额
-function printTemplate(tpl, empty = false) {
+// 打印模板：empty=true 时只打印商品名称/编码/单位，不出现数量/单价/金额；paper='A4' | 'A5'
+function printTemplate(tpl, empty = false, paper = 'A4') {
   const title = `订单模板 · ${tpl.name}`
   const subtitle = `${tpl.kind === 'purchase' ? '采购' : '销售'}模板 · ${(tpl.items || []).length} 项商品`
   const items = tpl.items || []
@@ -287,7 +287,7 @@ function printTemplate(tpl, empty = false) {
       { prop: 'unit', label: '单位' }
     ]
     const rows = items.map(it => ({ code: it.code || '', name: it.name || '', unit: it.unit || '' }))
-    printA4(title, columns, rows, subtitle)
+    printA4(title, columns, rows, subtitle, [], [], paper)
   } else {
     // 正常打印：带数量、单价、折扣、小计
     const columns = [
@@ -314,8 +314,8 @@ function printTemplate(tpl, empty = false) {
         total: total.toFixed(2)
       }
     })
-    const headerFields = [['合计', `¥ ${templateAmount(tpl).toFixed(2)}`]]
-    printA4(title, columns, rows, subtitle, headerFields)
+    const headerFields = [['合计', `¥ ${templateAmount(tpl).toFixed(2)}`, 'xl']]
+    printA4(title, columns, rows, subtitle, headerFields, [], paper)
   }
 }
 
