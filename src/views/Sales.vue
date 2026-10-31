@@ -5,7 +5,7 @@
     <el-card v-if="!entry">
       <template #header>
         <div class="card-header">
-          <b>销售出库</b>
+          <b>销售单（出库）</b>
           <div class="header-ops">
             <el-button type="primary" @click="openDialog()">新增销售</el-button>
           </div>

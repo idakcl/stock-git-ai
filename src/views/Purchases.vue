@@ -5,7 +5,7 @@
     <el-card v-if="!entry">
       <template #header>
         <div class="card-header">
-          <b>采购入库</b>
+          <b>采购单（入库）</b>
           <div class="header-ops">
             <el-button type="primary" @click="openDialog()">新增采购</el-button>
           </div>

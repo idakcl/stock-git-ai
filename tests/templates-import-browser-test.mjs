@@ -243,6 +243,31 @@ await t('空表：印出商品与数量/单价/金额空列（手写用），但
   } finally { await context.close() }
 })
 
+await t('编辑模板弹窗：左上角可最大化 / 还原，明细表高度跟着一起长', async () => {
+  const { page, context, errors } = await open('/templates', seed({ templates: [tplSeed()] }))
+  try {
+    await page.locator('.el-table__row').filter({ hasText: '常用管件组合' }).first().getByRole('button', { name: '编辑', exact: true }).click()
+    const dlg = page.locator('.el-dialog:visible').first()
+    await dlg.waitFor()
+    const size = () => dlg.evaluate(el => { const r = el.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height), full: el.classList.contains('is-fullscreen') } })
+    const before = await size()
+    assert.equal(before.full, false, '默认不是全屏')
+    assert.ok(before.w <= 620, `默认宽度不超过 620：${before.w}`)
+
+    await dlg.locator('.dlg-max').click()
+    await page.waitForTimeout(400)
+    const max = await size()
+    assert.equal(max.full, true, '点角标后铺满屏幕')
+    assert.ok(max.w > before.w && max.h > before.h, `全屏应更大：${JSON.stringify({ before, max })}`)
+
+    await dlg.locator('.dlg-max').click()
+    await page.waitForTimeout(400)
+    const back = await size()
+    assert.equal(back.w, before.w, '再点一次还原')
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 console.log('\n订单页「从模板导入」（需求 6）')
 
 await t('订单页有「从模板导入」按钮，弹窗列出模板与金额', async () => {

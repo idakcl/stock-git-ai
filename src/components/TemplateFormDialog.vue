@@ -1,7 +1,16 @@
 <template>
   <!-- 模板新增/编辑弹窗：只存商品明细（商品+数量+单价+行折扣率），不存客户/日期/单号。
        金额口径与订单完全一致（合计 × 折扣链 − 整单优惠），生成订单时按 orderAmount 重算。 -->
-  <el-dialog v-model="visible" :title="title" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!saving">
+  <el-dialog v-model="visible" :title="title" width="min(620px, 94vw)" :fullscreen="maximized" :close-on-click-modal="false" :close-on-press-escape="!saving">
+    <!-- 左上角最大化角标：行多的时候铺满屏幕，明细表能拿到更多高度；再点一次还原（与订单/单据弹窗同一交互） -->
+    <template #header="{ titleId, titleClass }">
+      <div class="dlg-header">
+        <el-button class="dlg-max" text :title="maximized ? '还原窗口' : '最大化窗口'" :aria-label="maximized ? '还原窗口' : '最大化窗口'" @click="toggleMax">
+          <MaxIcon :restore="maximized" />
+        </el-button>
+        <span :id="titleId" :class="titleClass">{{ title }}</span>
+      </div>
+    </template>
     <el-form :model="form" label-width="100px">
       <el-form-item label="模板名称">
         <el-input v-model="form.name" maxlength="60" placeholder="例如：常用管件组合、标准配件包" />
@@ -20,7 +29,7 @@
 
       <div class="scroll-hint">手机上表格可左右滑动，查看单价 / 折扣 / 小计</div>
       <div class="lines-scroll">
-        <el-table ref="linesTable" :data="form.lines" stripe max-height="320">
+        <el-table ref="linesTable" :data="form.lines" stripe :max-height="linesMaxHeight">
           <el-table-column label="商品" min-width="150">
             <template #default="{ row }">
               <GoodsSelect v-model="row.code" :items="items" placeholder="选择商品" style="width:100%" @change="onItemChange(row)" />
@@ -75,6 +84,7 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { round2 } from '../utils/account'
 import GoodsSelect from './GoodsSelect.vue'
+import MaxIcon from './MaxIcon.vue'
 import { normalizeRate } from '../utils/catalog'
 
 const props = defineProps({
@@ -101,6 +111,14 @@ const defaultForm = () => ({
 
 const form = ref(defaultForm())
 const quickItem = ref('')
+// 弹窗最大化（左上角角标切换）：明细多时铺满屏幕，退出时保持记忆，下次打开仍是上次的大小。
+// 明细表高度跟着走——不然窗口铺满了，表格还锁在 320px，多出来的空间白白浪费。
+const maximized = ref(false)
+const linesMaxHeight = ref(320)
+function toggleMax() {
+  maximized.value = !maximized.value
+  linesMaxHeight.value = maximized.value ? Math.max(320, window.innerHeight - 300) : 320
+}
 
 // 弹窗打开时初始化表单
 watch(() => props.modelValue, (v) => {
@@ -211,6 +229,14 @@ function save() {
 </script>
 
 <style scoped>
+/* 弹窗标题栏：最大化角标在最左侧，标题紧随其后（与订单/单据弹窗同一套样式） */
+.dlg-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dlg-max {
+  padding: 0; width: 26px; height: 26px; min-height: 0; margin-right: 2px;
+  background: transparent !important; border-color: transparent !important;
+  color: var(--text-regular) !important;
+}
+.dlg-max:hover { color: var(--color-primary) !important; background: var(--bg-hover) !important; }
 .quick-add-select { width: 100%; }
 /* 窄屏放不下 6 列：横向滚动是唯一出路，但滚动条在不滑动时不显眼，给一句提示 */
 .scroll-hint { display: none; margin-top: 8px; color: var(--text-secondary); font-size: var(--fs-mini); }

@@ -292,7 +292,7 @@ const payWord = computed(() => (isPurchase.value ? '付' : '收'))
 const dueWord = computed(() => (isPurchase.value ? '应付' : '应收'))
 const prefix = computed(() => (isPurchase.value ? 'C' : 'X'))
 const sumField = computed(() => (isPurchase.value ? 'paid' : 'received'))
-const title = computed(() => (editingId.value ? `编辑${isPurchase.value ? '采购单' : '销售单'}` : (isPurchase.value ? '采购入库' : '销售出库')))
+const title = computed(() => (editingId.value ? `编辑${isPurchase.value ? '采购单' : '销售单'}` : (isPurchase.value ? '采购单（入库）' : '销售单（出库）')))
 const saveLabel = computed(() => (isPurchase.value ? '保存入库' : '保存出库'))
 const bizWord = computed(() => (isPurchase.value ? '采购' : '销售'))
 // 变更/退款链路口径是 sale|purchase（本组件的 kind 是 receivable|payable），这里做一次映射
