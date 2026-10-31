@@ -29,6 +29,7 @@ import { depositWrite } from './ai-deposits.js'
 import { paymentWrite } from './ai-payments.js'
 import { amendTransaction } from './amends.js'
 import { listShares, shareOperation } from './shares.js'
+import { autoCatalog, MAX_AUTO_SUPPLIERS } from './ai-catalog.js'
 
 const V1 = '/api/ai/v1'
 const MAX_LIMIT = 200
@@ -395,28 +396,31 @@ async function readSummary(url, env, ctx) {
 
 // ---- 写接口 ----
 
-// 直接开单：服务端按商品档案重算每一行，客户/供应商必须已建档（防手滑造出新名字）。
-function buildDirectDoc(kind, input, state, keyName, requestId, now) {
+// 直接开单：服务端按商品档案重算每一行。
+// 默认要求客户/供应商与商品都已建档（防手滑造出新名字）；
+// 传了 allowNewItems / allowNewSuppliers 时，才按名称自动建档（见 api/ai-catalog.js）。
+function buildDirectDoc(kind, input, state, keyName, requestId, now, cat) {
   const isSale = kind === 'sale'
   const partyKey = isSale ? 'customer' : 'supplier'
   const partyLabel = isSale ? '客户' : '供应商'
-  const party = String(input[partyKey] || '').trim()
+  let party = String(input[partyKey] || '').trim()
   if (!party) fail(`请填写${partyLabel}名称（${partyKey}）`)
-  const parties = isSale ? (state.customers || []) : (state.suppliers || [])
-  if (!parties.some(p => p.name === party)) {
-    fail(`${partyLabel}「${party}」还没有档案；请先用 POST /api/ai/v1/master 建档，或使用已有名称`)
+  if (isSale) {
+    // 客户暂不开放自动建档（名字重名率更高），仍然要求事先建档
+    if (!(state.customers || []).some(p => p.name === party)) {
+      fail(`${partyLabel}「${party}」还没有档案；请先用 POST /api/ai/v1/master 建档，或使用已有名称`)
+    }
+  } else {
+    party = cat.resolveParty(party, partyLabel).name
   }
   const date = input.date ? String(input.date) : todayCN()
   if (!isDate(date)) fail('date 格式应为 YYYY-MM-DD')
   const raw = Array.isArray(input.items) ? input.items : []
   if (!raw.length) fail('至少要有 1 行商品明细（items）')
   if (raw.length > MAX_LINES) fail(`单张单据最多 ${MAX_LINES} 行明细`)
-  const byCode = new Map((state.items || []).map(i => [i.code, i]))
   const lines = raw.map((l, i) => {
     if (!l || typeof l !== 'object') fail(`第 ${i + 1} 行明细不是合法对象`)
-    const code = String(l.code || '').trim()
-    const it = byCode.get(code)
-    if (!it) fail(`第 ${i + 1} 行商品编码「${code || '（空）'}」不在商品库；请先查 GET /api/ai/v1/items`)
+    const it = cat.resolveItem(l, i, kind)
     const qty = Number(l.qty)
     if (!(qty > 0)) fail(`第 ${i + 1} 行数量必须大于 0`)
     const fallback = Number(isSale ? it.price : it.cost) || 0
@@ -459,8 +463,9 @@ async function createDirectDoc(kind, input, env, ctx, deps, requestId) {
   const now = new Date().toISOString()
   const dup = [...(tx.state.sales || []), ...(tx.state.purchases || [])].find(o => o.aiRequestId === requestId)
   if (dup) return { ok: true, duplicate: true, id: dup.id, kind }
-  const doc = buildDirectDoc(kind, input, tx.state, ctx.key.name, requestId, now)
-  const next = { ...tx.state }
+  const cat = autoCatalog(tx.state, { allowNewItems: input.allowNewItems === true, allowNewSuppliers: input.allowNewSuppliers === true })
+  const doc = buildDirectDoc(kind, input, tx.state, ctx.key.name, requestId, now, cat)
+  const next = cat.applyTo({ ...tx.state })
   if (kind === 'sale') next.sales = [...(tx.state.sales || []), doc]
   else next.purchases = [...(tx.state.purchases || []), doc]
   Object.assign(next, deps.derive(next.items, next.suppliers, next.purchases, next.sales, next.customers))
@@ -470,7 +475,12 @@ async function createDirectDoc(kind, input, env, ctx, deps, requestId) {
     message: `ai: create ${kind} ${doc.id} by ${ctx.key.name}`,
     logEntry: { source: 'ai', action: `create-${kind}`, code: doc.id, key: ctx.key.name, keyId: ctx.key.id }
   })
-  return { ok: true, id: doc.id, kind, amount: grossOf(doc), commit: r.unchanged ? undefined : r.sha }
+  return {
+    ok: true, id: doc.id, kind, amount: grossOf(doc),
+    ...(cat.createdItems.length ? { createdItems: cat.createdItems } : {}),
+    ...(cat.createdSuppliers.length ? { createdSuppliers: cat.createdSuppliers } : {}),
+    commit: r.unchanged ? undefined : r.sha
+  }
 }
 
 const ITEM_FIELDS = ['name', 'unit', 'price', 'cost', 'warning', 'package', 'spec', 'priceWholesale', 'priceInstaller', 'remark', 'barcode']
@@ -519,6 +529,7 @@ function applyMaster(state, input, requestId) {
 
   // upsert：有 code 按 code、否则按名字匹配；都没有就新建（code 自动生成）
   const next = { ...state }
+  const newSuppliers = []
   const nextRecord = idx >= 0 ? { ...list[idx] } : {}
   const fields = type === 'item' ? ITEM_FIELDS : PARTY_FIELDS
   for (const f of fields) {
@@ -548,13 +559,30 @@ function applyMaster(state, input, requestId) {
       if (data.photos.length && !nextRecord.photos.length) fail('photos 里没有合法的 http(s) 图片链接')
     }
     if ('suppliers' in data) {
-      if (!Array.isArray(data.suppliers)) fail('suppliers 必须是供应商编码数组')
-      const codes = data.suppliers.map(x => String(x || '').trim()).filter(Boolean)
-      if (codes.length > MAX_ITEM_SUPPLIERS) fail(`供应商最多 ${MAX_ITEM_SUPPLIERS} 个`)
-      const known = new Set((state.suppliers || []).map(x => x.code))
-      const unknown = codes.filter(x => !known.has(x))
-      if (unknown.length) fail(`供应商编码不存在：${unknown.join('、')}（请先用 POST /master 建档）`, 404)
+      if (!Array.isArray(data.suppliers)) fail('suppliers 必须是供应商编码或名称数组')
+      const refs = data.suppliers.map(x => String(x || '').trim()).filter(Boolean)
+      if (refs.length > MAX_ITEM_SUPPLIERS) fail(`供应商最多 ${MAX_ITEM_SUPPLIERS} 个`)
+      const list = (state.suppliers || []).slice()
+      const codes = []
+      for (const ref of refs) {
+        // 编码 → 名称 →（开关打开时）按名称建档；编码查不到一律 404，避免悄悄换个编码
+        const hit = list.find(s => s.code === ref) || list.find(s => s.name === ref)
+        if (hit) { codes.push(hit.code); continue }
+        if (/^S\d{5}$/.test(ref)) fail(`供应商编码不存在：${ref}（请先用 POST /master 建档）`, 404)
+        if (!input.allowNewSuppliers) {
+          fail(`供应商「${ref}」还没有档案；请先 POST /master 建档，或传 allowNewSuppliers: true 自动建档`, 404)
+        }
+        if (newSuppliers.length >= MAX_AUTO_SUPPLIERS) fail(`一次最多自动新建 ${MAX_AUTO_SUPPLIERS} 个供应商`)
+        const rec = {
+          code: nextEntityCode(list, 'S', 5), name: ref,
+          contact: '', phone: '', address: '', remark: '', advances: [], products: []
+        }
+        list.push(rec)
+        newSuppliers.push(rec)
+        codes.push(rec.code)
+      }
       nextRecord.suppliers = [...new Set(codes)]
+      if (newSuppliers.length) next.suppliers = list
     }
   }
   // 客户预存款 / 供应商预付款流水：允许随建档一起写入（新建供应商时就能带上预付款，不必事后补）
@@ -626,7 +654,10 @@ function applyMaster(state, input, requestId) {
     list[idx] = nextRecord
   }
   next[listKey] = list
-  return { next, code: nextRecord.code, name: nextRecord.name }
+  return {
+    next, code: nextRecord.code, name: nextRecord.name,
+    ...(newSuppliers.length ? { createdSuppliers: newSuppliers.map(s => ({ code: s.code, name: s.name })) } : {})
+  }
 }
 
 async function masterWrite(input, env, ctx, deps, requestId) {
@@ -636,7 +667,7 @@ async function masterWrite(input, env, ctx, deps, requestId) {
   const flowFiles = withFlows ? ['receipts', 'payment-vouchers'] : []
   const tx = await openTransaction(env, ['items', 'suppliers', 'customers', 'purchases', 'sales', 'orders', 'stock', 'logs', ...flowFiles], { optional: ['orders', ...flowFiles] })
   const now = new Date().toISOString()
-  const { next, code, name } = applyMaster(tx.state, input, requestId)
+  const { next, code, name, createdSuppliers } = applyMaster(tx.state, input, requestId)
   Object.assign(next, deps.derive(next.items, next.suppliers, next.purchases, next.sales, next.customers))
   next.stock = deps.rebuildStock(next.purchases, next.sales, next.items)
   const flows = input.type === 'customer' ? (next.customers || []).find(x => x.code === code)?.deposits : (next.suppliers || []).find(x => x.code === code)?.advances
@@ -648,6 +679,7 @@ async function masterWrite(input, env, ctx, deps, requestId) {
   return {
     ok: true, type: input.type, action: input.action || 'upsert', code, name,
     ...(withFlows ? { balance: round2((flows || []).reduce((s, f) => s + Number(f && f.amount || 0), 0)) } : {}),
+    ...(createdSuppliers ? { createdSuppliers } : {}),
     commit: r.unchanged ? undefined : r.sha
   }
 }
@@ -682,7 +714,8 @@ function schemaFor(env, ctx) {
       '所有接口都需要在请求头带 Authorization: Bearer <密钥>（也支持 ?key=，但不推荐，容易留在日志里）。',
       '金额由服务端按商品档案重算；AI 只需给商品编码（code）、数量（qty），可选 price 与 discountRate。',
       '所有写接口都必须带 requestId（16~80 位字母/数字/短横线），网络重试时复用同一个值，服务端据此保证不重复开单。',
-      '直接开单（POST /sales、/purchases）要求客户/供应商已建档；新单位请先用 POST /master 建档。',
+      '直接开单（POST /sales、/purchases）默认要求客户/供应商与商品已建档；新单位请先用 POST /master 建档。',
+      '需要一步到底时可传 allowNewItems: true（明细行只给 name + price，按名称匹配不到就自动建商品）与 allowNewSuppliers: true（采购单的供应商按名称自动建档）。两个开关默认关闭，只在本次请求生效，返回里有 createdItems / createdSuppliers 便于核对；一次最多各建 10 个。',
       '草稿订单不占库存、不进应收应付；只有 POST /orders 的 action=post 才会生成正式单据（需要 write:post）。',
       '库存是单据的派生数据，不能直接改写；改错请用作废 / 退货接口。',
       '预存款 / 预付款充值（POST /deposits）会同时生成一张收 / 付款单；抵扣不能超过当前余额，写错请用相反方向冲回，流水可用 flowId 编辑/删除（已开资金单据的金额不可改）。',
@@ -695,16 +728,14 @@ function schemaFor(env, ctx) {
 
 // 订单草稿同样由服务端补全：AI 只要给 kind + 往来单位 + [商品编码, 数量]，
 // 名称/单价/行金额/合计全部按商品档案算，validateOrder 的「金额与数量×单价×折扣不符」就不会被 AI 的算术误差触发。
-function normalizeDraftOrder(order, items) {
+function normalizeDraftOrder(order, cat) {
   const kind = order.kind
   if (!['sale', 'purchase'].includes(kind)) return order
   const partyKey = kind === 'purchase' ? 'supplier' : 'customer'
-  const byCode = new Map((items || []).map(i => [i.code, i]))
   const date = isDate(order.date) ? order.date : todayCN()
   const lines = (Array.isArray(order.items) ? order.items : []).map((l, i) => {
     if (!l || typeof l !== 'object') fail(`第 ${i + 1} 行明细不是合法对象`)
-    const it = byCode.get(String(l.code || '').trim())
-    if (!it) fail(`第 ${i + 1} 行商品编码「${l.code || '（空）'}」不在商品库；请先查 GET /api/ai/v1/items`)
+    const it = cat.resolveItem(l, i, kind)
     const qty = Number(l.qty)
     if (!(qty > 0)) fail(`第 ${i + 1} 行数量必须大于 0（订单不支持负数）`)
     const fallback = Number(kind === 'sale' ? it.price : it.cost) || 0
@@ -724,6 +755,21 @@ function normalizeDraftOrder(order, items) {
     total: round2(lines.reduce((s, l) => s + l.total, 0)),
     discount: round2(Number(order.discount || 0))
   }
+}
+
+// 订单草稿的「商品/供应商自动建档」：必须在订单事务的快照里做，才能和订单一起提交，
+// 不留「商品建了、订单没存」的半截状态。strict 模式（不传开关）行为与以前完全一致。
+function prepareDraftOrder(snapshot, input) {
+  if (input.action !== 'save' || !input.auto) return null
+  const cat = autoCatalog(snapshot, input.auto)
+  const order = normalizeDraftOrder(input.order, cat)
+  // 采购订单的供应商：开关打开时顺手建档（订单本身允许先写名字，过账时 derive 也会兜底）
+  if (order.kind === 'purchase' && order.supplier && input.auto.allowNewSuppliers) {
+    order.supplier = cat.resolveParty(order.supplier, '供应商').name
+  }
+  input.order = order
+  const state = (cat.createdItems.length || cat.createdSuppliers.length) ? cat.applyTo({ ...snapshot }) : snapshot
+  return { state, createdItems: cat.createdItems, createdSuppliers: cat.createdSuppliers }
 }
 
 export async function handleAi(req, url, env, deps) {
@@ -801,10 +847,14 @@ export async function handleAi(req, url, env, deps) {
         const order = { ...(body.order || {}), aiRequestId: requestId, createdBy: `ai:${ctx.key.name}` }
         delete order.status
         delete order.postedOrderId
-        const items = await readJSON(env, 'items.json')
-        input.order = normalizeDraftOrder(order, items)
+        input.order = order
+        // 自动建档开关只对本次 save 生效；解析放在订单事务里，和订单同一次提交
+        input.auto = {
+          allowNewItems: body.allowNewItems === true,
+          allowNewSuppliers: body.allowNewSuppliers === true
+        }
       }
-      const result = await orderTransaction(env, input, deps.derive, deps.rebuildStock)
+      const result = await orderTransaction(env, input, deps.derive, deps.rebuildStock, prepareDraftOrder)
       await noteUsage(env, ctx.key, 'write')
       return finish(result, 200, { requestId, code: result.code || result.id || (result.order && result.order.id) })
     }

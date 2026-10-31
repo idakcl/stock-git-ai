@@ -654,6 +654,97 @@ await t('预存流水 edit / delete：只能改自己写入的流水，已开单
   assert.equal(edited.balance, 720)
 })
 
+console.log('\n自动建档开关')
+
+await t('订单：不传 allowNewItems 仍严格 400；传了按名称建商品并与订单同一次提交', async () => {
+  const body = {
+    requestId: rid(901), action: 'save',
+    order: { kind: 'sale', customer: '客户甲', date: '2026-02-02', items: [{ name: '自动新品', unit: '个', qty: 2, price: 30 }] }
+  }
+  const strict = await call('/api/ai/v1/orders', { key: maxKey, method: 'POST', body })
+  assert.equal(strict.status, 400, '默认必须严格拒绝')
+  assert.ok(itemsFile().every(i => i.name !== '自动新品'), '被拒时不能留下商品档案')
+
+  const data = await ok('/api/ai/v1/orders', { key: maxKey, method: 'POST', body: { ...body, allowNewItems: true } })
+  assert.ok(data.code)
+  assert.equal(data.createdItems.length, 1)
+  const item = itemsFile().find(i => i.code === data.createdItems[0].code)
+  assert.equal(item.name, '自动新品')
+  assert.equal(item.price, 30, '销售订单自动建档：行单价进售价')
+  assert.equal(item.cost, null)
+  const order = JSON.parse(repo.read('orders.json')).find(o => o.id === data.code)
+  assert.equal(order.items[0].code, item.code)
+  assert.equal(order.items[0].total, 60)
+
+  // 同一 requestId 重试：订单与商品都不能翻倍
+  const again = await ok('/api/ai/v1/orders', { key: maxKey, method: 'POST', body: { ...body, allowNewItems: true } })
+  assert.equal(again.code, data.code)
+  assert.equal(itemsFile().filter(i => i.name === '自动新品').length, 1, '重试不应重复建档')
+})
+
+await t('采购单：allowNewItems + allowNewSuppliers 一步建好新商品与新供应商', async () => {
+  const data = await ok('/api/ai/v1/purchases', {
+    key: maxKey, method: 'POST',
+    body: {
+      requestId: rid(902), allowNewItems: true, allowNewSuppliers: true,
+      supplier: '自动新供应商', date: '2026-02-03',
+      items: [{ name: '自动新品二号', unit: '条', qty: 3, price: 12.5 }]
+    }
+  })
+  assert.equal(data.createdItems.length, 1)
+  assert.equal(data.createdSuppliers.length, 1)
+  const sup = JSON.parse(repo.read('suppliers.json')).find(s => s.code === data.createdSuppliers[0].code)
+  assert.equal(sup.name, '自动新供应商')
+  const item = itemsFile().find(i => i.code === data.createdItems[0].code)
+  assert.equal(item.cost, 12.5, '采购单自动建档：行单价进成本')
+  assert.equal(item.price, null)
+  assert.ok(sup.products.includes(item.code), '供应商.products 由商品挂靠反推')
+  const doc = JSON.parse(repo.read('purchases.json')).find(o => o.id === data.id)
+  assert.equal(doc.supplier, '自动新供应商')
+  assert.equal(doc.total, 37.5)
+})
+
+await t('只给新供应商名称、不开 allowNewSuppliers → 仍然报错（默认严格）', async () => {
+  const strict = await call('/api/ai/v1/purchases', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(903), supplier: '还没建档的供应商', items: [{ code: 'P00001', qty: 1 }] }
+  })
+  assert.equal(strict.status, 400)
+  assert.match(strict.data.error, /还没有档案/)
+})
+
+await t('编码写错时即使开了 allowNewItems 也 404（不会悄悄换个编码建档）', async () => {
+  const r = await call('/api/ai/v1/orders', {
+    key: maxKey, method: 'POST',
+    body: {
+      requestId: rid(904), allowNewItems: true, action: 'save',
+      order: { kind: 'sale', customer: '客户甲', date: '2026-02-04', items: [{ code: 'P09999', qty: 1, price: 5 }] }
+    }
+  })
+  assert.equal(r.status, 404)
+  assert.match(r.data.error, /只传 name/)
+})
+
+await t('新建商品：allowNewSuppliers 可直接挂没建档的供应商名称', async () => {
+  const strict = await call('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { name: '带新供应商的商品', suppliers: ['还没建的供应商甲'] } }
+  })
+  assert.equal(strict.status, 404)
+
+  const data = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { allowNewSuppliers: true, type: 'item', action: 'upsert', item: { name: '带新供应商的商品', suppliers: ['还没建的供应商甲', 'S00001'] } }
+  })
+  assert.equal(data.createdSuppliers.length, 1)
+  const sup = JSON.parse(repo.read('suppliers.json')).find(s => s.code === data.createdSuppliers[0].code)
+  assert.equal(sup.name, '还没建的供应商甲')
+  assert.ok(sup.products.includes(data.code), '反推出的 products 应包含该商品')
+  const item = itemsFile().find(i => i.code === data.code)
+  assert.ok(item.suppliers.includes(sup.code), '商品应已挂上新建的供应商')
+  assert.ok(item.suppliers.includes('S00001'))
+})
+
 console.log('\n吊销与过期')
 await t('吊销后立即 401', async () => {
   await ok('/api/ai-keys', { method: 'POST', token, body: { action: 'revoke', id: readRecord.id } })

@@ -124,9 +124,32 @@ curl -s -H "Authorization: Bearer $KEY" "$BASE/items?q=三通&limit=20"
 
 - 所有写接口都必须带 `requestId`：16~80 位字母、数字或短横线。
   网络超时重试时**复用同一个值**，服务端据此保证不重复开单（返回 `duplicate:true` 与已存在的单号）。
-- 金额一律服务端重算：只给 `code` 与 `qty`，单价默认取商品档案（销售取售价、采购取成本），
+- 金额一律服务端重算：只给 `code`（或已建档商品的名称）与 `qty`，单价默认取商品档案（销售取售价、采购取成本），
   可选 `price`、`discountRate`（0~1）。AI 自己算的 `total` 会被忽略。
-- 直接开单与订单都只接受**已建档**的商品编码；销售/采购的往来单位也必须已存在。
+- 直接开单与订单默认只接受**已建档**的商品编码；销售/采购的往来单位也必须已存在。
+  确实要一步到底时，可在请求体顶层加两个显式开关（默认关闭、只对本次请求生效，见 5.6）。
+
+### 5.6 自动建档开关（`allowNewItems` / `allowNewSuppliers`）
+
+默认关闭。只有请求体顶层明确写了才生效，其他调用方行为完全不变。
+
+```json
+POST /api/ai/v1/purchases
+{ "requestId": "req-20260203-0001", "allowNewItems": true, "allowNewSuppliers": true,
+  "supplier": "新上供应商", "date": "2026-02-03",
+  "items": [{ "name": "新阀门", "unit": "个", "qty": 3, "price": 12.5 }] }
+```
+
+- `allowNewItems`：明细行可以只写 `name`（+ `price` + 可选 `unit`）。解析顺序：
+  按 `code` 找 → 按 `name` 精确匹配 → 都找不到才新建 `P` 编码。
+  **新建时必须传 `price`**：销售单写入售价、采购单写入成本，另一项留 `null`。
+- `allowNewSuppliers`：采购单 / 采购订单的供应商可以只写名称；建商品时 `item.suppliers`
+  也可以直接写名称（与编码混传）。按名称精确匹配，命中就复用编码。
+- 只写名称这类确定信息，不猜联系人/电话；一次最多自动新建 10 个商品、10 个供应商。
+- 显式写了 `code` 却查不到 → 仍然 404（多半是打错，绝不悄悄换个编码建档）。
+- 与单据同一次提交：要么全成、要么全不写；同一 `requestId` 重试不会重复建档。
+- 返回里多出 `createdItems: [{ code, name }]` / `createdSuppliers: [{ code, name }]`，方便事后核对有没有写重复。
+- 客户目前不开放自动建档（重名率更高），销售单仍要求客户先建档。
 
 ### `POST /orders` — 订单（需要 `write:draft`；过账另需 `write:post`）
 
@@ -187,6 +210,7 @@ curl -s -H "Authorization: Bearer $KEY" "$BASE/items?q=三通&limit=20"
 - **显式传了不存在的编码会 404**，绝不静默新建一个别的编码。
 - 删除被单据引用的商品/往来单位、或还有预存/预付款流水的单位 → 409。
 - 商品还能写 `photos`（http(s) 链接数组，≤20）与 `suppliers`（供应商编码数组，必须已建档）；新建时一并传即可直接挂上。
+  传 `allowNewSuppliers: true` 时 `suppliers` 也可以直接写尚未建档的供应商名称，服务端按名称建档后挂上（返回 `createdSuppliers`）。
 - 商品没填 `price` / `cost` 时**留 `null`**（不是 0）；显式传 `0` 才表示 0 元。
   传 `null` 或 `""` 表示清空该字段。注意：有销售/采购历史的商品，售价/成本会按最近一张单据回填（与网页端同一口径）。
 - 客户 / 供应商可在新建时直接带预存/预付款流水，不必事后补：
@@ -308,9 +332,10 @@ curl -s -H "Authorization: Bearer $KEY" "$BASE/items?q=三通&limit=20"
 | `api/ai-keys.js` | 密钥存储（只存 SHA-256）、签发/改权限/吊销、使用统计、鉴权 |
 | `api/ai.js` | 所有 `/api/ai/v1/*` 读写接口、金额重算、幂等、审计 |
 | `api/ai-logs.js` | 调用日志：内存缓冲、合并落盘、保留策略、查询筛选 |
+| `api/ai-catalog.js` | 单据里的自动建档（allowNewItems / allowNewSuppliers）：名称匹配、编码生成、条数上限 |
 | `api/ai-deposits.js` | 预存款 / 预付款：充值 / 抵扣 / 编辑 / 删除、资金单据生成、requestId 幂等 |
 | `api/ai-payments.js` | 单据收付款 / 结清：流水追加、结算状态同步、资金单据生成 |
 | `api/routes.js` | `/ai/*` 分发；`/ai-keys`、`/ai-logs` 管理接口（仅登录态） |
 | `web/index.js` | `/api/ai/*` 绕开边缘缓存（响应随密钥权限变化） |
 | `src/views/AiApi.vue` + `src/components/AiScopePicker.vue` | 左侧菜单页面与权限勾选器 |
-| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 51 项接口回归 + 8 项页面回归 |
+| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 61 项接口回归 + 8 项页面回归 |

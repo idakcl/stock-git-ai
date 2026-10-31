@@ -12,10 +12,19 @@ const keys = ['items', 'suppliers', 'customers', 'purchases', 'sales', 'orders',
 // 只有「过账 / 撤销过账」会真正增删单据，才需要重算派生数据（商品档案、历史价、库存）；
 // 存草稿、收订金、删草稿都只动 orders.json（订金另加一张资金凭证），
 // 不跑 derive 是为了避免一次草稿保存重写 200KB 的 items.json。
-export async function orderTransaction(env, input, derive, rebuildStock) {
+// prepare(snapshot, input) 可选：在订单校验/落库之前，把「自动新建的商品/供应商」放进快照，
+// 这样订单与新建的档案在同一个事务里提交（要么全成、要么全不写）。
+// 注意必须返回一份新的 state（含新记录），不能原地改 snapshot——否则 diff 判定不出变化，商品不会被写盘。
+export async function orderTransaction(env, input, derive, rebuildStock, prepare) {
   const tx = await openTransaction(env, keys, { optional: ['orders', 'receipts', 'payment-vouchers'] })
-  const result = applyOrderOperation(tx.state, input)
-  if (result.duplicate) return { ok: true, code: result.code, orderId: result.orderId, duplicate: true }
+  const pre = prepare ? prepare(tx.state, input) : null
+  const snapshot = (pre && pre.state) || tx.state
+  const created = pre ? {
+    ...(pre.createdItems && pre.createdItems.length ? { createdItems: pre.createdItems } : {}),
+    ...(pre.createdSuppliers && pre.createdSuppliers.length ? { createdSuppliers: pre.createdSuppliers } : {})
+  } : {}
+  const result = applyOrderOperation(snapshot, input)
+  if (result.duplicate) return { ok: true, code: result.code, orderId: result.orderId, duplicate: true, ...created }
 
   const next = result.state
   if (input.action === 'post' || input.action === 'unpost') {
@@ -35,6 +44,7 @@ export async function orderTransaction(env, input, derive, rebuildStock) {
     ok: true,
     code: result.code,
     orderId: result.orderId || input.orderId,
+    ...created,
     removedDocId: result.removedDocId,
     removed: result.removed,
     skipped: result.skipped,
