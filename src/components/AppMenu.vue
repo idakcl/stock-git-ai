@@ -87,6 +87,10 @@
         <el-icon><Link /></el-icon>
         <span>外链分享</span>
       </el-menu-item>
+      <el-menu-item index="/ai-api">
+        <el-icon><Key /></el-icon>
+        <span>AI-API</span>
+      </el-menu-item>
       <el-menu-item index="/data">
         <el-icon><FolderOpened /></el-icon>
         <span>数据备份</span>
@@ -103,7 +107,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Document
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Document, Key
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

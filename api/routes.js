@@ -10,6 +10,8 @@ import { voidTransaction } from './voids.js'
 import { readProfile, saveProfile } from './profile.js'
 import { listShares, readPublicShare, shareOperation } from './shares.js'
 import { listTemplates, templateOperation } from './templates.js'
+import { handleAi } from './ai.js'
+import { listKeys, createKey, updateKey, revokeKey } from './ai-keys.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -404,6 +406,12 @@ export async function handleApi(req, url, env) {
     return new Response(null, { status: 204, headers: corsHeaders(req, env) })
   }
 
+  // AI-API：用 ai_live_ 密钥鉴权，权限由签发时勾选的 scope 决定。
+  // 放在登录校验之前 —— AI 没有、也不该有管理员会话；它只走自己的密钥与权限表。
+  if (path.startsWith('/ai/')) {
+    return handleAi(req, url, env, { derive, rebuildStock })
+  }
+
   // 登录接口：唯一无需会话即可访问的写接口
   if (path === '/login' && method === 'POST') {
     try {
@@ -480,6 +488,10 @@ export async function handleApi(req, url, env) {
     if (path === '/shares' && method === 'GET') return json(req, env, { shares: await listShares(env) })
     // 订单模板：预设商品清单，可一键转订单；单独一个文件，缺失按空列表
     if (path === '/templates' && method === 'GET') return json(req, env, { templates: await listTemplates(env) })
+    // AI-API 密钥列表：只返回名称/前缀/权限/有效期/最近使用，明文密钥永不回传
+    if (path === '/ai-keys' && method === 'GET') {
+      return json(req, env, { keys: await listKeys(env) })
+    }
 
     // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端
     if (path === '/upload' && method === 'POST') {
@@ -522,6 +534,14 @@ export async function handleApi(req, url, env) {
       // 订单模板：新增 / 编辑 / 删除 / 复制。只动 order-templates.json，转订单是另一回事（走 /orders）。
       if (path === '/templates') {
         return json(req, env, await templateOperation(env, body))
+      }
+      // AI-API 密钥管理：签发（明文仅本次返回）/ 改权限 / 吊销。
+      // 只走登录态：AI 自己永远不能签发、提权或吊销密钥。
+      if (path === '/ai-keys') {
+        if (body.action === 'create') return json(req, env, await createKey(env, body))
+        if (body.action === 'update') return json(req, env, { key: await updateKey(env, body) })
+        if (body.action === 'revoke') return json(req, env, { key: await revokeKey(env, body) })
+        return json(req, env, { error: '不支持的密钥操作' }, 400)
       }
 
       if (path === '/items') {

@@ -149,6 +149,12 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
 
   if (action === 'save') {
     const draft = input.order || {}
+    // AI-API 的幂等入口：同一个 aiRequestId 重试时直接返回已创建的订单，绝不重复开单。
+    // 放在事务快照内判定，两个并发请求也只会有一个真正新建。
+    if (draft.aiRequestId) {
+      const dup = state.orders.find(o => o.aiRequestId === draft.aiRequestId)
+      if (dup) return { state, code: dup.id, duplicate: true }
+    }
     const errors = validateOrder(draft, { items: state.items })
     if (errors.length) fail(errors[0])
     if (draft.id) {

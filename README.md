@@ -30,6 +30,9 @@
 - `api/profile.js` — 用户信息（打印落款用的联系名称/电话/地址/备注）读写与字段裁剪
 - `api/shares.js` — 外链分享：令牌生成、时效、取消、公开只读读取与脱敏载荷
 - `api/templates.js` — 订单模板：多份模板的增删改复制、字段裁剪与上限保护（数据存 `order-templates.json`）
+- `src/utils/aiScopes.js` — **AI-API 权限目录 / 预设 / 接口表**（前端勾选框、服务端校验、`/schema` 共用同一份）
+- `api/ai-keys.js` — AI 密钥：只存 SHA-256 与显示前缀，签发 / 改权限 / 吊销 / 使用统计 / 鉴权
+- `api/ai.js` — AI-API 全部读写接口（`/api/ai/v1/*`），金额服务端重算 + 幂等 + 审计
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
 - `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
 - `wrangler.json` — Cloudflare Workers 配置
@@ -60,6 +63,15 @@
 3. 资金单据编号分配 —— 手工拼 `SK-`/`FK-` 极易重号或跳号。
 
 只读数据仓是可以的，见本节末尾「只想读数据」。
+
+### 方式一：AI-API 密钥（推荐给 AI）
+
+左侧菜单 **AI-API** → 新建密钥，勾选它能做的事（可一键「最大权限」，可设永久），
+把 `ai_live_…` 密钥和基址 `https://stock-git-ai.1234.nyc.mn/api/ai/v1` 交给 AI 即可。
+它只能在你勾选的范围内读写：越权 403，吊销最长 15 秒生效；AI 永远无法管理密钥、改密码、备份或清空数据。
+完整契约（权限表、接口、参数、示例、给 AI 的提示词）见 [docs/ai-api.md](./docs/ai-api.md)。
+
+下面这一节是**方式二：管理密码票据**，权限等同管理员，适合你自己的脚本，不建议直接交给 AI。
 
 ### 基址
 | 用途 | 地址 |

@@ -23,6 +23,10 @@ export default {
     const url = new URL(req.url)
 
     if (url.pathname.startsWith('/api/')) {
+      // AI-API：响应内容随密钥权限（scope）而变，而 Authorization 不参与边缘缓存键 ——
+      // 一旦缓存，A 密钥查到的结果会被 B 密钥直接读到（越权泄露）。因此这条路径完全绕开缓存层。
+      if (url.pathname.startsWith('/api/ai/')) return handleApi(req, url, env)
+
       // ---- GET：边缘缓存优先 ----
       if (req.method === 'GET') {
         try {

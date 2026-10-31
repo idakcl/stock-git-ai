@@ -261,5 +261,12 @@ export const api = {
     const r = await request('/templates', { method: 'POST', body: JSON.stringify(operation) })
     invalidate('/templates')
     return r
+  },
+  // AI-API 密钥：列表只含前缀与权限；签发时的明文密钥只在响应里出现一次
+  getAiKeys: () => cachedGet('/ai-keys'),
+  aiKeyOperation: async (operation) => {
+    const r = await request('/ai-keys', { method: 'POST', body: JSON.stringify(operation) })
+    invalidate('/ai-keys')
+    return r
   }
 }
