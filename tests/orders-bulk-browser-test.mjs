@@ -58,6 +58,20 @@ async function open(state) {
       state.orders = state.orders.filter(o => !drop.has(o.id))
       return send({ ok: true, removed, skipped: (body.orderIds || []).length - removed })
     }
+    if (body.action === 'postMany' || body.action === 'post') {
+      const ids = body.action === 'postMany' ? (body.orderIds || []) : [body.orderId]
+      let posted = 0
+      state.orders = (state.orders || []).map(o => {
+        if (!ids.includes(o.id) || o.status === '已过账') return o
+        posted++
+        return { ...o, status: '已过账', postedOrderId: `X20261028${String(posted).padStart(8, '0')}` }
+      })
+      return send({ ok: true, posted, skipped: ids.length - posted, code: `X20261028${String(posted).padStart(8, '0')}` })
+    }
+    if (body.action === 'save') {
+      const id = body.order?.id || 'D202610281000000099'
+      return send({ ok: true, code: id })
+    }
     return send({ ok: true })
   })
   const page = await context.newPage()
@@ -287,6 +301,86 @@ await t('一次请求 deleteMany 删除多张，列表随即少掉这些单', as
     assert.equal(await rowOf(page, 'D202610281000000003').count(), 1)
     await page.waitForSelector('.el-message--success')
     assert.match(await page.locator('.el-message--success').first().innerText(), /已删除 2 张订单/)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+console.log('\n过账：单张 / 勾选批量 / 录入页，都要先选结清或挂账')
+
+await t('勾选两张后过账：弹窗二选一，选「结清」发 postMany + settleMode=settle', async () => {
+  const { page, context, state, errors } = await open(seed(fixtures()))
+  try {
+    await checkRow(page, 'D202610281000000001')
+    await checkRow(page, 'D202610281000000002')
+    const btn = page.getByRole('button', { name: '过账勾选（2）' })
+    assert.equal(await btn.isEnabled(), true, '勾了两张未过账单，批量过账可用')
+    await btn.click()
+    const dlg = page.locator('.el-dialog:visible', { hasText: '选择过账方式' })
+    await dlg.waitFor()
+    const text = (await dlg.innerText()).replace(/\s+/g, ' ')
+    assert.match(text, /待过账 2 张/, '弹窗报待过账张数')
+    assert.match(text, /订单金额合计 ¥ 35\.00/, '金额按订单口径汇总（20 + 15）')
+    assert.match(text, /过账为结清/, '提供「过账为结清」')
+    assert.match(text, /过账为挂账/, '提供「过账为挂账」')
+    await dlg.getByRole('button', { name: /过账为结清/ }).click()
+    await page.waitForTimeout(700)
+    const post = state.posts.find(p => p.action === 'postMany')
+    assert.ok(post, '应发 postMany')
+    assert.equal(post.settleMode, 'settle')
+    assert.deepEqual([...post.orderIds].sort(), ['D202610281000000001', 'D202610281000000002'])
+    await page.waitForSelector('.el-message--success')
+    assert.match(await page.locator('.el-message--success').first().innerText(), /已过账 2 张订单（结清）/)
+    assert.equal(await rows(page).count(), 2, '过账后这两张从「未过账」列表消失')
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+await t('行内「过账」也走方式选择：选挂账发 settleMode=credit，不再直接过账', async () => {
+  const { page, context, state, errors } = await open(seed(fixtures()))
+  try {
+    await rowOf(page, 'D202610281000000001').getByRole('button', { name: '过账', exact: true }).click()
+    const dlg = page.locator('.el-dialog:visible', { hasText: '选择过账方式' })
+    await dlg.waitFor()
+    assert.match((await dlg.innerText()).replace(/\s+/g, ' '), /待过账 1 张销售单/)
+    assert.equal(state.posts.filter(p => p.action === 'post').length, 0, '弹窗没确认前不发请求')
+    await dlg.getByRole('button', { name: /过账为挂账/ }).click()
+    await page.waitForTimeout(700)
+    const post = state.posts.find(p => p.action === 'post')
+    assert.equal(post.orderId, 'D202610281000000001')
+    assert.equal(post.settleMode, 'credit')
+    assert.match(await page.locator('.el-message--success').first().innerText(), /（挂账）/)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
+await t('录入页「保存并过账」：先 save 再 post，同一订单号、带过账方式', async () => {
+  const { page, context, state, errors } = await open(seed(fixtures()))
+  try {
+    await page.getByRole('button', { name: '新建订单' }).click()
+    const form = page.locator('.el-dialog:visible', { hasText: '新建订单' })
+    await form.waitFor()
+    await form.locator('.el-form-item', { hasText: '客户' }).locator('.el-select').first().click()
+    await page.getByRole('option', { name: /客户甲/ }).first().click()
+    // 「快速添加」选商品后回车入表：比逐行点表格里的下拉稳（下拉可能被弹窗遮挡）
+    await form.locator('.quick-add-select input').first().click()
+    await page.locator('.el-select-dropdown__item', { hasText: '管件' }).first().click()
+    await page.waitForTimeout(300)
+    assert.equal(await form.locator('.el-table__row').count(), 1, '商品已入明细')
+    await form.getByRole('button', { name: '保存并过账' }).click()
+    const dlg = page.locator('.el-dialog:visible', { hasText: '选择过账方式' })
+    await dlg.waitFor()
+    await dlg.getByRole('button', { name: /过账为结清/ }).click()
+    await page.waitForTimeout(900)
+    const save = state.posts.find(p => p.action === 'save')
+    const post = state.posts.find(p => p.action === 'post')
+    assert.ok(save, '先保存草稿')
+    assert.ok(post, '再按同一个订单号过账')
+    assert.equal(post.orderId, 'D202610281000000099', '过账用的是保存返回的订单号')
+    assert.equal(post.settleMode, 'settle')
+    assert.equal(await page.locator('.el-dialog:visible', { hasText: '新建订单' }).count(), 0, '成功后表单关闭')
+    const okMsg = page.locator('.el-message--success', { hasText: '订单已保存并过账' }).first()
+    await okMsg.waitFor()
+    assert.match(await okMsg.innerText(), /（结清）/)
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
 })

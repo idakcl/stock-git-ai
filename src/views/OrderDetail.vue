@@ -23,6 +23,8 @@
               :head-subtitle="docSubtitle" :head-fields="docHeaderFields" />
             <el-button v-if="found && !externalView" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || order.status === POSTED" @click="editDialog = true">编辑</el-button>
+            <!-- 未过账订单可直接过账：点开选「结清 / 挂账」，不用回列表 -->
+            <el-button v-if="!externalView" type="warning" :disabled="!found || order.status === POSTED || saving" @click="askPost()">过账</el-button>
             <el-button @click="$router.push('/orders')">返回列表</el-button>
           </div>
         </div>
@@ -31,7 +33,7 @@
       <el-alert v-if="externalView" class="external-banner" type="info" :closable="false" show-icon
         title="对外查看模式：价格与金额已隐藏，页面只读" />
       <el-alert v-if="found && isUnposted(order.status) && !deposits.length" class="external-banner" type="info" :closable="false" show-icon
-        title="未过账订单：不占库存、不计应收/应付；点「过账」才生成正式销售/采购单。" />
+        title="未过账订单：不占库存、不计应收/应付；点「过账」选结清或挂账，才会生成正式销售/采购单。" />
 
       <div class="info">
         <span>{{ isPurchase ? '供应商' : '客户' }}：
@@ -143,6 +145,7 @@
       :suppliers="suppliers"
       :saving="saving"
       @saved="onFormSaved"
+      @post="onFormPost"
     />
 
     <!-- 轻量补备注：与销售/采购详情页同一入口，只改 remark 字段 -->
@@ -152,6 +155,10 @@
     <!-- 外链分享：生成只读链接，可设时效、查看二维码、随时取消 -->
     <ShareDialog v-model="shareDialog" kind="order" :doc-id="order.id"
       :title="`${isPurchase ? '采购' : '销售'}订单 ${order.id}`" />
+
+    <!-- 过账方式：结清＝当场收/付并自动开收付款单；挂账＝只生成单据、欠款保留 -->
+    <PostSettleDialog v-model="postDialog" :orders="postTargets" :saving="saving"
+      @confirm="confirmPost" />
   </div>
 </template>
 
@@ -164,6 +171,7 @@ import ProductTable from '../components/ProductTable.vue'
 import PhotoThumbs from '../components/PhotoThumbs.vue'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
+import PostSettleDialog from '../components/PostSettleDialog.vue'
 import ShareDialog from '../components/ShareDialog.vue'
 import { orderAmount, orderDepositSum, orderStatusText, isUnposted, DRAFT, POSTED } from '../utils/orders.js'
 import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '../utils/account'
@@ -370,6 +378,49 @@ async function onFormSaved({ draft, isEdit }) {
     if (e.status === 409) ElMessage.error('数据已被其他操作更新，请刷新后重试')
     else if (e.status && e.status >= 500) ElMessage.error(`${e.message || '网络异常'}，请以刷新后的数据为准`)
     else ElMessage.error(e.message || '订单保存失败')
+  } finally { saving.value = false }
+}
+
+// ---- 过账：先选方式（结清 / 挂账） ----
+const postDialog = ref(false)
+const postTargets = ref([])
+const postPendingDraft = ref(null)
+
+function askPost() {
+  if (!found.value || order.value.status === POSTED) return
+  postPendingDraft.value = null
+  postTargets.value = [order.value]
+  postDialog.value = true
+}
+
+// 录入页「保存并过账」：先落草稿，再用返回的订单号过账
+async function onFormPost({ draft }) {
+  postTargets.value = [{ ...order.value, ...draft, deposits: order.value.deposits || [] }]
+  postPendingDraft.value = draft
+  postDialog.value = true
+}
+
+async function confirmPost(mode) {
+  if (saving.value) return
+  const settleMode = mode === 'settle' ? 'settle' : 'credit'
+  saving.value = true
+  try {
+    let orderId = order.value.id
+    if (postPendingDraft.value) {
+      const saved = await api.orderOperation({ action: 'save', order: postPendingDraft.value })
+      orderId = saved.code
+      // 记住订单号：过账失败重试时按编辑处理，不重复新建
+      postPendingDraft.value = { ...postPendingDraft.value, id: saved.code }
+    }
+    const r = await api.orderOperation({ action: 'post', orderId, settleMode })
+    ElMessage.success(`已过账：${r.code}${settleMode === 'settle' ? '（结清）' : '（挂账）'}`)
+    postDialog.value = false
+    postPendingDraft.value = null
+    editDialog.value = false
+    await load()
+  } catch (e) {
+    if (e.status === 409) ElMessage.error('数据已被其他操作更新，请刷新后重试')
+    else ElMessage.error(e.message || '过账失败')
   } finally { saving.value = false }
 }
 

@@ -121,6 +121,70 @@ test('过账：生成正式单据、订金原样搬成第一条流水、凭证�
   assert.equal(again.state.sales.length, 2)
 })
 
+test('过账为结清：差额记为本次实收并自动开收款单，应收归零', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const id = s.orders[0].id
+  // 先收 15 订金，再按结清过账：只补差额 25，不另开第二张「全额」收款单
+  const withDep = applyOrderOperation(s, { action: 'deposit', orderId: id, amount: 15, date: '2026-10-29' }).state
+  const r = applyOrderOperation(withDep, { action: 'post', orderId: id, settleMode: 'settle' })
+  assert.equal(r.settleMode, 'settle')
+  const doc = r.state.sales[1]
+  assert.equal(doc.payments.length, 2)
+  assert.equal(doc.payments[0].voucher, 'SK-20261029-0001', '订金凭证原样保留')
+  assert.equal(doc.payments[1].amount, 25)
+  assert.equal(doc.payments[1].remark, '过账结清')
+  assert.match(doc.payments[1].voucher, /^SK-20261029-0002$/)
+  assert.equal(doc.received, 40)
+  assert.equal(doc.settle, '结清')
+  assert.equal(receivableOf(doc), 0)
+  // 资金单据也落了库：差额那张指向新销售单
+  const voucher = r.state.receipts.find(v => v.code === doc.payments[1].voucher)
+  assert.equal(voucher.total, 25)
+  assert.equal(voucher.party, '客户甲')
+  assert.equal(voucher.items[0].orderId, doc.id)
+  assert.equal(voucher.items[0].settle, true)
+})
+
+test('过账为挂账（默认）：只生成单据，不开收付款单', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const r = applyOrderOperation(s, { action: 'post', orderId: s.orders[0].id })
+  assert.equal(r.settleMode, 'credit')
+  assert.equal(r.state.receipts.length, 0)
+  assert.equal(r.state.sales[1].settle, '挂账')
+  assert.equal(receivableOf(r.state.sales[1]), 40)
+})
+
+test('采购单结清：生成付款单 FK，应付归零', () => {
+  const s = saveOrder(fixture(), draft({ kind: 'purchase', supplier: '供应商甲' })).state
+  const r = applyOrderOperation(s, { action: 'post', orderId: s.orders[0].id, settleMode: 'settle' })
+  const doc = r.state.purchases[1]
+  assert.equal(doc.settle, '结清')
+  assert.equal(doc.paid, 40)
+  assert.equal(r.state['payment-vouchers'].length, 1)
+  assert.match(r.state['payment-vouchers'][0].code, /^FK-20261029-0001$/)
+  assert.equal(r.state['payment-vouchers'][0].kind, 'payable')
+})
+
+test('批量过账 postMany：一次事务生成多张单据，已过账的跳过、结清逐张开单', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const s2 = saveOrder(s, draft()).state
+  const s3 = saveOrder(s2, draft()).state
+  const ids = s3.orders.map(o => o.id)
+  // 先把第一张过账，批量时应跳过它
+  const posted = applyOrderOperation(s3, { action: 'post', orderId: ids[0] }).state
+  const r = applyOrderOperation(posted, { action: 'postMany', orderIds: ids, settleMode: 'settle' })
+  assert.equal(r.posted, 2)
+  assert.equal(r.skipped, 1)
+  assert.equal(r.state.sales.length, 4, '原有 1 张 + 先过账 1 张 + 批量过账 2 张')
+  assert.equal(r.state.receipts.length, 2, '两张结清单各开一张收款单（先过账的那张是挂账，不开单）')
+  r.state.orders.forEach(o => assert.equal(o.status, POSTED))
+  const batchDocs = r.state.orders.slice(1).map(o => r.state.sales.find(d => d.id === o.postedOrderId))
+  batchDocs.forEach(o => assert.equal(o.settle, '结清'))
+  // 全都已过账时不再产生空事务
+  assert.throws(() => applyOrderOperation(r.state, { action: 'postMany', orderIds: ids }), /已过账状态/)
+  assert.throws(() => applyOrderOperation(r.state, { action: 'postMany', orderIds: [] }), /选择/)
+})
+
 test('撤销过账：没动钱的单可以退回草稿，动过钱的不行', () => {
   const s = saveOrder(fixture(), draft()).state
   const id = s.orders[0].id

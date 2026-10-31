@@ -256,18 +256,21 @@ await t('新建订单只提交 save，不碰销售单', async () => {
   } finally { await context.close() }
 })
 
-await t('草稿列表可过账：确认后提交 post', async () => {
+await t('草稿列表可过账：先选结清/挂账，再提交 post', async () => {
   const s = seed()
   s.orders = [{ id: 'D20261029000000001', kind: 'sale', status: '未过账', customer: '客户甲', date: '2026-10-29',
     discount: 0, discountRates: [], items: [{ code: 'P00001', name: '管件', unit: '个', qty: 4, price: 10, total: 40 }], deposits: [] }]
   const { page, context, errors, state } = await open('/orders', s)
   try {
     await page.getByRole('button', { name: '过账', exact: true }).first().click()
-    await page.locator('.el-message-box').getByRole('button', { name: '确定' }).click()
+    const dlg = page.locator('.el-dialog:visible', { hasText: '选择过账方式' })
+    await dlg.waitFor()
+    await dlg.getByRole('button', { name: /过账为挂账/ }).click()
     await page.waitForTimeout(400)
     const post = (state.posts || []).find(p => p.key === 'orders')
     assert.equal(post.body.action, 'post')
     assert.equal(post.body.orderId, 'D20261029000000001')
+    assert.equal(post.body.settleMode, 'credit')
     assert.match((await page.locator('.el-table').innerText()).replace(/\s+/g, ' '), /D20261029000000001/, '列表应显示该订单')
     assert.deepEqual(errors, [], '页面不得报错')
   } finally { await context.close() }
@@ -454,6 +457,8 @@ await t('品牌与构建号只出现一次：侧栏承载品牌，顶栏在任�
       assert.equal(await page.locator('.aside .logo:visible').count(), 1, `${where}：侧栏保留品牌`)
       assert.equal(await page.locator('.build-tag').count(), 0, `${where}：顶栏没有构建号`)
       assert.equal(await page.locator('.build-info:visible').count(), 1, `${where}：构建号只在侧栏出现一次`)
+      assert.equal((await page.locator('.logout-btn').innerText()).trim(), '退出', `${where}：退出按钮文案为「退出」`)
+      assert.equal(await page.locator('.logout-btn .el-icon').count(), 1, `${where}：退出按钮保留图标`)
       assert.deepEqual(errors, [], '页面不得报错')
     } finally { await context.close() }
   }

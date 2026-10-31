@@ -23,7 +23,7 @@
         </div>
       </template>
       <el-alert type="info" :closable="false" show-icon
-        title="订单是未过账单据：不占库存、不计应收/应付。收订金会开真实收款单；点「过账」才生成正式销售/采购单。" />
+        title="订单是未过账单据：不占库存、不计应收/应付。收订金会开真实收款单；点「过账」选结清或挂账，才会生成正式销售/采购单。" />
       <el-input v-model="keyword" clearable placeholder="搜索订单号 / 往来单位 / 商品" class="search-input" />
       <div class="filter-row">
         <span class="filter-label">状态</span>
@@ -51,6 +51,10 @@
         <el-button size="small" :disabled="!selected.length" @click="printSelectedList()">打印勾选订单列表</el-button>
         <el-button size="small" :disabled="!selected.length" @click="openDetailPrint">打印勾选订单详情页</el-button>
         <el-button size="small" :disabled="!paged.length" @click="exportPageCsv">导出CSV（当前页）</el-button>
+        <!-- 勾选后一键过账：只对未过账的单生效，过账方式（结清/挂账）在弹窗里选 -->
+        <el-button size="small" type="warning" :disabled="!postableSelected.length || busy" @click="askPost(postableSelected)">
+          过账勾选{{ postableSelected.length ? `（${postableSelected.length}）` : '' }}
+        </el-button>
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
           删除勾选{{ selected.length ? `（${selected.length}）` : '' }}
         </el-button>
@@ -105,7 +109,7 @@
             <template #default="{ row }">
               <el-button size="small" type="primary" :disabled="row.status === POSTED" @click="openEdit(row)">编辑</el-button>
               <el-button size="small" type="success" :disabled="row.status === POSTED" @click="openDeposit(row)">收订金</el-button>
-              <el-button size="small" type="warning" :disabled="row.status === POSTED || busy" @click="post(row)">过账</el-button>
+              <el-button size="small" type="warning" :disabled="row.status === POSTED || busy" @click="askPost([row])">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
               <el-button size="small" plain @click="openRemark(row)">备注</el-button>
@@ -143,7 +147,12 @@
       :saving="saving"
       :standalone="entry"
       @saved="onFormSaved"
+      @post="onFormPost"
     />
+
+    <!-- 过账方式选择：单张、勾选批量、录入页「保存并过账」共用这一个弹窗 -->
+    <PostSettleDialog v-model="postDialog" :orders="postTargets" :saving="postSubmitting"
+      @confirm="confirmPost" />
 
     <!-- 轻量补备注：只改 remark 字段，已过账的订单也能补 -->
     <OrderRemarkDialog v-model="remarkDialog" :order="remarkOrder"
@@ -235,10 +244,11 @@ import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '..
 import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
 import { repeatHeaderPref } from '../utils/printPrefs'
 import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
-import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, orderKeys } from '../utils/orders.js'
+import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
+import PostSettleDialog from '../components/PostSettleDialog.vue'
 
 const PAGE_SIZE = 60
 
@@ -278,6 +288,13 @@ const templates = ref([])
 const templatesLoading = ref(false)
 const remarkDialog = ref(false)
 const remarkOrder = ref(null)
+// 过账方式弹窗：postTargets 是待过账的订单；postAfterSave 非空表示这是「录入页保存并过账」
+const postDialog = ref(false)
+const postTargets = ref([])
+const postAfterSave = ref(null)
+const postSubmitting = ref(false)
+// 勾选里可能混着已过账的单：批量过账只取未过账的
+const postableSelected = computed(() => selected.value.filter(o => o.status !== POSTED))
 
 const partyOf = (row) => (row && row.kind === 'purchase' ? row.supplier : row && row.customer) || ''
 const depositSumOf = (row) => orderDepositSum(row)
@@ -670,20 +687,62 @@ async function submitDeposit() {
   } catch (e) { fail(e, '订金登记失败') } finally { saving.value = false }
 }
 
-async function post(row) {
-  const { listKey } = orderKeys(row.kind)
-  try {
-    await ElMessageBox.confirm(
-      `过账后将生成正式${row.kind === 'purchase' ? '采购' : '销售'}单并计入${listKey === 'purchases' ? '应付' : '应收'}与库存${depositSumOf(row) > 0 ? `，已收订金 ¥${depositSumOf(row).toFixed(2)} 会转为第一笔${row.kind === 'purchase' ? '付款' : '收款'}` : ''}。是否继续？`,
-      '确认过账', { type: 'warning' }
-    )
-  } catch { return }
+// ---- 过账：先选方式（结清 / 挂账），再到服务端一次事务生成正式单据 ----
+// 结清：差额记为本次实收/实付并自动开收款单 SK / 付款单 FK；挂账：只生成单据，应收/应付保留。
+function askPost(rows) {
+  const targets = (rows || []).filter(o => o && o.status !== POSTED)
+  if (!targets.length) return ElMessage.warning('这些订单都已过账，无需再过账')
+  postAfterSave.value = null
+  postTargets.value = targets
+  postDialog.value = true
+}
+
+// 录入页「保存并过账」：先把表单落成草稿（新建拿订单号 / 编辑覆盖原草稿），
+// 再用同一个订单号过账；两步都成功才关表单，失败停在原处便于重试
+function onFormPost({ draft }) {
+  const existing = draft.id ? list.value.find(o => o.id === draft.id) : null
+  postAfterSave.value = { draft }
+  postTargets.value = [{
+    ...(existing || {}), ...draft, deposits: existing?.deposits || [],
+    status: draft.status || '未过账'
+  }]
+  postDialog.value = true
+}
+
+async function confirmPost(mode) {
+  if (postSubmitting.value) return
+  const afterSave = postAfterSave.value
+  const targets = postTargets.value
+  const settleMode = mode === 'settle' ? 'settle' : 'credit'
+  postSubmitting.value = true
   busy.value = true
   try {
-    const r = await api.orderOperation({ action: 'post', orderId: row.id })
-    ElMessage.success(`已过账：${r.code}`)
+    if (afterSave) {
+      const saved = await api.orderOperation({ action: 'save', order: afterSave.draft })
+      // 记住刚拿到的订单号：过账若失败，重试时走编辑而不是再新建一张草稿
+      afterSave.draft = { ...afterSave.draft, id: saved.code }
+      const r = await api.orderOperation({ action: 'post', orderId: saved.code, settleMode })
+      ElMessage.success(`订单已保存并过账：${r.code}${settleMode === 'settle' ? '（结清）' : '（挂账）'}`)
+      dialog.value = false
+    } else if (targets.length === 1) {
+      const r = await api.orderOperation({ action: 'post', orderId: targets[0].id, settleMode })
+      ElMessage.success(`已过账：${r.code}${settleMode === 'settle' ? '（结清）' : '（挂账）'}`)
+    } else {
+      const r = await api.orderOperation({ action: 'postMany', orderIds: targets.map(o => o.id), settleMode })
+      ElMessage.success(`已过账 ${r.posted || targets.length} 张订单${settleMode === 'settle' ? '（结清）' : '（挂账）'}${r.skipped ? `，跳过 ${r.skipped} 张（已过账）` : ''}`)
+    }
+    postDialog.value = false
+    postAfterSave.value = null
+    postTargets.value = []
+    tableRef.value?.clearSelection()
+    selected.value = []
     await load()
-  } catch (e) { fail(e, '过账失败') } finally { busy.value = false }
+  } catch (e) {
+    fail(e, '过账失败')
+  } finally {
+    postSubmitting.value = false
+    busy.value = false
+  }
 }
 
 async function unpost(row) {

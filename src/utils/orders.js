@@ -110,6 +110,34 @@ export function canUnpost(doc, allDocs = []) {
   return { ok: true }
 }
 
+// 过账结清：把未收/未付差额记成一笔实际收/付款，并生成对应的收款单/付款单（SK-/FK-）。
+// 全站口径一致：钱真的动了才叫结清（与销售/采购页「收款结清」同一算法），
+// 不做「只改结清标签、钱不落账」的假结清。订金本来就在单据流水里，这里只补差额；
+// 差额为 0（订金已覆盖、零元单）时不重复记账，单据自然就是结清。
+function settlePostedDoc(state, doc, kind, now) {
+  const { partyKey, field, voucherFile, voucherPrefix, orderType } = orderKeys(kind)
+  const payments = ensurePayments(doc, field)
+  const paid = round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0))
+  const gap = round2(grossOf(doc) - paid)
+  if (!(gap > 0)) return syncPayments({ ...doc, payments }, kind === 'purchase' ? 'payable' : 'receivable')
+  const date = doc.date || todayCN()
+  state[voucherFile] = (state[voucherFile] || []).slice()
+  const code = genVoucherCode(voucherPrefix, date, state[voucherFile].map(v => ({ code: v.code })))
+  payments.push({ date, amount: gap, remark: '过账结清', time: now, voucher: code })
+  state[voucherFile].push({
+    code,
+    kind: orderType === 'sale' ? 'receivable' : 'payable',
+    category: 'normal',
+    party: doc[partyKey],
+    date,
+    remark: '过账结清',
+    total: gap,
+    items: [{ orderId: doc.id, orderType, amount: gap, discount: 0, settle: true, note: '过账结清' }],
+    createdAt: now
+  })
+  return syncPayments({ ...doc, payments }, orderType === 'sale' ? 'receivable' : 'payable')
+}
+
 const clone = (state) => (typeof structuredClone === 'function' ? structuredClone(state) : JSON.parse(JSON.stringify(state)))
 
 // 服务端事务体：所有订单写操作都走这里，输入非法一律抛错（调用方负责一次提交、失败不重放）。
@@ -211,12 +239,44 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     if (errors.length) fail(errors[0])
     const { listKey, docPrefix } = orderKeys(order.kind)
     const list = (state[listKey] || []).slice()
-    const doc = orderToOrderDoc(order, genOrderId(docPrefix, list, order.date), now)
+    let doc = orderToOrderDoc(order, genOrderId(docPrefix, list, order.date), now)
+    // 过账方式：settle＝结清（差额记为本次实际收付并开资金单据）；默认 credit＝挂账（只生成正式单据）
+    if (input.settleMode === 'settle') doc = settlePostedDoc(state, doc, order.kind, now)
     list.push(doc)
     state[listKey] = list
     state.orders = state.orders.map(o => o.id === order.id
       ? { ...o, status: POSTED, postedOrderId: doc.id, postedAt: now, updatedAt: now } : o)
-    return { state, code: doc.id, orderId: order.id }
+    return { state, code: doc.id, orderId: order.id, settleMode: input.settleMode === 'settle' ? 'settle' : 'credit' }
+  }
+
+  // 批量过账：勾选多张订单后一次事务提交，避免 N 次 git 提交。
+  // 已过账的跳过（skipped 报数）；任一张校验不过就整体失败，不做「一半成功」。
+  if (action === 'postMany') {
+    const ids = Array.isArray(input.orderIds)
+      ? [...new Set(input.orderIds.map(v => String(v || '').trim()).filter(Boolean))]
+      : []
+    if (!ids.length) fail('请选择要过账的订单')
+    if (ids.length > 500) fail('一次最多过账 500 张订单')
+    const settleMode = input.settleMode === 'settle' ? 'settle' : 'credit'
+    const codes = []
+    let skipped = 0
+    for (const id of ids) {
+      const idx = state.orders.findIndex(o => o.id === id)
+      if (idx < 0 || state.orders[idx].status === POSTED) { skipped++; continue }
+      const order = state.orders[idx]
+      const errors = validateOrder(order, { items: state.items })
+      if (errors.length) fail(`订单 ${id}：${errors[0]}`)
+      const { listKey, docPrefix } = orderKeys(order.kind)
+      const list = (state[listKey] || []).slice()
+      let doc = orderToOrderDoc(order, genOrderId(docPrefix, list, order.date), now)
+      if (settleMode === 'settle') doc = settlePostedDoc(state, doc, order.kind, now)
+      list.push(doc)
+      state[listKey] = list
+      state.orders[idx] = { ...order, status: POSTED, postedOrderId: doc.id, postedAt: now, updatedAt: now }
+      codes.push(doc.id)
+    }
+    if (!codes.length) fail('勾选的订单都已是已过账状态，无需再过账')
+    return { state, code: codes[0], posted: codes.length, skipped, settleMode }
   }
 
   if (action === 'unpost') {

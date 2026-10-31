@@ -331,5 +331,27 @@ await t('restore 兼容旧备份：status「草稿」写成「未过账」；mig
   assert.equal(commits(), before2)
 })
 
+await t('批量过账为结清：单据 + 收款单 + 库存 + 日志同一提交，一次写盘', async () => {
+  const a = await call('/orders', 'POST', { action: 'save', order: { kind: 'sale', customer: '客户甲', date: '2026-10-31', items: [line('P00003', '弯头', 1, 6)] } })
+  const b = await call('/orders', 'POST', { action: 'save', order: { kind: 'purchase', supplier: '供应商甲', date: '2026-10-31', items: [line('P00003', '弯头', 2, 6)] } })
+  const before = commits()
+  const receiptsBefore = read('receipts.json').length
+  const payoutsBefore = read('payment-vouchers.json').length
+  const r = await call('/orders', 'POST', { action: 'postMany', orderIds: [a.code, b.code], settleMode: 'settle' })
+  assert.equal(r.posted, 2)
+  assert.equal(commits() - before, 1, '批量过账只应有一次提交（含两张资金单据）')
+  const docs = read('sales.json').concat(read('purchases.json') || [])
+  const saleDoc = docs.find(o => o.fromOrderId === a.code)
+  const buyDoc = docs.find(o => o.fromOrderId === b.code)
+  assert.equal(saleDoc.settle, '结清')
+  assert.equal(buyDoc.settle, '结清')
+  assert.equal(saleDoc.received, 6)
+  assert.equal(buyDoc.paid, 12)
+  assert.equal(read('receipts.json').length, receiptsBefore + 1, '销售单结清 → 收款单')
+  assert.equal(read('payment-vouchers.json').length, payoutsBefore + 1, '采购单结清 → 付款单')
+  assert.equal(read('receipts.json').at(-1).items[0].orderId, saleDoc.id)
+  assert.equal(read('logs.json').at(-1).action, 'postMany')
+})
+
 console.log(`\n${pass} passed, ${fail} failed`)
 process.exit(fail ? 1 : 0)

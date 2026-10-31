@@ -132,7 +132,9 @@
     <template #footer>
       <span v-if="saving || emitting" class="saving-hint">保存中，请稍候…</span>
       <el-button @click="visible = false">{{ standalone ? '返回' : '取消' }}</el-button>
-      <el-button type="primary" :loading="saving || emitting" @click="save">保存订单</el-button>
+      <el-button :loading="saving || emitting" :disabled="posted" @click="save">保存订单</el-button>
+      <!-- 录入即成交的场合同样常见：保存草稿后立刻过账，方式（结清/挂账）在弹窗里选 -->
+      <el-button v-if="!posted" type="success" :loading="saving || emitting" @click="postOrder">保存并过账</el-button>
     </template>
     <!-- 批量行折扣弹窗：为勾选行统一设置多级折扣链或逐行单独设置 -->
     <LineDiscountDialog
@@ -168,7 +170,7 @@ const props = defineProps({
   standalone: { type: Boolean, default: false },
   saving: { type: Boolean, default: false }
 })
-const emit = defineEmits(['update:modelValue', 'saved'])
+const emit = defineEmits(['update:modelValue', 'saved', 'post'])
 
 const visible = computed({ get: () => props.modelValue, set: (v) => emit('update:modelValue', v) })
 const photoUpload = ref(null)
@@ -367,6 +369,18 @@ async function save() {
   emitting.value = true
   try {
     emit('saved', { draft: draft.value, isEdit: !!editingId.value, id: editingId.value || undefined })
+  } finally { emitting.value = false }
+}
+
+// 保存并过账：与「保存订单」同一份校验和草稿；落库 + 过账由父组件按同一个订单号完成
+async function postOrder() {
+  if (emitting.value || props.saving) return
+  if (photoUpload.value && photoUpload.value.isUploading()) return ElMessage.warning('照片正在上传中，请等待上传完成后再过账')
+  const errors = validateOrder(draft.value, { items: props.items })
+  if (errors.length) return ElMessage.error({ message: errors[0], duration: 5000 })
+  emitting.value = true
+  try {
+    emit('post', { draft: draft.value })
   } finally { emitting.value = false }
 }
 </script>

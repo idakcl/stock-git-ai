@@ -28,7 +28,7 @@
         </el-button>
         <el-button text class="logout-btn" @click="onLogout">
           <el-icon><SwitchButton /></el-icon>
-          <span class="logout-text">退出登录</span>
+          <span class="logout-text">退出</span>
         </el-button>
       </div>
     </el-header>
@@ -258,7 +258,7 @@ body {
 .layout { height: 100%; flex-direction: column; }
 .body { flex: 1; min-height: 0; }
 
-/* 顶栏：桌面/移动统一显示，承载系统名与退出登录 */
+/* 顶栏：只放操作（开单 / 退出），品牌交给侧栏 */
 .header {
   height: 56px;
   padding: 0 var(--gap-md) 0 var(--gap-sm);

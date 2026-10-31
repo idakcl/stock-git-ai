@@ -27,7 +27,7 @@ export async function orderTransaction(env, input, derive, rebuildStock, prepare
   if (result.duplicate) return { ok: true, code: result.code, orderId: result.orderId, duplicate: true, ...created }
 
   const next = result.state
-  if (input.action === 'post' || input.action === 'unpost') {
+  if (input.action === 'post' || input.action === 'unpost' || input.action === 'postMany') {
     Object.assign(next, derive(next.items, next.suppliers, next.purchases, next.sales, next.customers))
     next.stock = rebuildStock(next.purchases, next.sales, next.items)
   }
@@ -47,6 +47,8 @@ export async function orderTransaction(env, input, derive, rebuildStock, prepare
     ...created,
     removedDocId: result.removedDocId,
     removed: result.removed,
+    posted: result.posted,
+    settleMode: result.settleMode,
     skipped: result.skipped,
     restored: result.restored,
     migrated: result.migrated,
