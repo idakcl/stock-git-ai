@@ -507,9 +507,12 @@ function doExport() {
   downloadCSV(`采购单-${purchase.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
+// 打印不带「供应商」列：本单的供应商已经在单头，明细里再列商品档案的挂靠供应商属于重复信息，
+// 也容易和单头的供应商混淆；CSV 仍保留这一列（内部对账要看）
+const printColumns = computed(() => exportColumns.value.filter(c => c.label !== '供应商'))
 function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`${isReturn(purchase.value) ? '采购退货单' : '采购单'} ${purchase.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
+  printA4(`${isReturn(purchase.value) ? '采购退货单' : '采购单'} ${purchase.value.id}`, printColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
 }
 
 async function onPaySaved(updated, payload) {

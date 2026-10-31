@@ -173,6 +173,26 @@ await t('采购单：整单折扣高亮、折后金额列与打印一致', async
   } finally { await context.close() }
 })
 
+await t('打印明细不带「供应商」列（销售单 / 采购单），CSV 仍保留', async () => {
+  for (const [path, state] of [
+    ['/sale/X202610281000000001', seed({ sales: [saleOrder()] })],
+    ['/purchase/C202610281000000001', seed({ purchases: [purchaseOrder()] })]
+  ]) {
+    const { page, context } = await open(path, state)
+    try {
+      await capturePrint(page)
+      const html = await printed(page)
+      assert.ok(!html.includes('>供应商<'), `${path} 打印明细不应出现供应商列`)
+      assert.match(html, /<th>名称<\/th>/)
+      await captureBlob(page)
+      await page.getByRole('button', { name: '导出CSV' }).click()
+      await page.waitForFunction(() => !!window.__csv, null, { timeout: 5000 })
+      const csv = await page.evaluate(() => window.__csv)
+      assert.match(csv, /供应商/, `${path} 的 CSV 仍保留供应商列（内部对账用）`)
+    } finally { await context.close() }
+  }
+})
+
 await browser.close()
 if (fail) { console.log(`\n${pass} passed, ${fail} failed`); process.exit(1) }
 console.log(`\n全部 ${pass} 项通过`)

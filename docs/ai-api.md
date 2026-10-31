@@ -40,6 +40,7 @@
 | `read:catalog` | 商品与库存 | 商品档案、规格价格、当前库存数量 |
 | `read:docs` | 单据查询 | 订单 / 销售 / 采购 / 退货单的列表与明细 |
 | `read:parties` | 客户供应商与欠款 | 往来单位档案、应收应付余额、来往账 |
+| `read:vouchers` | 资金单据 | 收款单 `SK-` / 付款单 `FK-` 的列表、金额与关联单号 |
 | `read:reports` | 报表汇总 | 区间营业额、采购额、单量等汇总数字 |
 | `read:cost` | 看进价与毛利 | 成本价 / 进价 / 毛利（敏感，默认关闭） |
 | `read:profile` | 看用户信息 | 打印落款里的姓名、电话、地址（敏感） |
@@ -56,6 +57,10 @@
 | `write:refunds` | 退货退款 | 生成退货单，可能开出现金退款凭证（敏感） |
 | `write:voids` | 作废单据 | 单据与关联凭证一起作废，账与库存归零（敏感） |
 | `write:master` | 改商品 / 客户 / 供应商档案 | 改主数据（名称、价格、联系方式）（敏感） |
+| `write:deposits` | 存 / 预付充值抵扣 | 给客户预存款 / 供应商预付款充值或抵扣，充值会生成收 / 付款单（敏感） |
+| `write:payments` | 记收付款 / 结清 | 给已开的销售单收款、采购单付款或按差额结清（敏感） |
+| `write:amend` | 变更已开单据 | 改明细：减少的生成退货单、增加的生成补差单，原单不动（敏感） |
+| `write:shares` | 外链分享 | 生成 / 取消 / 改有效期的只读公开链接 |
 
 预设按钮：**只读问答 / 开单助手 / 业务全流程 / 最大权限**。预设只是替你勾好，之后还能逐项微调。
 
@@ -181,6 +186,61 @@ curl -s -H "Authorization: Bearer $KEY" "$BASE/items?q=三通&limit=20"
 - 新增只填 `name`，编码自动生成（`P/C/S` + 5 位）；改档按 `code`（商品）或 `name`（客户/供应商）。
 - **显式传了不存在的编码会 404**，绝不静默新建一个别的编码。
 - 删除被单据引用的商品/往来单位、或还有预存/预付款流水的单位 → 409。
+- 商品还能写 `photos`（http(s) 链接数组，≤20）与 `suppliers`（供应商编码数组，必须已建档）。
+
+### `POST /deposits` — 预存款 / 预付款（需要 `write:deposits`）
+
+```json
+{ "requestId": "recharge-20261031-0001", "type": "supplier", "party": "S00001", "action": "add", "amount": 1000, "date": "2026-10-31", "remark": "银行转账" }
+```
+
+- `type`：`customer`（客户预存款） / `supplier`（供应商预付款）；`party` 可填编码或名称。
+- `action`：`add` 充值 / `deduct` 抵扣 / `edit` 编辑 / `delete` 删除；`amount` 恒为正数。
+- `edit` / `delete` 需要 `flowId`（充值接口返回，只有本接口写入的流水带）。已生成资金单据的流水：
+  金额不能改、不能删，请用相反方向冲回。
+- 充值 = 资金变动：同时生成一张无关联单号的收款单 `SK-` / 付款单 `FK-`，编号回写到流水。
+- 抵扣不超过当前余额（409）；写错请用相反方向冲回，**不提供删除流水**（保证可审计）。
+- 同一 `requestId` 重试返回 `duplicate: true`，余额不会重复增加。
+- 返回 `{ ok, type, action, party, amount, balance, voucher, flowId, date }`；`balance` 是操作后的可用余额。
+- 查余额：`GET /parties?type=supplier` 的每行多了 `prepaid` 字段（也可用 `GET /ledger` 的 `prepaid`）。
+
+### `POST /payments` — 收付款（需要 `write:payments`）
+
+```json
+{ "requestId": "pay-20261031-0001", "kind": "sale", "id": "X202602011000000001",
+  "action": "pay", "amount": 100, "date": "2026-10-31", "remark": "微信" }
+```
+
+- `action=pay` 记一笔；`action=settle` 按当前未收 / 未付差额一次结清（不用传 amount）。
+- 金额不能超过未收 / 未付（409）；多余的钱请用 `/deposits` 记成预存款 / 预付款。
+- 写入单据 `payments`，同步 `received/paid` 与结算状态，并生成关联单号的 `SK-` / `FK-` 资金单据。
+- 作废单、退货单不能收付款；同一 `requestId` 重试只记一次。
+- 返回 `{ ok, kind, id, amount, outstanding, settle, voucher }`。
+
+### `POST /amends` — 变更已开单据（需要 `write:amend`）
+
+与页面「变更明细」同一套事务：原单不动，减少的商品生成退货单、增加的商品生成补差单。
+
+```json
+{ "requestId": "amend-20261031-0001", "kind": "sale", "sourceOrderId": "X202602011000000001",
+  "party": "客户甲", "date": "2026-10-31",
+  "refundLines": [{ "index": 0, "qty": 1 }],
+  "amendLines": [{ "code": "P00002", "qty": 2 }],
+  "reason": "客户改单", "mode": "pending" }
+```
+
+`refundLines` 用原单明细下标 `index`（先 `GET /sales?include=lines` 查），`amendLines` 用商品编码。
+同一 `requestId` 幂等。
+
+### `GET /vouchers` — 资金单据（需要 `read:vouchers`）
+
+`type=receivable|payable|all`、`party`、`from`、`to`、`q`（单号 / 单位 / 关联单号 / 备注），
+返回 `{ total, nextCursor, vouchers: [{ code, kind, category, party, date, total, items }] }`。
+
+### `POST /shares` — 外链分享（需要 `write:shares`）
+
+`action=create|update|cancel`：`create` 传 `kind=sale|purchase|order` + `docId` + `days`（0＝长期）；
+`cancel/update` 传 `token`。`GET /shares` 列出当前链接。
 
 ### `POST /templates` — 订单模板（需要 `write:templates`）
 
@@ -235,7 +295,9 @@ curl -s -H "Authorization: Bearer $KEY" "$BASE/items?q=三通&limit=20"
 | `api/ai-keys.js` | 密钥存储（只存 SHA-256）、签发/改权限/吊销、使用统计、鉴权 |
 | `api/ai.js` | 所有 `/api/ai/v1/*` 读写接口、金额重算、幂等、审计 |
 | `api/ai-logs.js` | 调用日志：内存缓冲、合并落盘、保留策略、查询筛选 |
+| `api/ai-deposits.js` | 预存款 / 预付款：充值 / 抵扣 / 编辑 / 删除、资金单据生成、requestId 幂等 |
+| `api/ai-payments.js` | 单据收付款 / 结清：流水追加、结算状态同步、资金单据生成 |
 | `api/routes.js` | `/ai/*` 分发；`/ai-keys`、`/ai-logs` 管理接口（仅登录态） |
 | `web/index.js` | `/api/ai/*` 绕开边缘缓存（响应随密钥权限变化） |
 | `src/views/AiApi.vue` + `src/components/AiScopePicker.vue` | 左侧菜单页面与权限勾选器 |
-| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 37 项接口回归 + 8 项页面回归 |
+| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 51 项接口回归 + 8 项页面回归 |

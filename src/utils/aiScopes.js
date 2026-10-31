@@ -11,6 +11,7 @@ export const AI_SCOPE_GROUPS = [
       { id: 'read:catalog', label: '商品与库存', desc: '商品档案、规格价格、当前库存数量' },
       { id: 'read:docs', label: '单据查询', desc: '订单 / 销售 / 采购 / 退货单的列表与明细' },
       { id: 'read:parties', label: '客户供应商与欠款', desc: '往来单位档案、应收应付余额、来往账' },
+      { id: 'read:vouchers', label: '资金单据', desc: '收款单 SK- / 付款单 FK- 的列表、金额与关联单号' },
       { id: 'read:reports', label: '报表汇总', desc: '区间营业额、采购额、单量等汇总数字' },
       { id: 'read:cost', label: '看进价与毛利', desc: '成本价 / 进价 / 毛利。默认关闭，避免把底价交给 AI', danger: true },
       { id: 'read:profile', label: '看用户信息', desc: '打印落款里的姓名、电话、地址', danger: true }
@@ -28,7 +29,11 @@ export const AI_SCOPE_GROUPS = [
       { id: 'write:docs', label: '直接开销售单 / 采购单', desc: '跳过订单，直接生成正式单据（同样动库存与欠款）', danger: true },
       { id: 'write:refunds', label: '退货退款', desc: '生成退货单，并可能开出现金退款凭证', danger: true },
       { id: 'write:voids', label: '作废单据', desc: '单据与关联凭证一起作废，应收应付库存全部归零', danger: true },
-      { id: 'write:master', label: '改商品 / 客户 / 供应商档案', desc: '修改主数据（名称、价格、联系方式等）', danger: true }
+      { id: 'write:master', label: '改商品 / 客户 / 供应商档案', desc: '修改主数据（名称、价格、联系方式等）', danger: true },
+      { id: 'write:deposits', label: '存 / 预付充值抵扣', desc: '给客户预存款 / 供应商预付款充值或抵扣，会生成对应的收 / 付款单', danger: true },
+      { id: 'write:payments', label: '记收付款 / 结清', desc: '给已开的销售单收款、采购单付款或按差额结清，会生成收 / 付款单', danger: true },
+      { id: 'write:amend', label: '变更已开单据', desc: '改明细：减少的生成退货单、增加的生成补差单，原单不动', danger: true },
+      { id: 'write:shares', label: '外链分享', desc: '把单据生成只读公开链接 / 取消 / 改有效期', danger: false }
     ]
   }
 ]
@@ -73,6 +78,12 @@ export const AI_ENDPOINTS = [
   { method: 'POST', path: '/api/ai/v1/refunds', scope: 'write:refunds', desc: '退货 / 退款：action=create|settle' },
   { method: 'POST', path: '/api/ai/v1/voids', scope: 'write:voids', desc: '作废单据：kind=sale|purchase + id + reason' },
   { method: 'POST', path: '/api/ai/v1/master', scope: 'write:master', desc: '改主数据：type=item|customer|supplier，action=upsert|delete' },
+  { method: 'GET', path: '/api/ai/v1/vouchers', scope: 'read:vouchers', desc: '资金单据查询，支持 type / party / from / to / q' },
+  { method: 'GET', path: '/api/ai/v1/shares', scope: 'write:shares', desc: '当前分享链接列表' },
+  { method: 'POST', path: '/api/ai/v1/deposits', scope: 'write:deposits', desc: '预存 / 预付：type=customer|supplier，action=add|deduct|edit|delete，amount>0' },
+  { method: 'POST', path: '/api/ai/v1/payments', scope: 'write:payments', desc: '记收付款：kind=sale|purchase，id，action=pay|settle，amount>0' },
+  { method: 'POST', path: '/api/ai/v1/amends', scope: 'write:amend', desc: '变更已开单据：kind + sourceOrderId + refundLines / amendLines（原单不动）' },
+  { method: 'POST', path: '/api/ai/v1/shares', scope: 'write:shares', desc: '分享：action=create|cancel|update' },
   { method: 'POST', path: '/api/ai/v1/templates', scope: 'write:templates', desc: '订单模板：action=create|update|delete|duplicate' },
   { method: 'POST', path: '/api/ai/v1/upload', scope: 'write:upload', desc: '上传图片（multipart，字段名 file）' }
 ]

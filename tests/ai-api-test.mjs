@@ -324,6 +324,238 @@ await t('删除未被引用的新商品 → ok', async () => {
   assert.ok(!itemsFile().some(i => i.code === newItemCode))
 })
 
+console.log('\n预存 / 预付充值')
+const suppliersFile = () => JSON.parse(repo.read('suppliers.json'))
+const customersFile = () => JSON.parse(repo.read('customers.json'))
+const vouchersFile = (name) => JSON.parse(repo.read(name) || '[]')
+const advanceSum = () => (suppliersFile().find(s => s.code === 'S00001').advances || [])
+  .reduce((s, f) => s + Number(f.amount || 0), 0)
+
+await t('POST /deposits：供应商预付款充值，同时生成付款单 FK-', async () => {
+  const data = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(401), type: 'supplier', party: 'S00001', action: 'add', amount: 1000, date: '2026-10-31', remark: '银行转账' }
+  })
+  assert.equal(data.ok, true)
+  assert.equal(data.balance, 1000)
+  assert.match(data.voucher, /^FK-20261031-\d{4}$/)
+  const flow = advanceSum()
+  assert.equal(flow, 1000)
+  const saved = suppliersFile().find(s => s.code === 'S00001').advances.slice(-1)[0]
+  assert.equal(saved.remark, '银行转账')
+  assert.equal(saved.voucher, data.voucher)
+  assert.ok(saved.aiRequestId, '流水要带 requestId 以便幂等')
+  const v = vouchersFile('payment-vouchers.json').find(x => x.code === data.voucher)
+  assert.equal(v.category, 'deposit-recharge')
+  assert.equal(v.total, 1000)
+  assert.equal(v.party, '供应商甲')
+})
+
+await t('同一 requestId 重试 → duplicate，余额不重复增加', async () => {
+  const data = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(401), type: 'supplier', party: 'S00001', action: 'add', amount: 1000, date: '2026-10-31', remark: '银行转账' }
+  })
+  assert.equal(data.duplicate, true)
+  assert.equal(data.balance, 1000)
+  assert.equal(advanceSum(), 1000, '不能重复充值')
+  assert.equal(vouchersFile('payment-vouchers.json').length, 1)
+})
+
+await t('deduct 抵扣：余额减少、不生成资金单据；超过余额 → 409', async () => {
+  const data = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(402), type: 'supplier', party: '供应商甲', action: 'deduct', amount: 300 }
+  })
+  assert.equal(data.balance, 700)
+  assert.equal(data.voucher, null)
+  assert.equal(advanceSum(), 700)
+  const r = await call('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(403), type: 'supplier', party: 'S00001', action: 'deduct', amount: 701 }
+  })
+  assert.equal(r.status, 409)
+  assert.equal(advanceSum(), 700, '被拒绝的抵扣不能落库')
+})
+
+await t('客户预存款充值生成收款单 SK-；/parties 能读到可用余额', async () => {
+  const data = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(404), type: 'customer', party: 'C00001', action: 'add', amount: 50 }
+  })
+  assert.match(data.voucher, /^SK-\d{8}-\d{4}$/)
+  const c = customersFile().find(x => x.code === 'C00001')
+  assert.equal((c.deposits || []).reduce((s, f) => s + Number(f.amount || 0), 0), 50)
+  const parties = await ok('/api/ai/v1/parties?type=supplier', { key: maxKey })
+  assert.equal(parties.parties.find(p => p.code === 'S00001').prepaid, 700)
+})
+
+await t('预存充值需要 write:deposits：只读密钥 → 403', async () => {
+  const limited = await ok('/api/ai-keys', {
+    method: 'POST', token,
+    body: { action: 'create', name: '无充值权限', scopes: ['read:parties'], expiresInDays: 1 }
+  })
+  const r = await call('/api/ai/v1/deposits', {
+    key: limited.key, method: 'POST',
+    body: { requestId: rid(405), type: 'supplier', party: 'S00001', action: 'add', amount: 1 }
+  })
+  assert.equal(r.status, 403)
+  assert.equal(advanceSum(), 700)
+  await ok('/api/ai-keys', { method: 'POST', token, body: { action: 'revoke', id: limited.record.id } })
+})
+
+console.log('\n收付款记账')
+const saleDoc = () => JSON.parse(repo.read('sales.json')).find(o => o.id === 'X202601021100000001')
+const purchaseDoc = () => JSON.parse(repo.read('purchases.json')).find(o => o.id === 'C202601011000000001')
+
+await t('POST /payments：销售单收款 10 元，生成收款单 SK- 并保留欠款', async () => {
+  const data = await ok('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(501), kind: 'sale', id: 'X202601021100000001', amount: 10, date: '2026-10-31', remark: '微信' }
+  })
+  assert.equal(data.amount, 10)
+  assert.equal(data.outstanding, 14)
+  assert.equal(data.settle, '挂账')
+  assert.match(data.voucher, /^SK-20261031-\d{4}$/)
+  const doc = saleDoc()
+  assert.equal(doc.received, 10)
+  assert.equal(doc.payments.length, 1)
+  assert.equal(doc.payments[0].voucher, data.voucher)
+  assert.ok(doc.payments[0].aiRequestId)
+  const v = vouchersFile('receipts.json').find(x => x.code === data.voucher)
+  assert.equal(v.items[0].orderId, doc.id)
+  assert.equal(v.items[0].orderType, 'sale')
+  assert.equal(v.total, 10)
+})
+
+await t('同一 requestId 重试 → duplicate，不重复收款', async () => {
+  const data = await ok('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(501), kind: 'sale', id: 'X202601021100000001', amount: 10, date: '2026-10-31', remark: '微信' }
+  })
+  assert.equal(data.duplicate, true)
+  assert.equal(saleDoc().received, 10)
+  assert.equal(saleDoc().payments.length, 1)
+})
+
+await t('action=settle 按差额结清；结清后再记 → 409', async () => {
+  const data = await ok('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(502), kind: 'sale', id: 'X202601021100000001', action: 'settle' }
+  })
+  assert.equal(data.amount, 14)
+  assert.equal(data.outstanding, 0)
+  assert.equal(data.settle, '结清')
+  assert.equal(saleDoc().settle, '结清')
+  const r = await call('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(503), kind: 'sale', id: 'X202601021100000001', amount: 1 }
+  })
+  assert.equal(r.status, 409)
+})
+
+await t('付款超过未付 → 409；采购单付款生成付款单 FK-', async () => {
+  const over = await call('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(504), kind: 'purchase', id: 'C202601011000000001', amount: 100 }
+  })
+  assert.equal(over.status, 409)
+  assert.match(over.data.error, /预存款|预付款/)
+  const data = await ok('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(505), kind: 'purchase', id: 'C202601011000000001', amount: 80 }
+  })
+  assert.match(data.voucher, /^FK-20261031-\d{4}$/)
+  assert.equal(data.settle, '结清')
+  assert.equal(purchaseDoc().paid, 80)
+})
+
+console.log('\n资金单据查询')
+await t('GET /vouchers：列表可按类型 / 单位 / 单号筛选', async () => {
+  const all = await ok('/api/ai/v1/vouchers', { key: maxKey })
+  assert.ok(all.total >= 4, `至少包含预存/预付与收付款单，实际 ${all.total}`)
+  const recv = await ok('/api/ai/v1/vouchers?type=receivable', { key: maxKey })
+  assert.ok(recv.vouchers.every(v => v.kind === 'receivable'))
+  assert.ok(recv.vouchers.some(v => v.code === vouchersFile('receipts.json')[0].code))
+  const byParty = await ok(`/api/ai/v1/vouchers?party=${encodeURIComponent('供应商甲')}`, { key: maxKey })
+  assert.ok(byParty.vouchers.length >= 1)
+  assert.ok(byParty.vouchers.every(v => v.party === '供应商甲'))
+  const byOrder = await ok('/api/ai/v1/vouchers?q=X202601021100000001', { key: maxKey })
+  assert.ok(byOrder.vouchers.length >= 1)
+  assert.ok(byOrder.vouchers.every(v => v.items.some(it => it.orderId === 'X202601021100000001')))
+})
+
+console.log('\n变更已开单据')
+await t('POST /amends：减少明细生成退货单，原单不动；同一 requestId 幂等', async () => {
+  const body = {
+    requestId: rid(601), kind: 'sale', sourceOrderId: 'X202601021100000001', party: '客户甲',
+    date: '2026-10-31', refundLines: [{ index: 0, qty: 1 }], amendLines: [],
+    reason: '客户少要一件', mode: 'pending'
+  }
+  const data = await ok('/api/ai/v1/amends', { key: maxKey, method: 'POST', body })
+  assert.ok(data.code)
+  assert.ok(data.returnId)
+  const again = await ok('/api/ai/v1/amends', { key: maxKey, method: 'POST', body })
+  assert.equal(again.duplicate, true)
+  assert.equal(again.code, data.code)
+})
+
+console.log('\n外链分享')
+await t('POST /shares 建链 / 列表 / 取消', async () => {
+  const data = await ok('/api/ai/v1/shares', {
+    key: maxKey, method: 'POST',
+    body: { action: 'create', kind: 'sale', docId: 'X202601021100000001', days: 7 }
+  })
+  assert.ok(data.share && data.share.token)
+  const list = await ok('/api/ai/v1/shares', { key: maxKey })
+  assert.ok(list.shares.some(s => s.token === data.share.token))
+  const cancel = await ok('/api/ai/v1/shares', {
+    key: maxKey, method: 'POST', body: { action: 'cancel', token: data.share.token }
+  })
+  assert.equal(cancel.ok, true)
+})
+
+console.log('\n主数据细节')
+await t('master 可写商品照片与供应商挂靠；不存在的供应商编码 → 404', async () => {
+  const data = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { code: 'P00002', photos: ['https://example.com/p.png'], suppliers: ['S00001'] } }
+  })
+  assert.equal(data.code, 'P00002')
+  const p2 = itemsFile().find(i => i.code === 'P00002')
+  assert.deepEqual(p2.photos, ['https://example.com/p.png'])
+  assert.deepEqual(p2.suppliers, ['S00001'])
+  const r = await call('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { code: 'P00002', suppliers: ['S99999'] } }
+  })
+  assert.equal(r.status, 404)
+})
+
+await t('预存流水 edit / delete：只能改自己写入的流水，已开单的金额被锁', async () => {
+  const add = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(701), type: 'supplier', party: 'S00001', action: 'add', amount: 20, remark: '现金' }
+  })
+  assert.ok(add.flowId)
+  const locked = await call('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(702), type: 'supplier', party: 'S00001', action: 'edit', flowId: add.flowId, amount: 30 }
+  })
+  assert.equal(locked.status, 409, '已开资金单据的金额不能改')
+  const edited = await ok('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(703), type: 'supplier', party: 'S00001', action: 'edit', flowId: add.flowId, remark: '现金（改）' }
+  })
+  assert.equal(edited.amount, 20)
+  const del = await call('/api/ai/v1/deposits', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(704), type: 'supplier', party: 'S00001', action: 'delete', flowId: add.flowId }
+  })
+  assert.equal(del.status, 409, '已开资金单据的流水不能删')
+  assert.equal(edited.balance, 720)
+})
+
 console.log('\n吊销与过期')
 await t('吊销后立即 401', async () => {
   await ok('/api/ai-keys', { method: 'POST', token, body: { action: 'revoke', id: readRecord.id } })

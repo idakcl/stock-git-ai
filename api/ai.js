@@ -24,6 +24,10 @@ import { refundTransaction } from './refunds.js'
 import { voidTransaction } from './voids.js'
 import { templateOperation, listTemplates } from './templates.js'
 import { readProfile } from './profile.js'
+import { depositWrite } from './ai-deposits.js'
+import { paymentWrite } from './ai-payments.js'
+import { amendTransaction } from './amends.js'
+import { listShares, shareOperation } from './shares.js'
 
 const V1 = '/api/ai/v1'
 const MAX_LIMIT = 200
@@ -102,6 +106,68 @@ function docView(o, kind) {
     remark: o.remark || '',
     createdAt: o.createdAt || '',
     createdBy: o.createdBy || ''
+  }
+}
+
+// 资金单据（收款单 / 付款单）：新集合可能还没创建，缺失按空表处理
+async function readOptionalArray(env, file) {
+  try {
+    const v = await readJSON(env, file)
+    return Array.isArray(v) ? v : []
+  } catch (e) {
+    if (/GitHub 404/.test(String((e && e.message) || e))) return []
+    throw e
+  }
+}
+
+async function readVouchers(url, env) {
+  const type = String(url.searchParams.get('type') || 'all')
+  if (!['all', 'receivable', 'payable'].includes(type)) fail('type 只能是 all / receivable / payable')
+  const [receipts, pays] = await Promise.all([
+    readOptionalArray(env, 'receipts.json'),
+    readOptionalArray(env, 'payment-vouchers.json')
+  ])
+  const from = String(url.searchParams.get('from') || '')
+  const to = String(url.searchParams.get('to') || '')
+  if (from && !isDate(from)) fail('from 日期格式应为 YYYY-MM-DD')
+  if (to && !isDate(to)) fail('to 日期格式应为 YYYY-MM-DD')
+  const party = String(url.searchParams.get('party') || '').trim()
+  const q = String(url.searchParams.get('q') || '').trim().toLowerCase()
+  let list = [
+    ...receipts.map(v => ({ ...v, kind: 'receivable' })),
+    ...pays.map(v => ({ ...v, kind: 'payable' }))
+  ]
+  if (type !== 'all') list = list.filter(v => v.kind === type)
+  list = list.filter(v => {
+    const d = String(v.date || '')
+    if (from && d < from) return false
+    if (to && d > to) return false
+    if (party && v.party !== party) return false
+    if (q) {
+      const hay = [v.code, v.party, v.remark, ...(v.items || []).map(it => it.orderId)].join(' ').toLowerCase()
+      if (!hay.includes(q)) return false
+    }
+    return true
+  })
+  list.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.code || '').localeCompare(String(a.code || '')))
+  const { total, nextCursor, slice } = paginate(list, url)
+  return {
+    total,
+    nextCursor,
+    vouchers: slice.map(v => ({
+      code: v.code || '',
+      kind: v.kind,
+      category: v.category || 'normal',
+      party: v.party || '',
+      date: v.date || '',
+      total: round2(Number(v.total || 0)),
+      remark: v.remark || '',
+      createdAt: v.createdAt || '',
+      items: (v.items || []).map(it => ({
+        orderId: it.orderId || '', orderType: it.orderType || '',
+        amount: round2(Number(it.amount || 0)), settle: it.settle || '', note: it.note || ''
+      }))
+    }))
   }
 }
 
@@ -240,7 +306,9 @@ async function readParties(url, env) {
     return {
       type, code: p.code || '', name: p.name || '',
       contact: p.contact || '', phone: p.phone || '',
-      balance: b.unpaid, total: b.gross, paid: b.paid, openDocs: b.open
+      balance: b.unpaid, total: b.gross, paid: b.paid, openDocs: b.open,
+      // 预存款 / 预付款可用余额：AI 判断能不能抵扣、要不要充值先看这个
+      prepaid: round2(((type === 'supplier' ? p.advances : p.deposits) || []).reduce((s, f) => s + Number(f && f.amount || 0), 0))
     }
   }).filter(r => (!onlyOpen || Math.abs(r.balance) > 1e-6)
     && (!q || String(r.name).toLowerCase().includes(q) || String(r.code).toLowerCase().includes(q)))
@@ -405,7 +473,10 @@ async function createDirectDoc(kind, input, env, ctx, deps, requestId) {
 }
 
 const ITEM_FIELDS = ['name', 'unit', 'price', 'cost', 'warning', 'package', 'spec', 'priceWholesale', 'priceInstaller', 'remark', 'barcode']
+// 商品照片与「供应商挂靠」不是标量，单独校验（照片只收 http(s) 链接，供应商只收已存在的编码）
 const PARTY_FIELDS = ['name', 'contact', 'phone', 'address', 'remark']
+const MAX_PHOTOS = 20
+const MAX_ITEM_SUPPLIERS = 50
 
 function applyMaster(state, input) {
   const type = String(input.type || '')
@@ -455,6 +526,26 @@ function applyMaster(state, input) {
       nextRecord[f] = round2(n)
     } else {
       nextRecord[f] = String(v == null ? '' : v).trim().slice(0, f === 'remark' || f === 'address' ? 200 : 80)
+    }
+  }
+  // 商品照片 / 供应商挂靠：数组类字段单独处理，避免被上面的 String() 变成 "[object Object]"
+  if (type === 'item') {
+    if ('photos' in data) {
+      if (!Array.isArray(data.photos)) fail('photos 必须是图片链接数组')
+      nextRecord.photos = data.photos
+        .map(p => String(p || '').trim())
+        .filter(p => /^https?:\/\//i.test(p))
+        .slice(0, MAX_PHOTOS)
+      if (data.photos.length && !nextRecord.photos.length) fail('photos 里没有合法的 http(s) 图片链接')
+    }
+    if ('suppliers' in data) {
+      if (!Array.isArray(data.suppliers)) fail('suppliers 必须是供应商编码数组')
+      const codes = data.suppliers.map(x => String(x || '').trim()).filter(Boolean)
+      if (codes.length > MAX_ITEM_SUPPLIERS) fail(`供应商最多 ${MAX_ITEM_SUPPLIERS} 个`)
+      const known = new Set((state.suppliers || []).map(x => x.code))
+      const unknown = codes.filter(x => !known.has(x))
+      if (unknown.length) fail(`供应商编码不存在：${unknown.join('、')}（请先用 POST /master 建档）`, 404)
+      nextRecord.suppliers = [...new Set(codes)]
     }
   }
   if (!String(nextRecord.name || '').trim()) fail('name 不能为空')
@@ -524,6 +615,9 @@ function schemaFor(env, ctx) {
       '直接开单（POST /sales、/purchases）要求客户/供应商已建档；新单位请先用 POST /master 建档。',
       '草稿订单不占库存、不进应收应付；只有 POST /orders 的 action=post 才会生成正式单据（需要 write:post）。',
       '库存是单据的派生数据，不能直接改写；改错请用作废 / 退货接口。',
+      '预存款 / 预付款充值（POST /deposits）会同时生成一张收 / 付款单；抵扣不能超过当前余额，写错请用相反方向冲回，流水可用 flowId 编辑/删除（已开资金单据的金额不可改）。',
+      '收付款（POST /payments）只能记不超过未收 / 未付的金额并自动生成收 / 付款单；多出的钱请用 /deposits 记成预存款 / 预付款。',
+      '改已开单据用 POST /amends（原单不动，减少的生成退货单、增加的生成补差单）；作废后不能再用原单号开新单。',
       '权限不足返回 403，密钥无效/过期/吊销返回 401；错误信息不会透露密钥是否存在。'
     ]
   }
@@ -608,6 +702,8 @@ export async function handleAi(req, url, env, deps) {
       else if (path === '/ledger') { assertScope(ctx, 'read:parties'); body = await readLedger(url, env) }
       else if (path === '/summary') { assertScope(ctx, 'read:reports'); body = await readSummary(url, env, ctx) }
       else if (path === '/profile') { assertScope(ctx, 'read:profile'); body = { profile: await readProfile(env) } }
+      else if (path === '/vouchers') { assertScope(ctx, 'read:vouchers'); body = await readVouchers(url, env) }
+      else if (path === '/shares') { assertScope(ctx, 'write:shares'); body = { shares: await listShares(env) } }
       else if (path === '/templates') { assertScope(ctx, 'write:templates'); body = { templates: await listTemplates(env) } }
       else return finish({ error: `未知接口：GET ${path}` }, 404)
       await noteUsage(env, ctx.key, 'read')
@@ -669,6 +765,40 @@ export async function handleAi(req, url, env, deps) {
       const result = await masterWrite(body, env, ctx, deps)
       await noteUsage(env, ctx.key, 'write')
       return finish(result, 200, { requestId, code: result.code })
+    }
+
+    if (path === '/payments') {
+      assertScope(ctx, 'write:payments')
+      const requestId = requestIdOf(body)
+      const result = await paymentWrite(body, env, ctx, requestId)
+      await noteUsage(env, ctx.key, 'write')
+      return finish(result, 200, { requestId, code: result.voucher })
+    }
+
+    if (path === '/amends') {
+      assertScope(ctx, 'write:amend')
+      // 复用页面的变更事务：requestId 已内置幂等，原单不动，减少的生成退货单、增加的生成补差单
+      if (!['sale', 'purchase'].includes(String(body.kind || ''))) fail('kind 只能是 sale 或 purchase')
+      if (!String(body.sourceOrderId || '').trim()) fail('请提供原单号 sourceOrderId')
+      const requestId = requestIdOf(body)
+      const result = await amendTransaction(env, { ...body, requestId }, deps.derive, deps.rebuildStock)
+      await noteUsage(env, ctx.key, 'write')
+      return finish(result, 200, { requestId, code: result.code })
+    }
+
+    if (path === '/shares') {
+      assertScope(ctx, 'write:shares')
+      const result = await shareOperation(env, body)
+      await noteUsage(env, ctx.key, 'write')
+      return finish(result, 200, { code: result.share && result.share.token })
+    }
+
+    if (path === '/deposits') {
+      assertScope(ctx, 'write:deposits')
+      const requestId = requestIdOf(body)
+      const result = await depositWrite(body, env, ctx, requestId)
+      await noteUsage(env, ctx.key, 'write')
+      return finish(result, 200, { requestId, code: result.voucher || result.party.code })
     }
 
     if (path === '/templates') {

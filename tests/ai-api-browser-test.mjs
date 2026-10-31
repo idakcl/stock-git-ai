@@ -107,7 +107,7 @@ await t('新建：选最大权限 + 永久，签发后一次性显示密钥', as
   // 逐项微调：点整行也能取消/重新勾选
   const costRow = dialog.locator('.scope-item', { hasText: '看进价与毛利' })
   await costRow.click()
-  assert.match(await dialog.locator('.scope-summary').textContent(), /已选\s*13\s*\//)
+  assert.match(await dialog.locator('.scope-summary').textContent(), new RegExp(`已选\\s*${AI_ALL_SCOPE_IDS.length - 1}\\s*/`))
   await costRow.click()
   assert.match(await dialog.locator('.scope-summary').textContent(), /最大权限/)
   // 永久
@@ -146,7 +146,7 @@ await t('改权限：取消最大权限后只保留勾选项', async () => {
   const dialog = page.locator('.el-dialog').filter({ hasText: '修改密钥权限' })
   await dialog.waitFor({ state: 'visible' })
   await dialog.locator('.preset-row button', { hasText: '只读问答' }).click()
-  assert.match(await dialog.locator('.scope-summary').textContent(), /已选\s*4\s*\/\s*14/)
+  assert.match(await dialog.locator('.scope-summary').textContent(), new RegExp(`已选\\s*4\\s*/\\s*${AI_ALL_SCOPE_IDS.length}`))
   await dialog.getByRole('button', { name: '保存' }).click()
   const post = await until(() => posts.find(p => p.action === 'update'))
   assert.ok(post)

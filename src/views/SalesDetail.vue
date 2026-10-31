@@ -506,9 +506,12 @@ function doExport() {
   downloadCSV(`销售单-${sale.value.id}.csv`, exportColumns.value, detailItems.value, docHeaderFields.value)
   ElMessage.success(`已导出 ${detailItems.value.length} 行${priceHidden.value ? '（已隐藏单价与金额）' : ''}`)
 }
+// 打印不带「供应商」列：供应商是商品档案里的挂靠关系，不是本单信息，印在销售单上会让客户以为
+// 货是从他家买的；CSV 仍保留这一列（内部对账要看）
+const printColumns = computed(() => exportColumns.value.filter(c => c.label !== '供应商'))
 function doPrint() {
   if (!detailItems.value.length) return ElMessage.warning('本单暂无商品明细')
-  printA4(`${isReturn(sale.value) ? '销售退货单' : '销售单'} ${sale.value.id}`, exportColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
+  printA4(`${isReturn(sale.value) ? '销售退货单' : '销售单'} ${sale.value.id}`, printColumns.value, detailItems.value, docSubtitle.value, docHeaderFields.value, profileFields.value, '', repeatHeaderPref.value)
 }
 
 async function onPaySaved(updated, payload) {
