@@ -19,14 +19,14 @@ function cacheKey(url) {
 }
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url)
 
     if (url.pathname.startsWith('/api/')) {
       // AI-API：响应内容随密钥权限（scope）而变，而 Authorization 不参与边缘缓存键 ——
       // 一旦缓存，A 密钥查到的结果会被 B 密钥直接读到（越权泄露）。因此这条路径完全绕开缓存层。
       // 调用日志同理：缓存 15s 会看到「刚调用却查不到」，排障时最需要它实时。
-      if (url.pathname.startsWith('/api/ai/') || url.pathname === '/api/ai-logs') return handleApi(req, url, env)
+      if (url.pathname.startsWith('/api/ai/') || url.pathname === '/api/ai-logs') return handleApi(req, url, env, ctx)
 
       // ---- GET：边缘缓存优先 ----
       if (req.method === 'GET') {
@@ -61,7 +61,7 @@ export default {
       }
 
       // OPTIONS 预检等其它方法：直接透传
-      return handleApi(req, url, env)
+      return handleApi(req, url, env, ctx)
     }
 
     return env.ASSETS.fetch(req)

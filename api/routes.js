@@ -399,7 +399,7 @@ async function syncDerived(env, { purchases, sales, known }) {
   }
 }
 
-export async function handleApi(req, url, env) {
+export async function handleApi(req, url, env, execCtx) {
   const path = url.pathname.replace(/^\/api/, '') || '/'
   const method = req.method
 
@@ -410,7 +410,7 @@ export async function handleApi(req, url, env) {
   // AI-API：用 ai_live_ 密钥鉴权，权限由签发时勾选的 scope 决定。
   // 放在登录校验之前 —— AI 没有、也不该有管理员会话；它只走自己的密钥与权限表。
   if (path.startsWith('/ai/')) {
-    return handleAi(req, url, env, { derive, rebuildStock })
+    return handleAi(req, url, env, { derive, rebuildStock, execCtx })
   }
 
   // 登录接口：唯一无需会话即可访问的写接口

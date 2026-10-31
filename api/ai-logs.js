@@ -100,6 +100,31 @@ export async function flushAiLogs(env) {
   }
 }
 
+// 响应结束后在本次请求的生命周期里落盘（配合 ctx.waitUntil 调用）。
+// 为什么必须有这一步：上面的「攒够 40 条或过了 60 秒再写」只在同一个 isolate 内生效，
+// 而生产环境一次调用往往就是一个新 isolate，请求一返回它就被回收，缓冲区连同日志一起消失——
+// 结果就是「明明调用了很多次，日志里一条都没有」。
+// 现在每次调用结束都把「冲刷」挂到 waitUntil 上，等待 1.2 秒让同一瞬间的并发调用合并成一次提交，
+// 然后无论还有没有后续请求都会真的写进 ai-logs.json。
+const pendingFlushes = new Map()
+
+export function scheduleFlush(env, waitMs = 1200) {
+  const id = bufferId(env)
+  if (pendingFlushes.has(id)) return pendingFlushes.get(id)
+  const p = (async () => {
+    try { await new Promise(r => setTimeout(r, waitMs)) } catch (_) { /* ignore */ }
+    // 落盘失败（限流 / 409）时缓冲不会清空，这里再补两次，避免这一次调用的日志直接丢掉
+    for (let i = 0; i < 3; i++) {
+      await flushAiLogs(env)
+      const b = buffers.get(id)
+      if (!b || !b.entries.length) return
+      await new Promise(r => setTimeout(r, 400))
+    }
+  })().finally(() => pendingFlushes.delete(id))
+  pendingFlushes.set(id, p)
+  return p
+}
+
 // 管理端读取：先把缓冲刷一次，保证刚发生的事能看见
 export async function listAiLogs(env, url) {
   await flushAiLogs(env)

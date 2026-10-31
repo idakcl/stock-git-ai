@@ -13,7 +13,8 @@ import { readCollection } from './storage.js'
 import { openTransaction, commitTransaction } from './tx.js'
 import { corsHeaders } from './auth.js'
 import { authenticateAi, assertScope, noteUsage } from './ai-keys.js'
-import { recordAiLog, makeAiLog, logPathOf } from './ai-logs.js'
+import { recordAiLog, makeAiLog, logPathOf, scheduleFlush } from './ai-logs.js'
+import { genVoucherCode } from '../src/utils/voucher.js'
 import { AI_ENDPOINTS, AI_SCOPE_GROUPS, AI_PRESETS } from '../src/utils/aiScopes.js'
 import { genOrderId, nextEntityCode } from '../src/utils/code.js'
 import { todayCN } from '../src/utils/time.js'
@@ -477,8 +478,10 @@ const ITEM_FIELDS = ['name', 'unit', 'price', 'cost', 'warning', 'package', 'spe
 const PARTY_FIELDS = ['name', 'contact', 'phone', 'address', 'remark']
 const MAX_PHOTOS = 20
 const MAX_ITEM_SUPPLIERS = 50
+const MAX_FLOWS = 50
+const MAX_FLOW_AMOUNT = 100000000
 
-function applyMaster(state, input) {
+function applyMaster(state, input, requestId) {
   const type = String(input.type || '')
   const action = String(input.action || 'upsert')
   if (!['item', 'customer', 'supplier'].includes(type)) fail('type 只能是 item / customer / supplier')
@@ -515,12 +518,18 @@ function applyMaster(state, input) {
   }
 
   // upsert：有 code 按 code、否则按名字匹配；都没有就新建（code 自动生成）
+  const next = { ...state }
   const nextRecord = idx >= 0 ? { ...list[idx] } : {}
   const fields = type === 'item' ? ITEM_FIELDS : PARTY_FIELDS
   for (const f of fields) {
     if (!(f in data)) continue
     const v = data[f]
     if (['price', 'cost', 'warning', 'priceWholesale', 'priceInstaller'].includes(f)) {
+      // 售价/成本类字段允许显式传 null 或空串：表示「未设置」，与商品档案里 price:null 的存量口径一致
+      if ((f === 'price' || f === 'cost' || f === 'priceWholesale' || f === 'priceInstaller') && (v == null || v === '')) {
+        nextRecord[f] = null
+        continue
+      }
       const n = Number(v)
       if (!Number.isFinite(n) || n < 0) fail(`${f} 必须是非负数字`)
       nextRecord[f] = round2(n)
@@ -548,38 +557,99 @@ function applyMaster(state, input) {
       nextRecord.suppliers = [...new Set(codes)]
     }
   }
+  // 客户预存款 / 供应商预付款流水：允许随建档一起写入（新建供应商时就能带上预付款，不必事后补）
+  if (type !== 'item') {
+    const field = type === 'customer' ? 'deposits' : 'advances'
+    if (field in data) {
+      if (!Array.isArray(data[field])) fail(`${field} 必须是流水数组（可空数组）`)
+      if (data[field].length > MAX_FLOWS) fail(`一次最多写入 ${MAX_FLOWS} 条流水`)
+      const spec = type === 'customer'
+        ? { prefix: 'SK', kind: 'receivable', voucherFile: 'receipts', label: '客户', money: '预存款' }
+        : { prefix: 'FK', kind: 'payable', voucherFile: 'payment-vouchers', label: '供应商', money: '预付款' }
+      const cur = Array.isArray(nextRecord[field]) ? nextRecord[field].slice() : []
+      // 幂等：同一 requestId 重试时，已经记过的流水（id 里带 requestId）直接跳过，不再加一次钱
+      const seen = new Set(cur.map(f => f && f.id).filter(Boolean))
+      const vouchers = Array.isArray(state[spec.voucherFile]) ? state[spec.voucherFile].slice() : []
+      data[field].forEach((f, i) => {
+        if (!f || typeof f !== 'object') fail(`第 ${i + 1} 条流水不是合法对象`)
+        const amount = round2(Number(f.amount))
+        if (!Number.isFinite(amount) || amount === 0) fail(`第 ${i + 1} 条流水 amount 必须是非零数字（存入为正、抵扣为负）`)
+        if (Math.abs(amount) > MAX_FLOW_AMOUNT) fail(`第 ${i + 1} 条流水金额不能超过 ${MAX_FLOW_AMOUNT}`)
+        if (f.date && !isDate(f.date)) fail(`第 ${i + 1} 条流水 date 格式应为 YYYY-MM-DD`)
+        const date = isDate(f.date) ? f.date : todayCN()
+        const id = requestId ? `af-${requestId}-${i + 1}` : `af-${Date.now()}-${i + 1}`
+        if (seen.has(id)) return
+        seen.add(id)
+        const note = String(f.remark == null ? '' : f.remark).trim().slice(0, 200)
+        const flow = { id, date, amount, remark: note, time: new Date().toISOString() }
+        if (requestId) flow.aiRequestId = requestId
+        if (amount > 0) {
+          // 与界面 / 资金单据接口同一口径：充值即资金变动，生成一张无关联单号的收/付款单
+          const voucherNote = note || `存入${spec.label}${spec.money}`
+          const code = genVoucherCode(spec.prefix, date, vouchers)
+          vouchers.push({
+            code,
+            kind: spec.kind,
+            category: 'deposit-recharge',
+            party: nextRecord.name,
+            date,
+            remark: voucherNote,
+            total: amount,
+            items: [{ orderId: '', orderType: '', amount, note: voucherNote }],
+            createdAt: flow.time
+          })
+          flow.voucher = code
+        }
+        cur.push(flow)
+      })
+      nextRecord[field] = cur
+      next[spec.voucherFile] = vouchers
+    }
+  }
   if (!String(nextRecord.name || '').trim()) fail('name 不能为空')
   if (idx < 0) {
     // 新档：编码自动生成，避免 AI 猜编码导致主键冲突
     const prefix = type === 'item' ? 'P' : type === 'customer' ? 'C' : 'S'
     nextRecord.code = nextEntityCode(list, prefix, 5)
     if (type === 'item') {
-      nextRecord.price = Number(nextRecord.price || 0)
-      nextRecord.cost = Number(nextRecord.cost || 0)
+      // 没填售价/成本就留 null（不是 0）：0 元是「免费送」，和「还没定价」是两件事
+      if (!('price' in data)) nextRecord.price = null
+      if (!('cost' in data)) nextRecord.cost = null
       nextRecord.unit = nextRecord.unit || ''
-      nextRecord.suppliers = []
+      if (!Array.isArray(nextRecord.suppliers)) nextRecord.suppliers = []
     } else {
-      nextRecord[type === 'customer' ? 'deposits' : 'advances'] = []
+      const field = type === 'customer' ? 'deposits' : 'advances'
+      if (!Array.isArray(nextRecord[field])) nextRecord[field] = []
     }
     list.push(nextRecord)
   } else {
     list[idx] = nextRecord
   }
-  return { next: { ...state, [listKey]: list }, code: nextRecord.code, name: nextRecord.name }
+  next[listKey] = list
+  return { next, code: nextRecord.code, name: nextRecord.name }
 }
 
-async function masterWrite(input, env, ctx, deps) {
-  const tx = await openTransaction(env, ['items', 'suppliers', 'customers', 'purchases', 'sales', 'orders', 'stock', 'logs'], { optional: ['orders'] })
+async function masterWrite(input, env, ctx, deps, requestId) {
+  // 带流水时才有必要把两张资金单据表读进来（多两次 blob 读，避免每次建档都白读）
+  const partyData = input[input.type] && typeof input[input.type] === 'object' ? input[input.type] : {}
+  const withFlows = (input.type === 'customer' && 'deposits' in partyData) || (input.type === 'supplier' && 'advances' in partyData)
+  const flowFiles = withFlows ? ['receipts', 'payment-vouchers'] : []
+  const tx = await openTransaction(env, ['items', 'suppliers', 'customers', 'purchases', 'sales', 'orders', 'stock', 'logs', ...flowFiles], { optional: ['orders', ...flowFiles] })
   const now = new Date().toISOString()
-  const { next, code, name } = applyMaster(tx.state, input)
+  const { next, code, name } = applyMaster(tx.state, input, requestId)
   Object.assign(next, deps.derive(next.items, next.suppliers, next.purchases, next.sales, next.customers))
   next.stock = deps.rebuildStock(next.purchases, next.sales, next.items)
+  const flows = input.type === 'customer' ? (next.customers || []).find(x => x.code === code)?.deposits : (next.suppliers || []).find(x => x.code === code)?.advances
   const r = await commitTransaction(tx, {
     next,
     message: `ai: master ${input.action || 'upsert'} ${input.type} ${code} by ${ctx.key.name}`.trim(),
     logEntry: { source: 'ai', action: `master-${input.action || 'upsert'}`, type: input.type, code, key: ctx.key.name, keyId: ctx.key.id, at: now }
   })
-  return { ok: true, type: input.type, action: input.action || 'upsert', code, name, commit: r.unchanged ? undefined : r.sha }
+  return {
+    ok: true, type: input.type, action: input.action || 'upsert', code, name,
+    ...(withFlows ? { balance: round2((flows || []).reduce((s, f) => s + Number(f && f.amount || 0), 0)) } : {}),
+    commit: r.unchanged ? undefined : r.sha
+  }
 }
 
 async function uploadImage(req, env) {
@@ -663,16 +733,22 @@ export async function handleAi(req, url, env, deps) {
   const logPath = logPathOf(path, url)
 
   // 日志是旁路：写失败只丢一条记录，绝不影响这次调用本身返回什么
-  const writeLog = (status, payload, meta = {}) => recordAiLog(env, makeAiLog({
-    method,
-    path: logPath,
-    key: meta.key || null,
-    status,
-    startedAt: started,
-    requestId: meta.requestId,
-    code: meta.code,
-    error: status >= 400 ? (payload && payload.error) || '' : ''
-  })).catch(() => {})
+  const writeLog = (status, payload, meta = {}) => {
+    // waitUntil 把「落盘」挂到本次请求上：isolate 在响应后立刻被回收也不会丢日志（见 ai-logs.js）
+    if (deps.execCtx && typeof deps.execCtx.waitUntil === 'function') {
+      try { deps.execCtx.waitUntil(scheduleFlush(env)) } catch (_) { /* 仅测试环境的假 ctx */ }
+    }
+    return recordAiLog(env, makeAiLog({
+      method,
+      path: logPath,
+      key: meta.key || null,
+      status,
+      startedAt: started,
+      requestId: meta.requestId,
+      code: meta.code,
+      error: status >= 400 ? (payload && payload.error) || '' : ''
+    })).catch(() => {})
+  }
 
   let ctx
   try {
@@ -762,7 +838,7 @@ export async function handleAi(req, url, env, deps) {
       assertScope(ctx, 'write:master')
       const requestId = String(body.requestId || '').trim()
       if (requestId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) fail('requestId 需为 16~80 位字母、数字或短横线')
-      const result = await masterWrite(body, env, ctx, deps)
+      const result = await masterWrite(body, env, ctx, deps, requestId)
       await noteUsage(env, ctx.key, 'write')
       return finish(result, 200, { requestId, code: result.code })
     }

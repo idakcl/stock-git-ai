@@ -532,6 +532,104 @@ await t('master 可写商品照片与供应商挂靠；不存在的供应商编�
   assert.equal(r.status, 404)
 })
 
+await t('新建商品：不传售价/成本 → 留 null（不写 0）；传了供应商 → 直接挂上', async () => {
+  const data = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { name: '测试无售价商品', unit: '个', suppliers: ['S00001'] } }
+  })
+  assert.ok(data.code, '应返回新编码')
+  const rec = itemsFile().find(i => i.code === data.code)
+  assert.equal(rec.price, null, '未填售价应为 null，而不是 0')
+  assert.equal(rec.cost, null, '未填成本应为 null，而不是 0')
+  assert.deepEqual(rec.suppliers, ['S00001'], '新建时的供应商挂靠不能被清空')
+
+  const priced = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { name: '测试零元商品', price: 0 } }
+  })
+  assert.equal(itemsFile().find(i => i.code === priced.code).price, 0, '显式传 0 仍应保留 0')
+
+  // 改资料时不传售价 → 不动；显式传 null → 清空
+  await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { code: data.code, remark: '只改备注' } }
+  })
+  assert.equal(itemsFile().find(i => i.code === data.code).price, null)
+  // 显式传 null = 清空（有销售历史的商品售价会由最近一张销售单回填，这里用无单据的新品验证）
+  await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'item', action: 'upsert', item: { code: priced.code, price: null } }
+  })
+  assert.equal(itemsFile().find(i => i.code === priced.code).price, null, '显式 null 应清空售价')
+})
+
+await t('新建供应商可同时写入预付款流水并生成 FK- 付款单；同 requestId 重试不重复加钱', async () => {
+  const req = rid(801)
+  const body = {
+    requestId: req, type: 'supplier', action: 'upsert',
+    supplier: { name: '测试预付款供应商', contact: '张三', advances: [{ date: '2026-02-01', amount: 300, remark: '预付订金' }] }
+  }
+  const data = await ok('/api/ai/v1/master', { key: maxKey, method: 'POST', body })
+  assert.equal(data.balance, 300)
+  const sup = JSON.parse(repo.read('suppliers.json')).find(s => s.code === data.code)
+  assert.equal(sup.advances.length, 1)
+  assert.match(sup.advances[0].voucher, /^FK-\d{8}-\d{3,}$/)
+  const vouchers = JSON.parse(repo.read('payment-vouchers.json') || '[]')
+  const v = vouchers.find(x => x.code === sup.advances[0].voucher)
+  assert.equal(v.total, 300)
+  assert.equal(v.party, '测试预付款供应商')
+
+  // 网络重试：同一 requestId 再来一次，流水 / 资金单据都不能翻倍
+  const again = await ok('/api/ai/v1/master', { key: maxKey, method: 'POST', body })
+  assert.equal(again.code, data.code)
+  assert.equal(again.balance, 300)
+  const sup2 = JSON.parse(repo.read('suppliers.json')).find(s => s.code === data.code)
+  assert.equal(sup2.advances.length, 1, '重试不应重复记流水')
+})
+
+await t('新建客户可同时写入预存款流水并生成 SK- 收款单', async () => {
+  const data = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: {
+      requestId: rid(802), type: 'customer', action: 'upsert',
+      customer: { name: '测试预存客户', deposits: [{ amount: 88.5, remark: '预存货款' }] }
+    }
+  })
+  assert.equal(data.balance, 88.5)
+  const cus = JSON.parse(repo.read('customers.json')).find(c => c.code === data.code)
+  assert.equal(cus.deposits.length, 1)
+  assert.match(cus.deposits[0].voucher, /^SK-\d{8}-\d{3,}$/)
+})
+
+await t('流水非法（0 元 / 非数组）→ 400', async () => {
+  const zero = await call('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'supplier', action: 'upsert', supplier: { name: '测试零元预付', advances: [{ amount: 0 }] } }
+  })
+  assert.equal(zero.status, 400)
+  const bad = await call('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { type: 'customer', action: 'upsert', customer: { name: '测试坏流水', deposits: 'x' } }
+  })
+  assert.equal(bad.status, 400)
+})
+
+await t('调用日志：响应结束后借助 waitUntil 落盘（冷 isolate 也不丢）', async () => {
+  const { resetAiLogs } = await import('../api/ai-logs.js')
+  resetAiLogs(env)
+  const waits = []
+  const req = new Request('https://worker.test/api/ai/v1/items', {
+    method: 'GET', headers: { 'Content-Type': 'application/json', Origin: 'https://worker.test', Authorization: `Bearer ${readKey}` }
+  })
+  const res = await handleApi(req, new URL(req.url), env, { waitUntil: p => waits.push(p) })
+  assert.equal(res.status, 200)
+  assert.equal(waits.length, 1, '应当把落盘挂到 waitUntil 上')
+  await waits[0]
+  const raw = repo.read('ai-logs.json')
+  assert.ok(raw && raw.includes('/items'), '日志应已写入数据仓')
+})
+
+
 await t('预存流水 edit / delete：只能改自己写入的流水，已开单的金额被锁', async () => {
   const add = await ok('/api/ai/v1/deposits', {
     key: maxKey, method: 'POST',
