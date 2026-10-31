@@ -4,17 +4,17 @@
       <template #header>
         <div class="card-header">
           <b>收付款单</b>
-          <span class="header-sub">每一笔收付款、预存预付、超额转存、抵扣划转都自动生成一张资金单据（收款单 SK- / 付款单 FK-）</span>
+          <span class="header-sub">每一笔收付款、预存预付、超额转存、抵扣划转都自动生成一张资金单据（收款单 SK-、付款单 FK-、退款单 TK-、退货核销 HX-）</span>
         </div>
       </template>
 
       <div class="stat-grid">
         <div class="stat-item">
-          <el-statistic title="收款单累计" :value="receiptSum" :precision="2" prefix="¥" value-style="color:var(--color-success)" />
+          <el-statistic title="收款单 SK 累计" :value="receiptSum" :precision="2" prefix="¥" value-style="color:var(--color-success)" />
           <div class="stat-sub">{{ receipts.length }} 张</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="付款单累计" :value="voucherSum" :precision="2" prefix="¥" value-style="color:var(--el-color-primary)" />
+          <el-statistic title="付款单 FK 累计" :value="voucherSum" :precision="2" prefix="¥" value-style="color:var(--el-color-primary)" />
           <div class="stat-sub">{{ vouchers.length }} 张</div>
         </div>
         <div class="stat-item">
@@ -24,8 +24,8 @@
       </div>
 
       <el-tabs v-model="tab" class="vtabs">
-        <el-tab-pane label="收款单" name="receipts" />
-        <el-tab-pane label="付款单" name="payment-vouchers" />
+        <el-tab-pane label="收款单 SK" name="receipts" />
+        <el-tab-pane label="付款单 FK" name="payment-vouchers" />
         <el-tab-pane label="退款单 TK" name="refunds" />
         <el-tab-pane label="退货核销 HX" name="settlements" />
       </el-tabs>
@@ -105,7 +105,7 @@
           :title="`这张资金单据已作废${current.voidedAt ? `（${fmtCNTime(current.voidedAt) || current.voidedAt}）` : ''}${current.voidOf ? `，随源单据 ${current.voidOf} 一起作废` : ''}：不计入收付款合计${current.voidedReason ? `。原因：${current.voidedReason}` : ''}。`" />
         <el-descriptions :column="1" border size="small" class="vh">
           <el-descriptions-item label="资金单据编号">{{ current.code }}</el-descriptions-item>
-          <el-descriptions-item label="类型">{{ current.kind === 'refund' ? (current.direction === 'to_customer' ? '退给客户' : '收供应商退款') : current.kind === 'receivable' ? '收款单（客户）' : '付款单（供应商）' }}</el-descriptions-item>
+          <el-descriptions-item label="类型">{{ current.kind === 'refund' ? (current.direction === 'to_customer' ? '退给客户' : '收供应商退款') : current.kind === 'receivable' ? '收款单 SK（客户）' : '付款单 FK（供应商）' }}</el-descriptions-item>
           <el-descriptions-item v-if="current.kind === 'refund'" label="核销金额">{{ Number(current.settlementTotal || 0).toFixed(2) }}（非现金核销不计入资金净额）</el-descriptions-item>
           <el-descriptions-item label="类别">{{ categoryLabel(current) }}</el-descriptions-item>
           <el-descriptions-item label="往来单位">{{ current.party }}</el-descriptions-item>
@@ -192,7 +192,7 @@ watch(current, row => {
 // 源单据日期/备注：用于抽屉明细展示（单号链接 + 日期 + 备注，避免单据内重复存冗余）
 const orderMeta = ref({})
 
-const tabLabel = computed(() => ({ receipts: '收款单', 'payment-vouchers': '付款单', refunds: '退款单', settlements: '退货核销单' })[tab.value])
+const tabLabel = computed(() => ({ receipts: '收款单 SK', 'payment-vouchers': '付款单 FK', refunds: '退款单 TK', settlements: '退货核销 HX' })[tab.value])
 const currentList = computed(() => tab.value === 'receipts' ? receipts.value : tab.value === 'payment-vouchers' ? vouchers.value : refunds.value.filter(v => tab.value === 'refunds' ? v.category === 'refund' : v.category !== 'refund'))
 
 // 时间段筛选（按单据日期）+ 往来单位筛选：清空后回退为全量
@@ -249,7 +249,7 @@ function enrichedItems(voucher) {
 
 // 业务子类别保持独立，普通单据按收付方向分别命名。
 function categoryLabel(row) {
-  const type = row.kind === 'receivable' || row.code?.startsWith('SK-') ? '收款单' : '付款单'
+  const type = row.kind === 'receivable' || row.code?.startsWith('SK-') ? '收款单 SK' : '付款单 FK'
   if (!row.category || row.category === 'normal') return type
   return ({ refund: '现金退款', 'return-offset': '退货抵欠款', 'return-deposit': '退货转余额' })[row.category] || VOUCHER_CATEGORY[row.category] || type
 }
