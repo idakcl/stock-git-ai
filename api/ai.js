@@ -13,6 +13,7 @@ import { readCollection } from './storage.js'
 import { openTransaction, commitTransaction } from './tx.js'
 import { corsHeaders } from './auth.js'
 import { authenticateAi, assertScope, noteUsage } from './ai-keys.js'
+import { recordAiLog, makeAiLog, logPathOf } from './ai-logs.js'
 import { AI_ENDPOINTS, AI_SCOPE_GROUPS, AI_PRESETS } from '../src/utils/aiScopes.js'
 import { genOrderId, nextEntityCode } from '../src/utils/code.js'
 import { todayCN } from '../src/utils/time.js'
@@ -562,14 +563,36 @@ function normalizeDraftOrder(order, items) {
 }
 
 export async function handleAi(req, url, env, deps) {
+  const started = Date.now()
   const method = req.method
   const path = url.pathname.startsWith(V1) ? url.pathname.slice(V1.length) || '/' : url.pathname.replace(/^\/api\/ai/, '')
+  const logPath = logPathOf(path, url)
+
+  // 日志是旁路：写失败只丢一条记录，绝不影响这次调用本身返回什么
+  const writeLog = (status, payload, meta = {}) => recordAiLog(env, makeAiLog({
+    method,
+    path: logPath,
+    key: meta.key || null,
+    status,
+    startedAt: started,
+    requestId: meta.requestId,
+    code: meta.code,
+    error: status >= 400 ? (payload && payload.error) || '' : ''
+  })).catch(() => {})
 
   let ctx
   try {
     ctx = await authenticateAi(req, url, env)
   } catch (e) {
-    return json(req, env, { error: e.message || '密钥无效' }, e.status || 401)
+    const status = e.status || 401
+    // 鉴权失败也要留痕：否则「谁在用错密钥、被拒了多少次」完全不可见
+    await writeLog(status, { error: e.message })
+    return json(req, env, { error: e.message || '密钥无效' }, status)
+  }
+
+  const finish = async (payload, status = 200, meta = {}) => {
+    await writeLog(status, payload, { key: ctx.key, ...meta })
+    return json(req, env, payload, status)
   }
 
   try {
@@ -586,12 +609,12 @@ export async function handleAi(req, url, env, deps) {
       else if (path === '/summary') { assertScope(ctx, 'read:reports'); body = await readSummary(url, env, ctx) }
       else if (path === '/profile') { assertScope(ctx, 'read:profile'); body = { profile: await readProfile(env) } }
       else if (path === '/templates') { assertScope(ctx, 'write:templates'); body = { templates: await listTemplates(env) } }
-      else return json(req, env, { error: `未知接口：GET ${path}` }, 404)
+      else return finish({ error: `未知接口：GET ${path}` }, 404)
       await noteUsage(env, ctx.key, 'read')
-      return json(req, env, body)
+      return finish(body)
     }
 
-    if (method !== 'POST') return json(req, env, { error: `不支持的请求方法 ${method}` }, 405)
+    if (method !== 'POST') return finish({ error: `不支持的请求方法 ${method}` }, 405)
 
     const body = await req.json().catch(() => { fail('请求体必须是 JSON') })
 
@@ -611,7 +634,7 @@ export async function handleAi(req, url, env, deps) {
       }
       const result = await orderTransaction(env, input, deps.derive, deps.rebuildStock)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { requestId, code: result.code || result.id || (result.order && result.order.id) })
     }
 
     if (path === '/sales' || path === '/purchases') {
@@ -619,24 +642,24 @@ export async function handleAi(req, url, env, deps) {
       const requestId = requestIdOf(body)
       const result = await createDirectDoc(path === '/sales' ? 'sale' : 'purchase', body, env, ctx, deps, requestId)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { requestId, code: result.id })
     }
 
     if (path === '/refunds') {
       assertScope(ctx, 'write:refunds')
-      requestIdOf(body)
+      const requestId = requestIdOf(body)
       // AI 只允许「新建退货 / 核销」，不允许 restore / backfill 这类整表覆盖
       if (!['create', 'settle'].includes(String(body.action || ''))) fail('action 只能是 create 或 settle')
       const result = await refundTransaction(env, body, deps.derive, deps.rebuildStock)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { requestId, code: result.code || result.id })
     }
 
     if (path === '/voids') {
       assertScope(ctx, 'write:voids')
       const result = await voidTransaction(env, body, deps.derive, deps.rebuildStock)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { code: result.code || result.id })
     }
 
     if (path === '/master') {
@@ -645,27 +668,27 @@ export async function handleAi(req, url, env, deps) {
       if (requestId && !/^[a-zA-Z0-9-]{16,80}$/.test(requestId)) fail('requestId 需为 16~80 位字母、数字或短横线')
       const result = await masterWrite(body, env, ctx, deps)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { requestId, code: result.code })
     }
 
     if (path === '/templates') {
       assertScope(ctx, 'write:templates')
       const result = await templateOperation(env, body)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result, 200, { code: result.code || result.name })
     }
 
     if (path === '/upload') {
       assertScope(ctx, 'write:upload')
       const result = await uploadImage(req, env)
       await noteUsage(env, ctx.key, 'write')
-      return json(req, env, result)
+      return finish(result)
     }
 
-    return json(req, env, { error: `未知接口：POST ${path}` }, 404)
+    return finish({ error: `未知接口：POST ${path}` }, 404)
   } catch (e) {
     const status = [400, 403, 404, 409, 422, 429, 500, 502].includes(e.status) ? e.status
       : /GitHub (409|422)/.test(String(e.message || '')) ? 409 : 500
-    return json(req, env, { error: e.message || String(e) }, status)
+    return finish({ error: e.message || String(e) }, status)
   }
 }

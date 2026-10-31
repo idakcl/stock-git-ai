@@ -12,6 +12,7 @@ import { listShares, readPublicShare, shareOperation } from './shares.js'
 import { listTemplates, templateOperation } from './templates.js'
 import { handleAi } from './ai.js'
 import { listKeys, createKey, updateKey, revokeKey } from './ai-keys.js'
+import { listAiLogs } from './ai-logs.js'
 
 function json(req, env, res, status = 200) {
   return new Response(JSON.stringify(res), {
@@ -491,6 +492,11 @@ export async function handleApi(req, url, env) {
     // AI-API 密钥列表：只返回名称/前缀/权限/有效期/最近使用，明文密钥永不回传
     if (path === '/ai-keys' && method === 'GET') {
       return json(req, env, { keys: await listKeys(env) })
+    }
+    // AI 调用日志：管理端可查，只读；打开时会把 isolate 里的缓冲先冲刷一次，
+    // 保证「刚刚那次调用」也能看到（缓冲机制见 api/ai-logs.js）
+    if (path === '/ai-logs' && method === 'GET') {
+      return json(req, env, await listAiLogs(env, url))
     }
 
     // 图片/单据照片上传：转发到图床，authCode 保存在 Worker Secret，不暴露给前端

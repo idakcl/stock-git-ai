@@ -33,6 +33,7 @@
 - `src/utils/aiScopes.js` — **AI-API 权限目录 / 预设 / 接口表**（前端勾选框、服务端校验、`/schema` 共用同一份）
 - `api/ai-keys.js` — AI 密钥：只存 SHA-256 与显示前缀，签发 / 改权限 / 吊销 / 使用统计 / 鉴权
 - `api/ai.js` — AI-API 全部读写接口（`/api/ai/v1/*`），金额服务端重算 + 幂等 + 审计
+- `api/ai-logs.js` — AI 调用日志：内存缓冲后合并落盘，保留 7 天 / 1500 条，管理页可查
 - `api/routes.js` — API 路由 + 自动推导逻辑（`derive` / `rebuildStock`）
 - `web/index.js` — Worker 入口（静态 + SPA 回退 + API + 边缘缓存）
 - `wrangler.json` — Cloudflare Workers 配置

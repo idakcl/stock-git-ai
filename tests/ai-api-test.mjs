@@ -373,5 +373,65 @@ await t('可以继续签发新密钥（未触及上限）', async () => {
   assert.equal(r.status, 200)
 })
 
+console.log('\n调用日志')
+
+await t('日志记录成功调用：密钥名、接口、状态、耗时', async () => {
+  const created = await ok('/api/ai-keys', {
+    method: 'POST', token,
+    body: { action: 'create', name: '日志测试', scopes: AI_ALL_SCOPE_IDS, expiresInDays: 7 }
+  })
+  const sale = await ok('/api/ai/v1/sales', {
+    method: 'POST', key: created.key,
+    body: {
+      requestId: rid(9001), customer: '客户甲', date: '2026-02-01',
+      items: [{ code: 'P00001', qty: 1 }]
+    }
+  })
+  const data = await ok('/api/ai-logs?limit=50', { token })
+  assert.ok(data.logs.length > 0, '应该有日志')
+  const hit = data.logs.find(l => l.path === '/sales' && l.code === sale.id)
+  assert.ok(hit, '应能按单号找到这次开单')
+  assert.equal(hit.key, '日志测试')
+  assert.equal(hit.keyId, created.record.id)
+  assert.equal(hit.method, 'POST')
+  assert.equal(hit.status, 200)
+  assert.equal(hit.requestId, rid(9001))
+  assert.ok(hit.ms >= 0)
+  assert.ok(!('body' in hit), '不记录请求体')
+})
+
+await t('日志记录鉴权失败，且不落密钥明文', async () => {
+  const bad = 'ai_live_thisisnotarealkey1234567890'
+  const r = await call('/api/ai/v1/items', { key: bad })
+  assert.equal(r.status, 401)
+  const data = await ok('/api/ai-logs?status=error&limit=200', { token })
+  const hit = data.logs.find(l => l.path === '/items' && l.status === 401)
+  assert.ok(hit, '401 也应留痕')
+  assert.equal(hit.key, '')
+  const raw = repo.read('ai-logs.json')
+  assert.ok(!raw.includes(bad), '日志里不能出现密钥明文')
+  assert.ok(!raw.includes('ai_live_'), '日志里不能出现任何 ai_live_ 前缀')
+})
+
+await t('日志记录无权限调用 403，并可按密钥筛选', async () => {
+  const created = await ok('/api/ai-keys', {
+    method: 'POST', token,
+    body: { action: 'create', name: '日志只读', scopes: ['read:catalog'], expiresInDays: 7 }
+  })
+  const r = await call('/api/ai/v1/summary', { key: created.key })
+  assert.equal(r.status, 403)
+  const data = await ok(`/api/ai-logs?keyId=${encodeURIComponent(created.record.id)}`, { token })
+  assert.equal(data.total, 1)
+  assert.equal(data.logs[0].status, 403)
+  assert.equal(data.logs[0].path, '/summary')
+  assert.match(data.logs[0].error, /权限/)
+  assert.equal(data.logs[0].key, '日志只读')
+})
+
+await t('日志接口需要登录态', async () => {
+  const r = await call('/api/ai-logs')
+  assert.equal(r.status, 401)
+})
+
 console.log(`\n${pass} 通过，${fail} 失败`)
 if (fail) process.exit(1)

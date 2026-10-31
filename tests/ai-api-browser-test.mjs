@@ -40,6 +40,15 @@ await context.route('**/api/**', async route => {
   if (pathname === '/api/session') return send({ ok: true })
   if (pathname === '/api/sales' || pathname === '/api/purchases' || pathname === '/api/orders') return send([])
   if (pathname === '/api/ai-keys' && request.method() === 'GET') return send({ keys })
+  if (pathname === '/api/ai-logs') {
+    return send({
+      total: 2, retainedDays: 7, max: 1500,
+      logs: [
+        { at: new Date().toISOString(), ms: 42, method: 'POST', path: '/sales?x=1', key: '采购助手', keyId: 'AKTEST0001', status: 200, requestId: 'abcdefghijklmnop', code: 'X202601011200000001', error: '' },
+        { at: new Date().toISOString(), ms: 3, method: 'GET', path: '/items', key: '', keyId: '', status: 401, requestId: '', code: '', error: '密钥无效、已过期或已吊销' }
+      ]
+    })
+  }
   if (pathname === '/api/ai-keys' && request.method() === 'POST') {
     const body = JSON.parse(request.postData() || '{}')
     posts.push(body)
@@ -153,6 +162,22 @@ await t('吊销：确认后状态变为已吊销且不再显示操作按钮', as
   const ok = await until(async () => /已吊销/.test(await row.textContent()))
   assert.ok(ok, '状态应变为已吊销')
   assert.equal(await row.getByRole('button', { name: '吊销' }).count(), 0)
+})
+
+await t('调用日志：抽屉展示记录、状态与错误', async () => {
+  await page.getByRole('button', { name: '调用日志' }).click()
+  const drawer = page.locator('.el-drawer').filter({ hasText: 'AI 调用日志' })
+  await drawer.waitFor({ state: 'visible' })
+  const okRow = drawer.locator('.el-table__body tr', { hasText: '采购助手' })
+  await okRow.waitFor({ state: 'visible' })
+  assert.match(await okRow.textContent(), /POST \/sales/)
+  assert.match(await okRow.textContent(), /200/)
+  assert.match(await okRow.textContent(), /X202601011200000001/)
+  const errRow = drawer.locator('.el-table__body tr', { hasText: '未认证' })
+  assert.match(await errRow.textContent(), /401/)
+  assert.match(await errRow.textContent(), /密钥无效/)
+  assert.match(await drawer.locator('.log-total').textContent(), /共 2 条/)
+  assert.match(await drawer.locator('.log-foot').textContent(), /保留最近 7 天/)
 })
 
 console.log(`\n${pass} 通过，${fail} 失败`)

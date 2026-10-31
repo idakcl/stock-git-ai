@@ -268,5 +268,10 @@ export const api = {
     const r = await request('/ai-keys', { method: 'POST', body: JSON.stringify(operation) })
     invalidate('/ai-keys')
     return r
+  },
+  // 调用日志：永远是「刚刚发生」的数据，不能走 15 秒内存缓存
+  getAiLogs: (query = {}) => {
+    const qs = new URLSearchParams(Object.entries(query).filter(([, v]) => v !== '' && v != null)).toString()
+    return request(`/ai-logs${qs ? `?${qs}` : ''}`)
   }
 }

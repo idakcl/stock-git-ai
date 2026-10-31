@@ -8,6 +8,7 @@
         </div>
         <div class="actions">
           <el-button :loading="loading" @click="load">刷新</el-button>
+          <el-button @click="openLogs">调用日志</el-button>
           <el-button type="primary" @click="openCreate">新建密钥</el-button>
         </div>
       </div>
@@ -141,6 +142,58 @@
       <el-button type="primary" @click="created.visible = false">我已保存，关闭</el-button>
     </template>
   </el-dialog>
+
+  <!-- 调用日志 -->
+  <el-drawer v-model="logs.visible" title="AI 调用日志" size="86%" :destroy-on-close="true">
+    <div class="log-bar">
+      <el-select v-model="logs.filters.keyId" placeholder="全部密钥" clearable style="width: 160px" @change="loadLogs">
+        <el-option v-for="r in rows" :key="r.id" :label="r.name" :value="r.id" />
+      </el-select>
+      <el-select v-model="logs.filters.status" placeholder="全部结果" clearable style="width: 130px" @change="loadLogs">
+        <el-option label="成功" value="ok" />
+        <el-option label="失败" value="error" />
+        <el-option label="401 未认证" value="401" />
+        <el-option label="403 无权限" value="403" />
+        <el-option label="400 参数错" value="400" />
+      </el-select>
+      <el-input v-model="logs.filters.q" placeholder="搜接口 / 单号 / 错误" clearable style="width: 220px" @keyup.enter="loadLogs" @clear="loadLogs" />
+      <el-button :loading="logs.loading" @click="loadLogs">刷新</el-button>
+      <span class="log-total">共 {{ logs.total }} 条，显示最近 {{ logs.rows.length }} 条</span>
+    </div>
+    <el-table v-loading="logs.loading" :data="logs.rows" stripe size="small" empty-text="还没有调用记录，AI 一开口就会出现在这里">
+      <el-table-column label="时间" width="160">
+        <template #default="{ row }">{{ fmtCNTime(row.at) }}</template>
+      </el-table-column>
+      <el-table-column label="密钥" min-width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.key">{{ row.key }}</span>
+          <span v-else class="muted">未认证</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="接口" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }"><code class="log-path">{{ row.method }} {{ row.path }}</code></template>
+      </el-table-column>
+      <el-table-column label="结果" width="90">
+        <template #default="{ row }">
+          <el-tag :type="logTagType(row.status)" size="small" disable-transitions>{{ row.status }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column label="耗时" width="80" align="right">
+        <template #default="{ row }">{{ row.ms }} ms</template>
+      </el-table-column>
+      <el-table-column label="单号 / 错误" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span v-if="row.code" class="log-code">{{ row.code }}</span>
+          <span v-if="row.error" :class="row.status >= 400 ? 'log-error' : 'muted'">{{ row.error }}</span>
+          <span v-if="row.code && row.error" class="muted"> · </span>
+          <span v-if="!row.code && !row.error" class="muted">—</span>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="log-foot">
+      日志只保留最近 {{ logs.retainedDays }} 天、最多 {{ logs.max }} 条，超出自动丢弃最老的；不记录请求体，也不记录密钥明文。
+    </div>
+  </el-drawer>
 </template>
 
 <script setup>
@@ -159,6 +212,15 @@ const baseUrl = computed(() => `${window.location.origin}/api/ai/v1`)
 const create = ref({ visible: false, saving: false, name: '', days: 30, scopes: [] })
 const edit = ref({ visible: false, saving: false, id: '', name: '', days: 'keep', scopes: [] })
 const created = ref({ visible: false, key: '', name: '', scopes: [] })
+const logs = ref({
+  visible: false,
+  loading: false,
+  rows: [],
+  total: 0,
+  retainedDays: 7,
+  max: 1500,
+  filters: { keyId: '', status: '', q: '' }
+})
 const scopeText = computed(() => (isMaxScopes(created.value.scopes)
   ? '最大权限（全部业务权限，不含密钥管理/改密码/备份/清空数据）'
   : scopesTextOf(created.value.scopes)))
@@ -287,6 +349,32 @@ async function copyManual() {
 }
 
 onMounted(load)
+
+function logTagType(status) {
+  if (status < 300) return 'success'
+  if (status < 500) return 'warning'
+  return 'danger'
+}
+
+function openLogs() {
+  logs.value.visible = true
+  loadLogs()
+}
+
+async function loadLogs() {
+  logs.value.loading = true
+  try {
+    const r = await api.getAiLogs({ ...logs.value.filters, limit: 200 })
+    logs.value.rows = r.logs || []
+    logs.value.total = r.total || 0
+    logs.value.retainedDays = r.retainedDays || 7
+    logs.value.max = r.max || 1500
+  } catch (e) {
+    ElMessage.error(`日志加载失败：${e.message || '网络异常'}`)
+  } finally {
+    logs.value.loading = false
+  }
+}
 </script>
 
 <style scoped>
@@ -312,4 +400,10 @@ onMounted(load)
 .manual-sub { margin-top: 4px; }
 .key-link { word-break: break-all; }
 .manual-warn { margin-top: 4px; color: var(--color-warning); }
+.log-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.log-total { font-size: var(--fs-sub); color: var(--text-disabled); margin-left: auto; }
+.log-path { font-size: var(--fs-sub); color: var(--text-secondary); }
+.log-code { font-weight: 600; }
+.log-error { color: var(--color-danger); }
+.log-foot { margin-top: 12px; font-size: var(--fs-sub); color: var(--text-disabled); }
 </style>
