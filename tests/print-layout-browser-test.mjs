@@ -1,6 +1,6 @@
 // 打印版面（A4 / A5）实测：
 //   1. 订单金额字号 = 正文的 1.2 倍并加粗（以前固定 24px，是正文的 2 倍，太大）；
-//   2. 明细表按「每页 40 行」（A5 每页 28 行）分片，切片数 = PDF 真实页数；
+//   2. 明细表按「每页行数」分片（行数按虚拟边距与折行估算），切片数 = PDF 真实页数；
 //   3. 跨页表头真的重复：销售单 / 采购单 / 订单详情，每一页都有「序号 + 列名」那一行。
 //      —— 靠的是「每片表各自带 <thead>」这个物理结构，不再只看 table-header-group 那条声明。
 // 跑法：先起 dev server（npx vite --port 5173 --strictPort --host 127.0.0.1），再 node tests/print-layout-browser-test.mjs
@@ -14,7 +14,7 @@ const { chromium } = createRequire(import.meta.url)('playwright')
 import { buildPrintHtml, pageCapacities, paperSpec, columnWidths, PAPER_SPECS } from '../src/utils/export.js'
 import { paperPref } from '../src/utils/printPrefs.js'
 
-// 本文件验证的是「A4 横向」这套版面（40 行/页）以及跨页表头。
+// 本文件验证的是「A4 横向」这套版面以及跨页表头。
 // 产品默认已改成 A4 纵向，所以这里显式把方向定成横向；A4 纵向 / 自定义纸张由
 // tests/print-paper-browser-test.mjs 覆盖，两边口径分开，不互相牵连。
 paperPref.mode = 'preset'
@@ -157,9 +157,14 @@ await t('A5 版面另有一套参数（148mm 宽的纸，字号与每页行数�
   assert.match(html, /\.fields \.f\.xl \{ font-size: 11\.4px/, 'A5 上金额仍是正文 1.2 倍')
 })
 
-await t('每页行数：A4 = 40 行、A5 = 28 行', () => {
-  assert.equal(PAPER_SPECS.A4.rowsPerPage, 40)
-  assert.equal(PAPER_SPECS.A5.rowsPerPage, 28)
+await t('每页行数按虚拟边距重算：比按 8mm 边距的旧常量更保守', () => {
+  // 旧常量 40 / 28 是按 @page 8mm 边距算满的值，真机边距更宽时每页会少装几行，
+  // 多出的行落到下一张纸、后面紧跟强制换页 → 一页只印两三行。故实际行数一律重算。
+  paperPref.mode = 'preset'
+  paperPref.orientation = 'landscape'
+  assert.ok(paperSpec('A4').rowsPerPage < PAPER_SPECS.A4.rowsPerPage, 'A4 横向应少于 40 行')
+  assert.ok(paperSpec('A5').rowsPerPage < PAPER_SPECS.A5.rowsPerPage, 'A5 横向应少于 28 行')
+  assert.ok(paperSpec('A4').rowsPerPage >= 20 && paperSpec('A5').rowsPerPage >= 15)
 })
 
 await t('分片算法：首页扣单头预留、末页扣落款预留，总行数不丢', () => {
@@ -423,12 +428,13 @@ await t('真机 PDF：关闭跨页表头后只有第 1 页有表头，开启时�
   assert.doesNotMatch(b.textOf(b.pages), /折后金额/, '关闭后续页不再重复表头')
 })
 
-await t('A5 同样受跨页表头开关控制（切片 28 行 / 关闭后一张表）', () => {
+await t('A5 同样受跨页表头开关控制（开启时每页带表头 / 关闭后一张表）', () => {
   const columns = realCols(), rows = realRows(90)
   const on = buildPrintHtml({ title: '销售订单 X1', columns, rows, paper: 'A5' })
   const off = buildPrintHtml({ title: '销售订单 X1', columns, rows, paper: 'A5', repeatHeader: false })
   assert.match(on, /@page \{ size: A5 landscape/)
-  assert.equal((on.match(/<thead>/g) || []).length, 4, 'A5 每页 28 行：90 行应切 4 片')
+  const chunks = (on.match(/<thead>/g) || []).length
+  assert.ok(chunks >= 4, `A5 每页行数有限，90 行应切成多片，实际 ${chunks}`)
   assert.match(off, /@page \{ size: A5 landscape/, 'A5 关闭开关后仍是 A5')
   assert.equal((off.match(/<thead>/g) || []).length, 1, 'A5 关闭后表头只有一份')
 })

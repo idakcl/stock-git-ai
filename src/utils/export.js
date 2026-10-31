@@ -70,6 +70,8 @@ export const PAPER_SPECS = {
     // w/h 为横向时的纸宽/纸高（mm）；纵向＝两者对调，每页行数按纵向纸高重算
     w: 297, h: 210, marginMm: 8,
     base: 11, pad: '1px 4px',
+    // rowsPerPage 只是历史参考值（按 @page 8mm 边距算满）；实际行数统一由
+    // rowsPerPageOf() 按「虚拟边距」重算，见 budgetMarginMm 的说明
     rowsPerPage: 40, headReserve: 6, footReserve: 2
   },
   A5: {
@@ -84,10 +86,28 @@ export const PAPER_SPECS = {
 const MM_PX = 96 / 25.4
 // 明细行高：正文行高 1.25 + 上下留白 2px + 边框 1px（与 printStyle 里的 CSS 一一对应）
 const rowPxOf = (base) => base * 1.25 + 3
+/**
+ * 行数预算用的「虚拟边距」。
+ *
+ * @page 里写的是 8mm（A5 5mm），浏览器和打印驱动却不一定照着留白：
+ * iOS / AirPrint 一类链路常见默认边距约 12.7mm（0.5 英寸），还会因打印机再缩一点。
+ * 按 8mm 算出来的行数在那种环境下每页少装两三行，溢出的行落到下一张纸；
+ * 而每片明细末尾都强制换页，那张纸上就只剩两三行、下面全白 —— 正是「第二页只有几行」的成因。
+ *
+ * 所以行数预算宁可保守：边距至少按 24mm 计（约合 1 英寸，真机 12.7mm 边距下仍有富余；
+ * 窄纸/矮纸按纸高的 16% 封顶，避免小票纸被算成只能印几行）。
+ * 代价是每页底部会空出几行——比多出一张只有两三行的白纸好得多。
+ */
+const BUDGET_MARGIN_MM = 24
+const budgetMarginMm = (heightMm, marginMm) => {
+  const floor = Math.min(BUDGET_MARGIN_MM, Math.max(6, heightMm * 0.16))
+  return Math.max(Number(marginMm) || 0, floor)
+}
 // 每页能装几行：扣掉表头行与 1 行安全余量，保证「一片＝一张纸」，不会因为差几像素
 // 把最后一行挤到下一页（那一页就只剩光秃秃的一行，看起来像「跨页表头失败」）
 export function rowsPerPageOf(heightMm, marginMm, base) {
-  const contentPx = Math.max(60, heightMm - marginMm * 2) * MM_PX
+  const m = budgetMarginMm(heightMm, marginMm)
+  const contentPx = Math.max(60, heightMm - m * 2) * MM_PX
   const rows = Math.floor((contentPx - rowPxOf(base)) / rowPxOf(base)) - 1
   return Math.max(5, rows)
 }
@@ -127,6 +147,11 @@ export const paperSpec = (paper) => {
       ...preset, page: `${preset.key} portrait`, w, h,
       rowsPerPage: rowsPerPageOf(h, preset.marginMm, preset.base)
     }
+  } else {
+    // 横向同样按「虚拟边距」重算，不能沿用 40 / 28 的旧常量：
+    // 那是按 @page 8mm 边距算满的值，真机上下边距一宽，每页就少装三五行，
+    // 尾巴被挤到下一张纸，看起来又是一页只印了几行。
+    spec = { ...preset, rowsPerPage: rowsPerPageOf(preset.h, preset.marginMm, preset.base) }
   }
   // 手动行数覆盖（0＝自动）：纸高推算偏保守时也能用，遇到真机溢出就调小
   const manual = Number(cfg.rowsPerPage) > 0 ? Math.round(Number(cfg.rowsPerPage)) : 0
@@ -258,13 +283,86 @@ const pagedTables = (columns, rows, p, opts, repeatHeader = true) => {
   const list = rows || []
   const widths = columnWidths(columns, list)
   if (!repeatHeader) return tableHtml(columns, list, 0, 'pg', widths)
-  const caps = pageCapacities(list.length, p.rowsPerPage, opts.headRows || 0, opts.foot ? p.footReserve : 0)
+  // 按「折行后的实际行数」分页，而不是按「条目数」：名称一旦折成两行，
+  // 一行就吃掉两行的高度，按条目数切的片必然溢出——溢出的那几行会跑到下一张纸，
+  // 紧接着又是强制换页，于是出现「第二页只有两三行、下面全空」。
+  const costs = rowLineCosts(columns, list, widths, p)
+  const caps = packPageSlices(costs, p.rowsPerPage, opts.headRows || 0, opts.foot ? p.footReserve : 0)
   let offset = 0
   return caps.map((n, i) => {
     const slice = list.slice(offset, offset + n)
     offset += n
     return tableHtml(columns, slice, offset - n, 'pg' + (i < caps.length - 1 ? ' brk' : ''), widths)
   }).join('')
+}
+
+/**
+ * 一行明细实际会占几行纸面。
+ *
+ * 以前的页行数预算只数「条目」：40 条就是 40 行。可名称列宽度有限，
+ * 长商品名会折成两行，一条就顶两条的高度；条目一多，预定的 40 条就装不下，
+ * 溢出部分落到下一张纸 —— 而每片末尾又强制换页，于是那张纸上只剩两三行、大片空白。
+ *
+ * 这里按列宽与字宽估算每条明细的折行数：整行取所有列里最多的折行数
+ * （单元格是并排的，最高的那格决定行高）。全角按 1em、半角按 0.55em 计，
+ * 再留 2% 宽度余量，宁可少排一行，也不让一片溢到下一张纸。
+ */
+export function rowLineCosts(columns, rows, widths, p) {
+  // 宽度也按虚拟边距收缩：真机边距一宽，可用纸宽同步变窄，长名称/编码更容易折行。
+  // 只按 @page 8mm 算会低估折行数，导致「页数算少了、最后一片溢出」。
+  const contentPx = Math.max(120, (p.w - budgetMarginMm(p.w, p.marginMm) * 2) * MM_PX)
+  // 单元格左右 padding（p.pad 里的横向值）+ 边框，和 printStyle 一一对应
+  const padPx = p.base < 10 ? 8 : 10
+  const avail = widths.slice(1).map(pct => Math.max(10, contentPx * (pct / 100) - padPx) * 0.98)
+  const pxOf = (v) => {
+    let px = 0
+    for (const ch of String(v ?? '')) px += /[^\x00-\xff]/.test(ch) ? p.base : p.base * 0.55
+    return px
+  }
+  return (rows || []).map(r => {
+    let lines = 1
+    columns.forEach((c, i) => {
+      lines = Math.max(lines, Math.ceil(pxOf(pick(c, r)) / avail[i]))
+    })
+    return lines
+  })
+}
+
+/**
+ * 按「行数成本」把明细切到各页：首页扣单头预留、末页扣落款预留。
+ * costs 全是 1 时，结果与 pageCapacities（按条目数切）完全一致。
+ * 每页至少放一行（单行成本超过一页也只放它自己），保证 sum(caps) === costs.length。
+ */
+export function packPageSlices(costs, rowsPerPage, headReserve = 0, footReserve = 0) {
+  const list = costs || []
+  if (!list.length) return [0]
+  const cap = Math.max(1, Math.round(rowsPerPage) || 1)
+  const firstCap = Math.max(1, cap - Math.max(0, headReserve))
+  const lastCap = Math.max(1, cap - Math.max(0, footReserve))
+  const caps = []
+  const used = []
+  let i = 0
+  const take = (limit) => {
+    let lines = 0, n = 0
+    while (i < list.length && (n === 0 || lines + list[i] <= limit)) {
+      lines += list[i]
+      n++
+      i++
+    }
+    caps.push(n)
+    used.push(lines)
+  }
+  take(firstCap)
+  while (i < list.length) take(cap)
+  // 末页要给落款腾位置：装太满就把尾部挪到新的一页
+  while (used[used.length - 1] > lastCap && caps[caps.length - 1] > 1) {
+    const last = caps.length - 1
+    i -= 1
+    caps[last] -= 1
+    used[last] -= list[i]
+  }
+  while (i < list.length) take(cap)
+  return caps
 }
 
 /**

@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
 import cp from 'node:child_process'
-import { buildPrintHtml, paperSpec, customSpec, rowsPerPageOf, PAPER_SPECS } from '../src/utils/export.js'
+import { buildPrintHtml, paperSpec, customSpec, rowsPerPageOf, columnWidths, rowLineCosts, packPageSlices, pageCapacities, PAPER_SPECS } from '../src/utils/export.js'
 import { paperPref, resetPaperPref } from '../src/utils/printPrefs.js'
 
 const { chromium } = createRequire(import.meta.url)('playwright')
@@ -70,6 +70,52 @@ await t('A4 纵向：行数按纵向纸高重算，比横向多', () => {
   assert.equal(s.page, 'A4 portrait')
   assert.equal(s.rowsPerPage, portrait)
   resetPaperPref()
+})
+
+await t('分页按「折行后的行数」计算：长名称折行会占两行高度', () => {
+  const p = { ...PAPER_SPECS.A4, w: 210, h: 297, marginMm: 8, base: 11 }
+  const cols = [{ label: '名称', prop: 'name' }, { label: '数量', prop: 'qty' }]
+  const rows = rowsOf(6, i => (i === 0 ? '很长的商品名称'.repeat(12) : '三通'))
+  const widths = columnWidths(cols, rows)
+  const costs = rowLineCosts(cols, rows, widths, p)
+  assert.ok(costs[0] >= 2, `长名称应折成多行，实际 ${costs[0]}`)
+  assert.equal(costs[1], 1)
+  // 按累计行数切页：两行成本的条目不能被当成一行塞进页尾
+  const caps = packPageSlices(costs, 8, 0, 0)
+  assert.equal(caps.reduce((a, b) => a + b, 0), 6, '切片后条目总数不能变')
+  let off = 0
+  for (const n of caps) {
+    const used = costs.slice(off, off + n).reduce((a, b) => a + b, 0)
+    assert.ok(used <= 8, `每页行数不得超过预算，实际 ${used}`)
+    off += n
+  }
+})
+
+await t('packPageSlices 与旧的条目分片完全兼容（每行成本为 1 时）', () => {
+  for (const [total, cap, head, foot] of [[140, 40, 6, 0], [140, 40, 6, 2], [74, 40, 6, 2], [34, 40, 6, 0], [3, 40, 6, 0]]) {
+    const caps = packPageSlices(Array(total).fill(1), cap, head, foot)
+    assert.deepEqual(caps, pageCapacities(total, cap, head, foot), `${total}/${cap}/${head}/${foot}`)
+  }
+  assert.deepEqual(packPageSlices([], 40, 6, 2), [0], '空明细也要有一片（只有表头的一页）')
+  // 任意折行组合：切片总数守恒、每片不超过预算
+  const costs = [1, 2, 1, 3, 1, 1, 2, 4, 1, 1, 1, 2]
+  const caps = packPageSlices(costs, 6, 2, 1)
+  assert.equal(caps.reduce((a, b) => a + b, 0), costs.length)
+  let off = 0
+  caps.forEach((n, i) => {
+    const used = costs.slice(off, off + n).reduce((a, b) => a + b, 0)
+    const limit = i === 0 ? 4 : 6
+    assert.ok(used <= limit || n === 1, `第 ${i + 1} 页超预算：${used} > ${limit}`)
+    off += n
+  })
+})
+
+await t('行数预算按更大的虚拟边距算：1 英寸打印边距下也装得下', () => {
+  const rows = rowsPerPageOf(297, 8, 11)
+  assert.ok(rows <= 56, `A4 纵向行数应保守（实际 ${rows}），不能按 8mm 边距算满`)
+  const rowPx = 11 * 1.25 + 3
+  const content = (297 - 25.4 * 2) * 96 / 25.4   // 1 英寸边距下的可打印高度
+  assert.ok((rows + 1) * rowPx <= content, `整页明细(含表头)必须装进 1 英寸边距：${(rows + 1) * rowPx} vs ${content}`)
 })
 
 await t('自定义纸张优先于 A4/A5 纸张选择；每页行数可手动覆盖', () => {
