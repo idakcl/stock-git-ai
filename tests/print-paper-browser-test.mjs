@@ -244,7 +244,7 @@ await t('打印设置弹层：切换自定义纸张后，打印按钮按新纸�
   try {
     const btn = page.locator('.paper-btn')
     await btn.waitFor()
-    assert.equal((await btn.innerText()).trim(), 'A4 纵向', '默认 A4 纵向')
+    assert.match((await btn.innerText()).trim(), /^A4 纵向/, '默认 A4 纵向')
     await btn.click()
     const pop = page.locator('.pp')
     await pop.waitFor()
@@ -256,8 +256,8 @@ await t('打印设置弹层：切换自定义纸张后，打印按钮按新纸�
     await nums.nth(0).blur()
     await nums.nth(1).fill('150')
     await nums.nth(1).blur()
-    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.trim() === '100×150mm', null, { timeout: 5000 })
-    assert.equal((await btn.innerText()).trim(), '100×150mm')
+    await page.waitForFunction(() => (document.querySelector('.paper-btn')?.textContent || '').trim().startsWith('100×150mm'), null, { timeout: 5000 })
+    assert.match((await btn.innerText()).trim(), /^100×150mm/, '按钮显示自定义纸张')
     // 点「打印」：纸张必须是自定义的 100×150mm，而不是 A4
     await page.evaluate(() => {
       window.__printed = null
@@ -269,7 +269,7 @@ await t('打印设置弹层：切换自定义纸张后，打印按钮按新纸�
     assert.match(html, /@page \{ size: 100mm 150mm; margin: 4mm; \}/)
     // 重新进页面，设置仍在（localStorage）
     await page.reload({ waitUntil: 'networkidle' })
-    assert.equal((await page.locator('.paper-btn').innerText()).trim(), '100×150mm')
+    assert.match((await page.locator('.paper-btn').innerText()).trim(), /^100×150mm/)
     // 换回默认设置后仍是自定义纸优先，不会偷偷变回 A4
     await page.evaluate(() => {
       window.__printed = null
@@ -288,8 +288,8 @@ await t('打印设置弹层：默认就是 A4 纵向，打印出纵向纸', asyn
     const pop = page.locator('.pp')
     await pop.waitFor()
     await pop.getByText('纵向', { exact: true }).click()
-    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.trim() === 'A4 纵向', null, { timeout: 5000 })
-    assert.equal((await page.locator('.paper-btn').innerText()).trim(), 'A4 纵向')
+    await page.waitForFunction(() => (document.querySelector('.paper-btn')?.textContent || '').trim().startsWith('A4 纵向'), null, { timeout: 5000 })
+    assert.match((await page.locator('.paper-btn').innerText()).trim(), /^A4 纵向/)
     await page.evaluate(() => {
       window.__printed = null
       window.open = () => { const doc = { write: h => { window.__printed = h }, close() {} }; return { document: doc, focus() {}, print() {} } }

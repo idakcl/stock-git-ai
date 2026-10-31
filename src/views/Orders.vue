@@ -7,16 +7,18 @@
         <div class="card-header">
           <b>订单</b>
           <div class="header-ops">
+            <!-- 新建订单位于最左：最常用、也最不容易误点旁边那排（导入/模板/清空） -->
+            <el-button type="primary" @click="openCreate">新建订单</el-button>
+            <el-button @click="openTemplatePicker">从模板导入</el-button>
+            <!-- 订单模板不再占侧边栏：低频配置收到这里，和「从模板导入」挨着，动线更顺 -->
+            <el-button @click="$router.push('/templates')">模板管理</el-button>
             <!-- 清空未过账订单：一次请求删干净，避免几十张草稿各写一次 git 提交；
-                 已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮 -->
+                 已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮。
+                 危险操作放最右端，离「新建订单」最远 -->
             <el-button type="danger" :disabled="!draftCount || busy || loading"
               title="删除未过账且未收订金的订单；已过账 / 已收订金的会保留" @click="clearDrafts">
               清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
-            <el-button @click="openTemplatePicker">从模板导入</el-button>
-            <!-- 订单模板不再占侧边栏：低频配置收到这里，和「从模板导入」挨着，动线更顺 -->
-            <el-button @click="$router.push('/templates')">模板管理</el-button>
-            <el-button type="primary" @click="openCreate">新建订单</el-button>
           </div>
         </div>
       </template>

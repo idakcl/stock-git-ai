@@ -98,6 +98,17 @@ async function open(path, state = {}, opts = {}) {
 }
 
 // 拦下打印窗口：拿到那份 HTML 字符串，而不是真去弹系统打印框
+// 跨页表头已并进「打印设置」弹层：点纸张按钮开弹层 → 切开关 → 再点一次关掉
+async function setRepeatHeader(page, on) {
+  const btn = page.locator('.paper-btn').first()
+  await btn.click()
+  const sw = page.locator('.el-popover:visible .el-switch').first()
+  await sw.waitFor()
+  const checked = ((await sw.getAttribute('class')) || '').includes('is-checked')
+  if (checked !== on) await sw.click()
+  await btn.click()
+  await page.waitForTimeout(150)
+}
 const capturePrint = (page) => page.evaluate(() => {
   window.__printed = null
   window.open = () => {
@@ -444,14 +455,20 @@ await t('列表页工具栏：取消「跨页表头」后打印只有一份表�
     items: Array.from({ length: 90 }, (_, i) => ({ code: `P${String(i + 1).padStart(5, '0')}`, name: `管件${i + 1}`, unit: '个', price: 10, cost: 5 }))
   }))
   try {
-    const cb = page.locator('.el-checkbox', { hasText: '跨页表头' })
-    assert.equal(await cb.count(), 1, '工具栏要有「跨页表头」开关')
-    assert.match((await cb.first().getAttribute('class')) || '', /is-checked/, '默认开启')
+    const paper = page.locator('.paper-btn').first()
+    assert.equal(await paper.count(), 1, '工具栏要有「打印设置」入口')
+    assert.match(await paper.innerText(), /每页表头/, '默认开启时按钮上直接写出状态')
+    await paper.click()
+    await page.locator('.el-popover:visible .el-switch').first().waitFor()
+    assert.equal(await page.locator('.el-popover:visible .el-switch.is-checked').count(), 1, '弹层里「跨页表头」默认开启')
+    await paper.click()
+    await page.waitForTimeout(150)
     await capturePrint(page)
     const on4 = await printed(page, page.getByRole('button', { name: '打印' }))
     // 默认 A4 纵向；商品库按 60 行分页，工具栏打「当前页」→ 60 行在纵向 A4 上一页装得下
     assert.match(on4, /@page \{ size: A4 portrait/, '未设置时默认 A4 纵向')
-    await cb.first().click()
+    await setRepeatHeader(page, false)
+    assert.match(await paper.innerText(), /单表/, '关闭后按钮显示「单表」')
     const off4 = await printed(page, page.getByRole('button', { name: '打印' }))
     assert.equal((off4.match(/<thead>/g) || []).length, 1, '取消后表头只有一份')
     // 切到 A5 横向：60 行会切成多片，关闭开关后仍只有一份表头
@@ -467,7 +484,7 @@ await t('列表页工具栏：取消「跨页表头」后打印只有一份表�
   } finally { await context.close() }
 })
 
-await t('订单列表、订单详情、模板页都提供「跨页表头」开关', async () => {
+await t('订单列表、订单详情、模板页、销售单详情都提供「跨页表头」开关', async () => {
   for (const [path, state] of [
     ['/orders', seed({ orders: [orderDoc(2)], items: [{ code: 'P00001', name: '管件', unit: '个', price: 10, cost: 5 }] })],
     [`/order/${ORDER_ID}`, seed({ orders: [orderDoc(2)] })],
@@ -476,7 +493,13 @@ await t('订单列表、订单详情、模板页都提供「跨页表头」开�
   ]) {
     const { page, context } = await open(path, state)
     try {
-      assert.equal(await page.locator('.el-checkbox', { hasText: '跨页表头' }).count(), 1, `${path} 应有「跨页表头」开关`)
+      assert.equal(await page.locator('.paper-btn').count(), 1, `${path} 应有打印设置入口`)
+      await page.locator('.paper-btn').first().click()
+      const pop = page.locator('.el-popover:visible')
+      await pop.waitFor()
+      assert.match(await pop.innerText(), /跨页表头/, `${path} 的打印设置里应有「跨页表头」开关`)
+      assert.equal(await pop.locator('.el-switch').count(), 1, `${path} 应有表头开关`)
+      await page.locator('.paper-btn').first().click()
     } finally { await context.close() }
   }
 })
@@ -484,11 +507,12 @@ await t('订单列表、订单详情、模板页都提供「跨页表头」开�
 await t('开关状态跨页面保持（localStorage 记住上次选择）', async () => {
   const { page, context } = await open('/items', seed({ items: [{ code: 'P00001', name: '管件', unit: '个', price: 10, cost: 5 }] }))
   try {
-    const cb = page.locator('.el-checkbox', { hasText: '跨页表头' })
-    await cb.first().click()
+    await setRepeatHeader(page, false)
     await page.goto(`${BASE}/items`, { waitUntil: 'networkidle' })
-    const cls = (await page.locator('.el-checkbox', { hasText: '跨页表头' }).first().getAttribute('class')) || ''
-    assert.doesNotMatch(cls, /is-checked/, '刷新后应仍是关闭状态')
+    assert.match(await page.locator('.paper-btn').first().innerText(), /单表/, '刷新后按钮仍是「单表」')
+    await page.locator('.paper-btn').first().click()
+    assert.equal(await page.locator('.el-popover:visible .el-switch.is-checked').count(), 0, '刷新后开关仍是关闭状态')
+    await page.locator('.paper-btn').first().click()
   } finally { await context.close() }
 })
 
