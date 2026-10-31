@@ -18,9 +18,6 @@
       <el-button class="menu-btn" text @click="drawer = true">
         <el-icon :size="22"><Menu /></el-icon>
       </el-button>
-      <div class="header-title">
-        <span class="logo-dot">进</span>进销存
-      </div>
       <div class="header-right">
         <!-- 全局开单入口：订单用得最频繁，任何页面都能一步开单；角标是待过账的草稿数 -->
         <el-button class="quick-new" type="primary" @click="quickNewOrder"
@@ -29,7 +26,6 @@
           <span class="quick-new-text">开单</span>
           <span v-if="draftCount" class="quick-new-badge">{{ draftCount > 99 ? '99+' : draftCount }}</span>
         </el-button>
-        <span class="build-tag">构建 {{ buildStamp }}</span>
         <el-button text class="logout-btn" @click="onLogout">
           <el-icon><SwitchButton /></el-icon>
           <span class="logout-text">退出登录</span>
@@ -273,24 +269,6 @@ body {
   border-bottom: 1px solid var(--border-color);
   flex: none;
 }
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: var(--gap-sm);
-  font-size: var(--fs-title);
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.logo-dot {
-  width: 26px; height: 26px;
-  border-radius: var(--radius-md);
-  background: var(--brand-gradient);
-  color: #fff;
-  font-size:15px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
 .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 /* 顶部「开单」：角标就是草稿数，不用 el-badge 的绝对定位（在 flex 里会漂），自己画 */
 .quick-new { position: relative; }
@@ -312,7 +290,6 @@ body {
   font-weight: 600;
   line-height: 1;
 }
-.build-tag { color: var(--text-placeholder); font-size: var(--fs-sub); }
 .logout-btn { color: var(--text-regular); }
 .logout-btn:hover { color: var(--color-danger); }
 
@@ -566,7 +543,6 @@ body {
   .main { padding: var(--gap-md); }
   /* 统计块在窄/矮屏排两列 */
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .build-tag { display: none; }
   /* 手机上头部空间紧张：开单按钮只留图标，退出登录只留图标（原有规则） */
   .quick-new-text { display: none; }
   .quick-new { padding: 8px 10px; }
@@ -574,8 +550,5 @@ body {
 @media (min-width: 769px) {
   .menu-btn { display: none; }
   .header { padding-left: 20px; }
-  /* 侧边栏已经带头部 logo 与底部构建号：顶栏不再重复，否则平板上会出现两个「进销存」、两处构建号 */
-  .header-title { display: none; }
-  .build-tag { display: none; }
 }
 </style>
