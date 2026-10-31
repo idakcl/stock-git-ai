@@ -219,16 +219,26 @@ await t('打印设置选 A5 后，打印与空表都按 A5 出纸', async () => 
   } finally { await context.close() }
 })
 
-await t('空表：只留编码/商品名称/单位，不出现数量、单价、小计与任何金额', async () => {
+await t('空表：印出商品与数量/单价/金额空列（手写用），但不填任何数字', async () => {
   const { page, context } = await open('/templates', seed({ templates: [tplSeed()] }))
   try {
     await capturePrint(page)
     await page.locator('.el-table__row').filter({ hasText: '常用管件组合' }).first().getByRole('button', { name: '空表', exact: true }).click()
     const html = await printed(page)
     assert.match(html, /<th[^>]*>商品名称<\/th>/, '空表仍要列出商品')
-    assert.doesNotMatch(html, /<th[^>]*>数量<\/th>/, '空表不该有数量列')
-    assert.doesNotMatch(html, /<th[^>]*>单价<\/th>/, '空表不该有单价列')
-    assert.doesNotMatch(html, /<th[^>]*>小计<\/th>/, '空表不该有小计列')
+    // 空表是给人手写的：数量/单价/金额三列必须印出来，否则拿到纸不知道该往哪填
+    for (const h of ['数量', '单价', '金额']) {
+      assert.match(html, new RegExp(`<th[^>]*>${h}</th>`), `空表应保留${h}列`)
+    }
+    assert.doesNotMatch(html, /<th[^>]*>折扣<\/th>/, '空表不印折扣列')
+    const body = (html.match(/<tbody>[\s\S]*?<\/tbody>/) || [''])[0]
+    const rows = [...body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)]
+      .map(m => [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(x => x[1].trim()))
+    assert.ok(rows.length > 0, '空表应列出商品行')
+    for (const r of rows) {
+      assert.equal(r.length, 7, `每行应是 序号+编码+商品名称+单位+数量+单价+金额 共 7 格，实际 ${r.length}`)
+      assert.deepEqual(r.slice(4), ['', '', ''], '数量/单价/金额三格必须留白')
+    }
     assert.doesNotMatch(html, /(660|200\.00|100\.00)/, '空表里不应出现任何金额')
   } finally { await context.close() }
 })

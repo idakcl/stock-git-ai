@@ -1,7 +1,7 @@
 <template>
   <!-- 模板新增/编辑弹窗：只存商品明细（商品+数量+单价+行折扣率），不存客户/日期/单号。
        金额口径与订单完全一致（合计 × 折扣链 − 整单优惠），生成订单时按 orderAmount 重算。 -->
-  <el-dialog v-model="visible" :title="title" width="620" :close-on-click-modal="false" :close-on-press-escape="!saving">
+  <el-dialog v-model="visible" :title="title" width="min(620px, 94vw)" :close-on-click-modal="false" :close-on-press-escape="!saving">
     <el-form :model="form" label-width="100px">
       <el-form-item label="模板名称">
         <el-input v-model="form.name" maxlength="60" placeholder="例如：常用管件组合、标准配件包" />
@@ -18,9 +18,10 @@
         <div class="calc-hint">只能选商品库里已有的商品；新品请先到商品档案新增</div>
       </el-form-item>
 
+      <div class="scroll-hint">手机上表格可左右滑动，查看单价 / 折扣 / 小计</div>
       <div class="lines-scroll">
         <el-table ref="linesTable" :data="form.lines" stripe max-height="320">
-          <el-table-column label="商品" min-width="180">
+          <el-table-column label="商品" min-width="150">
             <template #default="{ row }">
               <GoodsSelect v-model="row.code" :items="items" placeholder="选择商品" style="width:100%" @change="onItemChange(row)" />
             </template>
@@ -211,7 +212,12 @@ function save() {
 
 <style scoped>
 .quick-add-select { width: 100%; }
-.lines-scroll { max-height: 360px; overflow-y: auto; margin-top: 8px; }
+/* 窄屏放不下 6 列：横向滚动是唯一出路，但滚动条在不滑动时不显眼，给一句提示 */
+.scroll-hint { display: none; margin-top: 8px; color: var(--text-secondary); font-size: var(--fs-mini); }
+@media (max-width: 768px) { .scroll-hint { display: block; } }
+.lines-scroll { max-height: 360px; overflow-y: auto; overflow-x: auto; margin-top: 8px; }
+/* 明细行输入框撑满所在列：el-input-number 默认 150px，在 100px 的列里会溢出错位（数量和单价被裁掉一半） */
+.lines-scroll :deep(.el-input-number) { width: 100%; }
 .calc-hint { color: var(--text-secondary); font-size: var(--fs-mini); }
 .calc-detail { margin-top: 4px; color: var(--text-secondary); font-size: var(--fs-sub); }
 .calc-detail .discount { color: var(--color-danger); margin-left: 12px; }

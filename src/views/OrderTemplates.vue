@@ -282,13 +282,20 @@ function printTemplate(tpl, empty = false) {
   const items = tpl.items || []
 
   if (empty) {
-    // 空表：只有商品名称、编码、单位，不出现数量/单价/金额
+    // 空表是「手写单」：商品/编码/单位照常印出来当底稿，数量/单价/金额留白格，
+    // 现场填数、回去再录单。列必须出现，否则拿到纸的人不知道该往哪写。
     const columns = [
       { prop: 'code', label: '编码' },
       { prop: 'name', label: '商品名称' },
-      { prop: 'unit', label: '单位' }
+      { prop: 'unit', label: '单位' },
+      { prop: 'qty', label: '数量' },
+      { prop: 'price', label: '单价' },
+      { prop: 'amount', label: '金额' }
     ]
-    const rows = items.map(it => ({ code: it.code || '', name: it.name || '', unit: it.unit || '' }))
+    const rows = items.map(it => ({
+      code: it.code || '', name: it.name || '', unit: it.unit || '',
+      qty: '', price: '', amount: ''
+    }))
     printA4(title, columns, rows, subtitle, [], [], '', repeatHeaderPref.value)
   } else {
     // 正常打印：带数量、单价、折扣、小计
