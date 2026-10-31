@@ -53,9 +53,7 @@
         <el-table :data="extra" max-height="240">
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.code" filterable placeholder="选择商品" style="width:100%" @change="onItemChange(row)">
-                <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-              </el-select>
+              <GoodsSelect v-model="row.code" :items="items" placeholder="选择商品" style="width:100%" @change="onItemChange(row)" />
             </template>
           </el-table-column>
           <el-table-column label="数量" width="110" align="right">
@@ -127,6 +125,7 @@ import { round2, grossOf } from '../utils/account.js'
 import { returnableLines } from '../utils/refunds.js'
 import { diffOrderLines, refundPreview } from '../utils/amend.js'
 import { todayCN } from '../utils/time.js'
+import GoodsSelect from './GoodsSelect.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

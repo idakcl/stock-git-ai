@@ -48,9 +48,7 @@
       </el-form-item>
 
       <el-form-item label="快速添加">
-        <el-select v-model="quickItem" filterable default-first-option placeholder="选择商品后回车添加" class="quick-add-select" @change="addQuickItem">
-          <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-        </el-select>
+        <GoodsSelect v-model="quickItem" :items="items" first-option placeholder="选择商品后回车添加" class="quick-add-select" @change="addQuickItem" />
         <div class="calc-hint">订单只能选商品库里已有的商品；新品请先到商品档案新增</div>
       </el-form-item>
       <!-- 所选按钮区：批量折扣与批量删除 -->
@@ -71,9 +69,7 @@
           <el-table-column type="index" label="序号" width="58" align="center" />
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
-              <el-select v-model="row.code" filterable placeholder="选择商品" style="width:100%" @change="onItemChange(row)">
-                <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-              </el-select>
+              <GoodsSelect v-model="row.code" :items="items" placeholder="选择商品" style="width:100%" @change="onItemChange(row)" />
             </template>
           </el-table-column>
           <el-table-column label="数量" width="100" align="right">
@@ -151,6 +147,7 @@
 import { ref, reactive, computed, watch, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PhotoUpload from './PhotoUpload.vue'
+import GoodsSelect from './GoodsSelect.vue'
 import LineDiscountDialog from './LineDiscountDialog.vue'
 import MaxIcon from './MaxIcon.vue'
 import { round2, discountRatesTextOf } from '../utils/account.js'

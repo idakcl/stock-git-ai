@@ -79,9 +79,7 @@
       </el-form-item>
       <el-form-item label="快速添加">
         <!-- 顶部快捷加商品：选已有商品或输入新名回车即加入下方明细，免去滚动到表格底部操作 -->
-        <el-select v-if="!moneyLocked" v-model="quickItem" filterable allow-create default-first-option placeholder="选择或输入商品后回车添加" class="quick-add-select" @change="addQuickItem">
-          <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-        </el-select>
+        <GoodsSelect v-if="!moneyLocked" v-model="quickItem" :items="items" allow-create placeholder="选择或输入商品后回车添加" class="quick-add-select" @change="addQuickItem" />
         <el-input v-else model-value="明细已锁定，请点上方「变更明细」增减商品" disabled class="quick-add-select" />
         <div v-if="!moneyLocked" class="calc-hint">选择已有商品或输入新商品名后回车，即加入下方明细</div>
       </el-form-item>
@@ -106,18 +104,15 @@
           <el-table-column type="index" label="序号" width="58" align="center" />
           <el-table-column label="商品" min-width="180">
             <template #default="{ row }">
-              <el-select
+              <GoodsSelect
                 v-if="!moneyLocked"
                 v-model="row.code"
-                filterable
+                :items="items"
                 allow-create
-                default-first-option
                 placeholder="选择或输入商品"
                 style="width:100%"
                 @change="onItemChange(row)"
-              >
-                <el-option v-for="i in items" :key="i.code" :label="`${i.name} (${i.code})`" :value="i.code" />
-              </el-select>
+              />
               <span v-else>{{ row.name || row.code }}</span>
             </template>
           </el-table-column>
@@ -260,6 +255,7 @@ import { resolveLine, normalizeRate, lineEffectiveRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
 import { payableOf, receivableOf, grossOf, overpaidOf, paidSumOf, receivedSumOf, ensurePayments, depositSumOf, discountRatesTextOf, settleBalance } from '../utils/account'
 import PhotoUpload from './PhotoUpload.vue'
+import GoodsSelect from './GoodsSelect.vue'
 import OrderAmendDialog from './OrderAmendDialog.vue'
 import LineDiscountDialog from './LineDiscountDialog.vue'
 import MaxIcon from './MaxIcon.vue'
