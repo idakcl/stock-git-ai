@@ -180,11 +180,11 @@ const PAGE_SIZE = 60
 
 // 文案与口径按 kind 派生
 const L = computed(() => props.kind === 'payable' ? {
-  title: '应付款管理', subtitle: '按供应商管理与登记采购付款',
+  title: '应付款', subtitle: '按供应商管理与登记采购付款',
   party: '供应商', itemsLabel: '商品数量', due: '应付', paid: '实付', unpaid: '未付',
   payBtn: '付款', detailPath: '/purchase/', partyPath: '/supplier/'
 } : {
-  title: '应收款管理', subtitle: '按客户管理与登记销售收款',
+  title: '应收款', subtitle: '按客户管理与登记销售收款',
   party: '客户', itemsLabel: '商品数量', due: '应收', paid: '实收', unpaid: '未收',
   payBtn: '收款', detailPath: '/sale/', partyPath: '/customer/'
 })
