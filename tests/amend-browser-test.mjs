@@ -445,6 +445,27 @@ await t('订单在业务组一级、顶部「+ 开单」一步开单、模板入
   } finally { await context.close() }
 })
 
+await t('品牌与构建号只出现一次：桌面靠侧栏、手机靠顶栏，平板上不再重复', async () => {
+  // 平板上侧栏和顶栏都渲染，两处都得只剩一份「进销存」和一处构建号
+  for (const [viewport, where] of [[{ width: 1280, height: 900 }, 'desktop'], [{ width: 1024, height: 768 }, 'tablet']]) {
+    const { page, context, errors } = await open('/', seed(), viewport)
+    try {
+      assert.equal(await page.locator('.header-title:visible').count(), 0, `${where}：顶栏不再重复品牌`)
+      assert.equal(await page.locator('.aside .logo:visible').count(), 1, `${where}：侧栏保留品牌`)
+      assert.equal(await page.locator('.build-tag:visible').count(), 0, `${where}：顶栏不显示构建号`)
+      assert.equal(await page.locator('.build-info:visible').count(), 1, `${where}：构建号只在侧栏出现一次`)
+      assert.deepEqual(errors, [], '页面不得报错')
+    } finally { await context.close() }
+  }
+  // 手机上侧栏收起，品牌和退出登录退回顶栏
+  const { page, context } = await open('/', seed(), { width: 375, height: 812 })
+  try {
+    assert.equal(await page.locator('.header-title:visible').count(), 1, '手机：顶栏保留品牌')
+    assert.equal(await page.locator('.aside .logo:visible').count(), 0, '手机：侧栏隐藏')
+    assert.equal(await page.locator('.menu-btn:visible').count(), 1, '手机：有抽屉入口')
+  } finally { await context.close() }
+})
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)

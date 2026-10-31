@@ -291,7 +291,7 @@ body {
   align-items: center;
   justify-content: center;
 }
-.header-right { display: flex; align-items: center; gap: 10px; }
+.header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 /* 顶部「开单」：角标就是草稿数，不用 el-badge 的绝对定位（在 flex 里会漂），自己画 */
 .quick-new { position: relative; }
 .quick-new-badge {
@@ -574,5 +574,8 @@ body {
 @media (min-width: 769px) {
   .menu-btn { display: none; }
   .header { padding-left: 20px; }
+  /* 侧边栏已经带头部 logo 与底部构建号：顶栏不再重复，否则平板上会出现两个「进销存」、两处构建号 */
+  .header-title { display: none; }
+  .build-tag { display: none; }
 }
 </style>
