@@ -62,7 +62,7 @@
       </div>
       <div class="lines-scroll">
         <!-- 整页模式给明细表近两倍高度：几十行商品的小窗滚动是最主要的痛点 -->
-        <el-table ref="linesTable" :data="form.lines" stripe :max-height="standalone ? 480 : 320" @selection-change="onSelectionChange">
+        <el-table ref="linesTable" :data="form.lines" stripe :max-height="linesMaxHeight" @selection-change="onSelectionChange">
           <!-- 勾选框列 -->
           <el-table-column type="selection" width="42" />
           <!-- 序号列：按行号实时生成，历史单据自动带上 -->
@@ -145,6 +145,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { useLinesMaxHeight } from '../utils/linesHeight.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import PhotoUpload from './PhotoUpload.vue'
 import GoodsSelect from './GoodsSelect.vue'
@@ -178,6 +179,8 @@ const emitting = ref(false)
 const editingId = ref('')
 // 弹窗最大化（左上角角标切换）
 const maximized = ref(false)
+// 明细可见高度：弹窗给视口 55%，最大化/整页几乎占满，比原来写死的 320px 多看几行
+const linesMaxHeight = useLinesMaxHeight(computed(() => props.standalone || maximized.value))
 const posted = ref(false)
 const form = reactive({ kind:'sale', party:'', date:'', no:'', remark:'', photos:[], discount:0, discountRates:[], lines:[] })
 

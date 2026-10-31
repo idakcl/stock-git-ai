@@ -97,7 +97,7 @@
            锁定态（原单已动过钱）整表改为纯文本展示：明细改动只能走「变更明细」生成关联单 -->
       <div class="lines-scroll">
         <!-- 整页模式给明细表近两倍高度：商品几十行的单子不用在小窗里来回滚 -->
-        <el-table ref="linesTable" :data="form.lines" stripe :max-height="standalone ? 480 : 320" @selection-change="onSelectionChange">
+        <el-table ref="linesTable" :data="form.lines" stripe :max-height="linesMaxHeight" @selection-change="onSelectionChange">
           <!-- 勾选框列：非锁定态才显示，锁定态不显示（已动过钱的单不允许批量操作） -->
           <el-table-column v-if="!moneyLocked" type="selection" width="42" />
           <!-- 序号列：按行号实时生成，历史单据打开即自动带上，无需迁移数据 -->
@@ -250,6 +250,7 @@
 
 <script setup>
 import { ref, reactive, computed, watch, nextTick } from 'vue'
+import { useLinesMaxHeight } from '../utils/linesHeight.js'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { resolveLine, normalizeRate, lineEffectiveRate } from '../utils/catalog'
 import { genOrderId } from '../utils/code'
@@ -312,6 +313,8 @@ const photoKey = ref(0)
 const editingId = ref('')
 // 弹窗最大化（左上角角标切换）；整页开单模式不用它
 const maximized = ref(false)
+// 明细可见高度：弹窗给视口 55%，最大化/整页几乎占满，比原来写死的 320px 多看几行
+const linesMaxHeight = useLinesMaxHeight(computed(() => props.standalone || maximized.value))
 // 组件内防重入（父级 saving 之外的第二道锁）
 const emitting = ref(false)
 // 变更明细弹窗：原单已动过钱时，明细只能走它生成退货单/补差单

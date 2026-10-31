@@ -69,6 +69,21 @@ async function openEdit(state) {
 
 console.log('\n已动过钱的单据：编辑弹窗锁明细 + 变更入口')
 
+await t('编辑弹窗的明细表按视口高度分配，不再是写死的 320px（多显示几行）', async () => {
+  const s = seed()
+  s.sales[0].items = Array.from({ length: 15 }, (_, i) => ({
+    code: 'P' + String(i + 1).padStart(5, '0'), name: `商品${i + 1}`, unit: '个', qty: 1, price: 10, total: 10
+  }))
+  s.sales[0].total = 150
+  const { dialog, context, errors } = await openEdit(s)
+  try {
+    const h = await dialog.locator('.lines-scroll .el-scrollbar__wrap, .lines-scroll .el-table__body-wrapper').first()
+      .evaluate(e => Math.round(e.clientHeight))
+    assert.ok(h > 320, `1280x900 下明细表应高于原来的 320px，实际 ${h}px`)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 await t('明细与折扣整体锁定，并给出「变更明细」入口', async () => {
   const s = seed(); const { page, dialog, context, errors } = await openEdit(s)
   try {
