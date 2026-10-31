@@ -7,12 +7,9 @@
 //   allowNewItems      —— 明细行可以只给 name（+ price），按名称匹配不到就自动建商品
 //   allowNewSuppliers  —— 采购单的供应商可以只给名称，按名称匹配不到就自动建档案
 // 共同规则：先按编码找 → 再按名称精确匹配（命中就复用，能挡掉大部分重复）→ 都没有才新建；
-// 一次最多新建 10 个；只写名称这类确定信息，不猜联系人/电话。
+// 不限条数（整单在同一事务里提交，失败即整体回滚）；只写名称这类确定信息，不猜联系人/电话。
 import { nextEntityCode } from '../src/utils/code.js'
 import { round2 } from '../src/utils/account.js'
-
-export const MAX_AUTO_ITEMS = 10
-export const MAX_AUTO_SUPPLIERS = 10
 
 const fail = (message, status = 400) => { const e = new Error(message); e.status = status; throw e }
 
@@ -43,7 +40,6 @@ export function autoCatalog(state, { allowNewItems = false, allowNewSuppliers = 
     // 显式给了编码却查不到：多半是打错了，不能悄悄换成自动编码建档
     if (code) fail(`${where}编码「${code}」不存在；新建商品请只传 name`, 404)
     if (!name) fail(`${where}要自动建档时必须传 name`)
-    if (createdItems.length >= MAX_AUTO_ITEMS) fail(`一次最多自动新建 ${MAX_AUTO_ITEMS} 个商品`)
     const price = money(line.price)
     if (price == null) fail(`${where}要自动建档时必须传 price（0 或正数），会作为新商品的${kind === 'purchase' ? '成本' : '售价'}`)
     const rec = {
@@ -70,7 +66,6 @@ export function autoCatalog(state, { allowNewItems = false, allowNewSuppliers = 
     if (!allowNewSuppliers) {
       fail(`${label}「${key}」还没有档案；请先用 POST /api/ai/v1/master 建档，或传 allowNewSuppliers: true 自动建档`)
     }
-    if (createdSuppliers.length >= MAX_AUTO_SUPPLIERS) fail(`一次最多自动新建 ${MAX_AUTO_SUPPLIERS} 个供应商`)
     const rec = {
       code: nextEntityCode(suppliers, 'S', 5),
       name: key,

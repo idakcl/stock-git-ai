@@ -29,7 +29,7 @@ import { depositWrite } from './ai-deposits.js'
 import { paymentWrite } from './ai-payments.js'
 import { amendTransaction } from './amends.js'
 import { listShares, shareOperation } from './shares.js'
-import { autoCatalog, MAX_AUTO_SUPPLIERS } from './ai-catalog.js'
+import { autoCatalog } from './ai-catalog.js'
 
 const V1 = '/api/ai/v1'
 const MAX_LIMIT = 200
@@ -572,7 +572,6 @@ function applyMaster(state, input, requestId) {
         if (!input.allowNewSuppliers) {
           fail(`供应商「${ref}」还没有档案；请先 POST /master 建档，或传 allowNewSuppliers: true 自动建档`, 404)
         }
-        if (newSuppliers.length >= MAX_AUTO_SUPPLIERS) fail(`一次最多自动新建 ${MAX_AUTO_SUPPLIERS} 个供应商`)
         const rec = {
           code: nextEntityCode(list, 'S', 5), name: ref,
           contact: '', phone: '', address: '', remark: '', advances: [], products: []

@@ -745,6 +745,24 @@ await t('新建商品：allowNewSuppliers 可直接挂没建档的供应商名�
   assert.ok(item.suppliers.includes('S00001'))
 })
 
+await t('自动建档不限条数：30 行新商品、15 个新供应商都一次提交成功', async () => {
+  const many = Array.from({ length: 30 }, (_, i) => ({ name: `批量新品${i + 1}`, unit: '个', qty: 1, price: 10 }))
+  const data = await ok('/api/ai/v1/orders', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(905), action: 'save', allowNewItems: true, order: { kind: 'sale', customer: '客户甲', date: '2026-02-06', items: many } }
+  })
+  assert.equal(data.createdItems.length, 30, '不应有 10 条上限')
+
+  const supNames = Array.from({ length: 15 }, (_, i) => `批量供应商${i + 1}`)
+  const master = await ok('/api/ai/v1/master', {
+    key: maxKey, method: 'POST',
+    body: { allowNewSuppliers: true, type: 'item', action: 'upsert', item: { name: '批量挂靠商品', price: 5, suppliers: supNames } }
+  })
+  assert.equal(master.createdSuppliers.length, 15, '供应商也不应有 10 条上限')
+  const item = itemsFile().find(i => i.code === master.code)
+  assert.equal(item.suppliers.length, 15)
+})
+
 console.log('\n吊销与过期')
 await t('吊销后立即 401', async () => {
   await ok('/api/ai-keys', { method: 'POST', token, body: { action: 'revoke', id: readRecord.id } })

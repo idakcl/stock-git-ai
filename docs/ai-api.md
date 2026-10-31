@@ -145,7 +145,7 @@ POST /api/ai/v1/purchases
   **新建时必须传 `price`**：销售单写入售价、采购单写入成本，另一项留 `null`。
 - `allowNewSuppliers`：采购单 / 采购订单的供应商可以只写名称；建商品时 `item.suppliers`
   也可以直接写名称（与编码混传）。按名称精确匹配，命中就复用编码。
-- 只写名称这类确定信息，不猜联系人/电话；一次最多自动新建 10 个商品、10 个供应商。
+- 只写名称这类确定信息，不猜联系人/电话；条数不限，整单在同一事务里提交，任一条失败即整体回滚。
 - 显式写了 `code` 却查不到 → 仍然 404（多半是打错，绝不悄悄换个编码建档）。
 - 与单据同一次提交：要么全成、要么全不写；同一 `requestId` 重试不会重复建档。
 - 返回里多出 `createdItems: [{ code, name }]` / `createdSuppliers: [{ code, name }]`，方便事后核对有没有写重复。
@@ -332,10 +332,10 @@ POST /api/ai/v1/purchases
 | `api/ai-keys.js` | 密钥存储（只存 SHA-256）、签发/改权限/吊销、使用统计、鉴权 |
 | `api/ai.js` | 所有 `/api/ai/v1/*` 读写接口、金额重算、幂等、审计 |
 | `api/ai-logs.js` | 调用日志：内存缓冲、合并落盘、保留策略、查询筛选 |
-| `api/ai-catalog.js` | 单据里的自动建档（allowNewItems / allowNewSuppliers）：名称匹配、编码生成、条数上限 |
+| `api/ai-catalog.js` | 单据里的自动建档（allowNewItems / allowNewSuppliers）：名称匹配、编码生成、整单事务提交 |
 | `api/ai-deposits.js` | 预存款 / 预付款：充值 / 抵扣 / 编辑 / 删除、资金单据生成、requestId 幂等 |
 | `api/ai-payments.js` | 单据收付款 / 结清：流水追加、结算状态同步、资金单据生成 |
 | `api/routes.js` | `/ai/*` 分发；`/ai-keys`、`/ai-logs` 管理接口（仅登录态） |
 | `web/index.js` | `/api/ai/*` 绕开边缘缓存（响应随密钥权限变化） |
 | `src/views/AiApi.vue` + `src/components/AiScopePicker.vue` | 左侧菜单页面与权限勾选器 |
-| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 61 项接口回归 + 8 项页面回归 |
+| `tests/ai-api-test.mjs` / `tests/ai-api-browser-test.mjs` | 62 项接口回归 + 8 项页面回归 |
