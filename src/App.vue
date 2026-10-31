@@ -22,6 +22,13 @@
         <span class="logo-dot">进</span>进销存
       </div>
       <div class="header-right">
+        <!-- 全局开单入口：订单用得最频繁，任何页面都能一步开单；角标是待过账的草稿数 -->
+        <el-button class="quick-new" type="primary" @click="quickNewOrder"
+          :title="draftCount ? `${draftCount} 张订单还没过账` : '新建订单'">
+          <el-icon><Plus /></el-icon>
+          <span class="quick-new-text">开单</span>
+          <span v-if="draftCount" class="quick-new-badge">{{ draftCount > 99 ? '99+' : draftCount }}</span>
+        </el-button>
         <span class="build-tag">构建 {{ buildStamp }}</span>
         <el-button text class="logout-btn" @click="onLogout">
           <el-icon><SwitchButton /></el-icon>
@@ -74,12 +81,13 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { Menu, SwitchButton } from '@element-plus/icons-vue'
+import { Menu, SwitchButton, Plus } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import AppMenu from './components/AppMenu.vue'
 import Login from './views/Login.vue'
 import { api, auth } from './api'
 import { cnDateTime } from './utils/time.js'
+import { draftCount, refreshDraftCount } from './utils/draftBadge.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -143,12 +151,19 @@ function observeMain(retry = 0) {
   mo.observe(main, { childList: true, subtree: true })
 }
 
+// 顶部「开单」：统一跳订单页并带 ?new=1，由订单页负责开表单（避免再写一套开单链路）
+function quickNewOrder() {
+  if (route.path === '/orders') router.replace({ path: '/orders', query: { ...route.query, new: '1' } })
+  else router.push({ path: '/orders', query: { new: '1' } })
+}
+
 onMounted(() => {
   check()
+  refreshDraftCount()
   window.addEventListener('auth:expired', onExpired)
   window.addEventListener('resize', scheduleSync)
   window.addEventListener('orientationchange', scheduleSync)
-  router.afterEach(() => nextTick(scheduleSync))
+  router.afterEach(() => { nextTick(scheduleSync); refreshDraftCount() })
   observeMain()
   scheduleSync()
   clockTimer = setInterval(() => { clock.value = cnDateTime() }, 1000)
@@ -277,6 +292,26 @@ body {
   justify-content: center;
 }
 .header-right { display: flex; align-items: center; gap: 10px; }
+/* 顶部「开单」：角标就是草稿数，不用 el-badge 的绝对定位（在 flex 里会漂），自己画 */
+.quick-new { position: relative; }
+.quick-new-badge {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: var(--color-warning);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
 .build-tag { color: var(--text-placeholder); font-size: var(--fs-sub); }
 .logout-btn { color: var(--text-regular); }
 .logout-btn:hover { color: var(--color-danger); }
@@ -532,6 +567,9 @@ body {
   /* 统计块在窄/矮屏排两列 */
   .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .build-tag { display: none; }
+  /* 手机上头部空间紧张：开单按钮只留图标，退出登录只留图标（原有规则） */
+  .quick-new-text { display: none; }
+  .quick-new { padding: 8px 10px; }
 }
 @media (min-width: 769px) {
   .menu-btn { display: none; }

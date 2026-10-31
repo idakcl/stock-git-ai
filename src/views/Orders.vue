@@ -14,6 +14,8 @@
               清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
             <el-button @click="openTemplatePicker">从模板导入</el-button>
+            <!-- 订单模板不再占侧边栏：低频配置收到这里，和「从模板导入」挨着，动线更顺 -->
+            <el-button @click="$router.push('/templates')">模板管理</el-button>
             <el-button type="primary" @click="openCreate">新建订单</el-button>
           </div>
         </div>
@@ -220,7 +222,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 // 新页面开单：/orders/new 复用本页组件，只靠路由 meta 切换成整页表单
 import { useEntryMode } from '../utils/entryMode'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -249,6 +251,7 @@ const saving = ref(false)
 // 订金凭证（SK-/FK- 的 items[].orderType === 'order'）在资金单据页点单号会跳到这里并带上订单号，
 // 用 route.query.kw 预填关键词，落地就是一行，不用用户在几百张草稿里手搜。
 const route = useRoute()
+const router = useRouter()
 const keyword = ref(String(route.query?.kw || ''))
 // 默认只看未过账订单；已过账的要切到「仅显示已过账订单」或「显示全部订单」才看得到
 const status = ref('draft')
@@ -606,6 +609,18 @@ function importTemplate(tpl) {
 watch(entry, (v) => { if (v) openCreate() })
 watch(dialog, (v) => { if (!v) backToList() })
 
+// 顶部「+ 开单」：跳 /orders?new=1 直接开表单，开完立刻把参数抹掉，
+// 否则刷新或从详情页返回时又会自动弹一张空表单。
+function openFromQuery() {
+  if (!route.query.new) return false
+  const q = { ...route.query }
+  delete q.new
+  router.replace({ path: '/orders', query: q })
+  return true
+}
+// 已在本页时再点顶部「开单」：组件被复用，只能靠 watch 捕获 query 变化
+watch(() => route.query.new, (v) => { if (v && ready.value) { openCreate(); openFromQuery() } })
+
 // 备注只改 remark：走独立 action，已过账的订单也能补，不碰金额/明细/凭证
 async function onRemarkSaved(text) {
   const row = remarkOrder.value
@@ -719,6 +734,8 @@ onMounted(async () => {
   await load()
   // 整页开单：数据取齐了才开窗（ready 只在成功时置真，加载失败就留在占位提示，不给一张存不了的表单）
   if (entry.value && ready.value) openCreate()
+  // 从顶部「+ 开单」进来：同样等数据就绪再开，并清掉 ?new
+  if (!entry.value && ready.value && openFromQuery()) openCreate()
 })
 </script>
 

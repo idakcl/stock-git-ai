@@ -1,7 +1,7 @@
 <template>
   <!-- 菜单分组口径：经营=看结果，业务=做单据，资金=对钱，资料=基础档案，对外=给出去的出口，系统=自己的配置。
        层级最多两层：手机抽屉只有 224px 宽，再深就点不动了。 -->
-  <el-menu ref="menuRef" :default-active="$route.path" router class="menu" @select="$emit('select')">
+  <el-menu :default-active="$route.path" router class="menu" @select="$emit('select')">
     <el-menu-item-group title="经营">
       <el-menu-item index="/">
         <el-icon><HomeFilled /></el-icon>
@@ -19,17 +19,13 @@
     </el-menu-item-group>
 
     <el-menu-item-group title="业务">
-      <!-- 订单是业务链起点（先谈单、再收订金、过账后才生成采购/销售单）；模板是它的下属配置，
-           所以收进子菜单而不是和订单平级。父级 index 用非路由值，避免和子项路径撞车。 -->
-      <el-sub-menu index="/biz-orders">
-        <template #title>
-          <el-icon><Tickets /></el-icon>
-          <span>订单</span>
-          <span v-if="draftOrders" class="menu-badge warn">{{ badgeText(draftOrders) }}</span>
-        </template>
-        <el-menu-item index="/orders">全部订单</el-menu-item>
-        <el-menu-item index="/templates">订单模板</el-menu-item>
-      </el-sub-menu>
+      <!-- 订单是业务链起点且使用频率最高，放回一级：一次点击直达，草稿角标也才看得见。
+           订单模板低频，不再占菜单，入口收在订单页头部的「模板管理」里（/templates 路由保留）。 -->
+      <el-menu-item index="/orders">
+        <el-icon><Tickets /></el-icon>
+        <span>订单</span>
+        <span v-if="draftCount" class="menu-badge warn">{{ badgeText(draftCount) }}</span>
+      </el-menu-item>
       <el-menu-item index="/purchases">
         <el-icon><Download /></el-icon>
         <span>采购</span>
@@ -113,48 +109,30 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
   Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Key, RefreshLeft
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'
-import { isUnposted } from '../utils/orders.js'
+import { draftCount, refreshDraftCount } from '../utils/draftBadge.js'
 
 defineEmits(['select'])
-
-const route = useRoute()
-const menuRef = ref(null)
-// 订单子菜单的父级 index（不是路由路径，纯用作分组开关）
-const ORDERS_MENU = '/biz-orders'
-
-// 命中订单/模板路由时自动展开订单子菜单：default-active 只负责高亮，
-// 从分享链接或刷新直接落到 /templates 时，折叠的父级会让子项「看不见」。
-function syncOrdersMenu(path) {
-  if (!menuRef.value || !path) return
-  if (path === '/orders' || path.startsWith('/orders/') || path === '/templates') {
-    menuRef.value.open(ORDERS_MENU)
-  }
-}
-onMounted(() => syncOrdersMenu(route.path))
-watch(() => route.path, p => syncOrdersMenu(p))
 
 // 资金菜单角标：未收清 / 未付清的单据数（加载失败不影响菜单使用）
 const receivableOpen = ref(0)
 const payableOpen = ref(0)
-// 订单菜单角标：还没过账的草稿数（过账前不占库存、不进往来账，容易忘）
-const draftOrders = ref(0)
 // 角标文案：超过 99 显示 99+，与 el-badge 的 :max="99" 同一口径
 const badgeText = n => (Number(n) > 99 ? '99+' : String(n))
 
 onMounted(async () => {
+  // 草稿角标与顶部「开单」按钮共用同一份计数（utils/draftBadge.js），避免每页重复请求
+  refreshDraftCount()
   try {
-    const [sales, purchases, orders] = await Promise.all([api.getSales(), api.getPurchases(), api.getOrders()])
+    const [sales, purchases] = await Promise.all([api.getSales(), api.getPurchases()])
     receivableOpen.value = (sales || []).filter(s => receivableOf(s) > 0).length
     payableOpen.value = (purchases || []).filter(p => payableOf(p) > 0).length
-    draftOrders.value = (orders || []).filter(o => isUnposted(o.status)).length
   } catch (e) { /* 忽略：角标仅为提示 */ }
 })
 </script>
@@ -178,14 +156,6 @@ onMounted(async () => {
   color:var(--color-primary);
   font-weight: 600;
 }
-.menu :deep(.el-sub-menu__title) {
-  height: 44px;
-  line-height: 44px;
-  margin: 2px 8px;
-  border-radius: 6px;
-}
-/* 订单子菜单：子项缩进一档，层级看得出来，右侧内边距收紧给角标和文字留空间 */
-.menu :deep(.el-sub-menu .el-menu-item) { padding-left: 32px !important; padding-right: 14px !important; }
 /* 菜单角标：原先用 el-badge，但它是「默认插槽 + 绝对定位的 sup」结构——这里没有插槽内容，
    el-badge 本体就是个零高度盒子，sup 相对它 top:0 + translateY(-50%) 定位，在 flex 菜单项里
    会掉到文字下沿（手机上 3 颗像素的偏移就被看成一整行）。改成自己画一颗胶囊：

@@ -399,6 +399,37 @@ await t('菜单：应付排在应收上方，三颗角标都与文字同一行',
   } finally { await context.close() }
 })
 
+await t('订单在业务组一级、顶部「+ 开单」一步开单、模板入口收在订单页头部', async () => {
+  const s = seed()
+  s.orders = [{ id: 'D20261029000000019', kind: 'sale', status: '未过账', customer: '客户甲', date: '2026-10-29',
+    discount: 0, discountRates: [], items: [], deposits: [] }]
+  const { page, context, errors } = await open('/', s)
+  try {
+    // 一级菜单：业务组里直接是「订单」，不再有子菜单
+    assert.equal(await page.locator('.menu .el-sub-menu').count(), 0, '订单不应再是折叠子菜单')
+    const orderItem = page.locator('.menu .el-menu-item', { hasText: '订单' }).first()
+    assert.equal((await orderItem.innerText()).replace(/\s+/g, ''), '订单1', '订单是一级项且带草稿角标')
+
+    // 顶部开单：直达订单页并弹出新建表单，query 里的 new 用完即抹
+    const quick = page.locator('.quick-new')
+    assert.equal((await quick.innerText()).replace(/\s+/g, ''), '开单1', '顶部按钮带草稿数角标')
+    await quick.click()
+    const dialog = page.locator('.el-dialog:visible').first()
+    await dialog.waitFor()
+    assert.match(await dialog.locator('.el-dialog__title').innerText(), /新建订单/)
+    await page.waitForTimeout(300)
+    assert.ok(!page.url().includes('new=1'), `开单后应清掉 ?new：${page.url()}`)
+
+    // 关掉表单，页头的「模板管理」承接原菜单里的订单模板
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(200)
+    await page.locator('.header-ops button', { hasText: '模板管理' }).click()
+    await page.waitForTimeout(300)
+    assert.ok(page.url().endsWith('/templates'), `模板管理应跳到 /templates：${page.url()}`)
+    assert.deepEqual(errors, [], '页面不得报错')
+  } finally { await context.close() }
+})
+
 await browser.close()
 console.log(`\n${pass} passed, ${fail} failed`)
 if (fail) process.exit(1)
