@@ -18,7 +18,9 @@
             <el-button :disabled="!found" @click="doExport">导出CSV</el-button>
             <!-- 只有一个打印按钮：纸张/方向统一在右边的「打印设置」里选 -->
             <el-button :disabled="!found" @click="doPrint()">打印</el-button>
-            <PrintHeaderToggle />
+            <PrintHeaderToggle
+              :head-title="(isReturn(purchase) ? '采购退货单' : '采购单') + ' ' + (purchase.id || '')"
+              :head-subtitle="docSubtitle" :head-fields="docHeaderFields" />
             <el-button v-if="found && !externalView && !isVoided(purchase)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(purchase) || isVoided(purchase)" @click="editDialog = true">编辑</el-button>
             <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(purchase) || isVoided(purchase) || purchases.some(o => o.sourceOrderId === purchase.id)" @click="removeOrder">删除</el-button>

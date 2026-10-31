@@ -168,7 +168,11 @@
         <p class="print-hint">将打印 {{ selected.length }} 张订单，每张单独起一页{{ repeatHeaderPref ? '（明细超过一页时自动续页并重复表头）' : '（明细不切片，商品表头只印在每张单据的第一页）' }}。</p>
         <!-- 纸张与跨页表头都来自「打印设置」（全局同一份偏好），这里只留打印动作 -->
         <div class="print-paper">
-          <PrintHeaderToggle />
+          <!-- 批量打印每张单的标头字段数略有差异，面板按第一张勾选的单据估算标头行数 -->
+          <PrintHeaderToggle
+            :head-title="batchHeadSample.title"
+            :head-subtitle="batchHeadSample.subtitle"
+            :head-fields="batchHeadSample.fields" />
         </div>
         <el-button type="primary" class="print-btn" @click="printSelectedDetails(false)">直接打印</el-button>
         <el-button class="print-btn" @click="printSelectedDetails(true)">隐藏金额打印</el-button>
@@ -461,9 +465,19 @@ const maskedHeaderFields = (row) => {
   return fields
 }
 
+// 打印设置面板估算标头行数用：取第一张勾选订单的标题/副标题/单头字段
+const batchHeadSample = computed(() => {
+  const row = selected.value[0]
+  if (!row) return { title: '', subtitle: '', fields: [] }
+  return {
+    title: `${row.kind === 'purchase' ? '采购' : '销售'}订单 ${row.id}`,
+    subtitle: `共 ${(row.items || []).length} 项商品`,
+    fields: orderHeaderFields(row)
+  }
+})
+
 // 每张订单单独一页；masked=true 时所有金额字段（单价/折扣/合计/订金/未收）都不进打印
-function printSelectedDetails(masked) {
-  const rows = selectedSorted.value
+function printSelectedDetails(masked) {  const rows = selectedSorted.value
   if (!rows.length) return ElMessage.warning('请先勾选订单')
   const sections = rows.map(row => {
     const items = row.items || []

@@ -40,6 +40,20 @@
           <el-input-number v-model="cfg.rowsPerPage" :min="0" :max="200" :step="1" :controls="false" size="small" class="pp-num" />
           <span class="pp-unit">0 = 自动</span>
         </div>
+        <!-- 自动行数 + 标头/商品拆解：换纸张、方向、自定义宽高都会即时重算，
+             数字与真正切片用的 rowsPerPageOf / headRowsOf 同源 -->
+        <div class="pp-cap">
+          <div class="pp-cap-line">
+            每页 <b>{{ rowsInfo.rowsPerPage }}</b> 行
+            <span class="pp-cap-tag" :class="{ manual: rowsInfo.manual }">{{ rowsInfo.manual ? '手动' : '自动' }}</span>
+            <span v-if="rowsInfo.manual" class="pp-cap-auto">自动 {{ rowsInfo.auto }}</span>
+          </div>
+          <div class="pp-cap-line">
+            首页：标头 {{ headRows }} 行 + 商品 <b>{{ firstRows }}</b> 行
+          </div>
+          <div v-if="headRows" class="pp-cap-line">后续页：商品 <b>{{ rowsInfo.rowsPerPage }}</b> 行</div>
+          <div v-if="!on" class="pp-cap-note">跨页表头已关闭：明细不按纸张分页，表头只印在第一页。</div>
+        </div>
         <div class="pp-hint">自定义纸张按填入的宽高出纸（宽 &lt; 高即纵向）。真机打印若某页缺表头或最后一行被挤到下一页，把每页行数调小几行即可。</div>
         <div class="pp-actions">
           <el-button link size="small" @click="resetPaperPref()">恢复默认（A4 纵向）</el-button>
@@ -52,7 +66,15 @@
 <script setup>
 import { computed } from 'vue'
 import { repeatHeaderPref, paperPref, resetPaperPref } from '../utils/printPrefs'
-import { paperSpec } from '../utils/export'
+import { paperSpec, paperRowsInfo, headRowsOf } from '../utils/export'
+
+// 当前要打印内容的单头信息（标题/副标题/信息块）：只用来算「标头占几行」，
+// 不传就按无标头算（列表打印、模板打印这类没有信息块的场景）
+const props = defineProps({
+  headTitle: { type: String, default: '' },
+  headSubtitle: { type: String, default: '' },
+  headFields: { type: Array, default: () => [] }
+})
 
 const cfg = paperPref
 const on = computed({
@@ -81,6 +103,15 @@ const paperLabel = computed(() => (cfg.mode === 'custom'
 
 // 纸张是否真的生效，以解析结果为准
 const spec = computed(() => paperSpec())
+// 面板上的行数拆解：自动行数取当前纸张/方向/自定义尺寸，标头行数取当前单据头信息
+const rowsInfo = computed(() => paperRowsInfo())
+const headRows = computed(() => headRowsOf(spec.value, {
+  title: props.headTitle,
+  subtitle: props.headSubtitle,
+  headerFields: props.headFields
+}))
+// 首页商品行数：与 packPageSlices 一样至少留 1 行（手动行数填得过小时也不会出现 0/负数）
+const firstRows = computed(() => Math.max(1, rowsInfo.value.rowsPerPage - headRows.value))
 defineExpose({ spec })
 </script>
 
@@ -95,6 +126,13 @@ defineExpose({ spec })
 .pp-label { width: 68px; color: var(--text-regular); font-size: var(--fs-sub); flex: none; }
 .pp-num { width: 84px; }
 .pp-x, .pp-unit { color: var(--text-secondary); font-size: var(--fs-sub); }
+/* 行数拆解：浅底块，和上面的表单控件区分开 */
+.pp-cap { background: var(--el-fill-color-light, #f5f7fa); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-sub); color: var(--text-regular); }
+.pp-cap b { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.pp-cap-tag { margin-left: 4px; padding: 0 5px; border-radius: 3px; font-size: var(--fs-mini); color: var(--text-secondary); background: var(--el-fill-color, #ebeef5); }
+.pp-cap-tag.manual { color: var(--el-color-warning-dark-2, #b88230); background: var(--el-color-warning-light-8, #fdf6ec); }
+.pp-cap-auto { margin-left: 6px; color: var(--text-secondary); font-size: var(--fs-mini); }
+.pp-cap-note { color: var(--text-secondary); font-size: var(--fs-mini); line-height: 1.5; }
 .pp-hint { color: var(--text-secondary); font-size: var(--fs-mini); line-height: 1.5; }
 .pp-actions { text-align: right; }
 </style>

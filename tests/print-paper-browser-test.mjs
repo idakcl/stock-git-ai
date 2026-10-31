@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
 import cp from 'node:child_process'
-import { buildPrintHtml, paperSpec, customSpec, rowsPerPageOf, columnWidths, rowLineCosts, packPageSlices, pageCapacities, PAPER_SPECS } from '../src/utils/export.js'
+import { buildPrintHtml, paperSpec, paperRowsInfo, headRowsOf, customSpec, rowsPerPageOf, columnWidths, rowLineCosts, packPageSlices, pageCapacities, PAPER_SPECS } from '../src/utils/export.js'
 import { paperPref, resetPaperPref } from '../src/utils/printPrefs.js'
 
 const { chromium } = createRequire(import.meta.url)('playwright')
@@ -298,6 +298,100 @@ await t('打印设置弹层：默认就是 A4 纵向，打印出纵向纸', asyn
     await page.waitForFunction(() => !!window.__printed, null, { timeout: 5000 })
     const html = await page.evaluate(() => window.__printed)
     assert.match(html, /@page \{ size: A4 portrait/)
+  } finally { await context.close() }
+})
+
+await t('打印设置面板：显示的行数与真正切片同口径（A4/A5/横纵向/自定义/手动）', () => {
+  resetPaperPref()
+  for (const paper of ['A4', 'A5']) {
+    for (const orientation of ['landscape', 'portrait']) {
+      paperPref.orientation = orientation
+      const info = paperRowsInfo(paper)
+      assert.equal(info.manual, false, `${paper} ${orientation} 默认应为自动`)
+      assert.equal(info.rowsPerPage, paperSpec(paper).rowsPerPage, `${paper} ${orientation} 自动行数应与纸张解析一致`)
+      assert.equal(info.auto, info.rowsPerPage)
+    }
+  }
+  // 自定义纸张：改宽高自动重算，手动填行数时单独标注且覆盖自动值
+  resetPaperPref()
+  paperPref.mode = 'custom'
+  paperPref.width = 100
+  paperPref.height = 180
+  let info = paperRowsInfo()
+  assert.equal(info.manual, false)
+  assert.equal(info.rowsPerPage, paperSpec().rowsPerPage)
+  assert.equal(info.auto, customSpec(100, 180, 0).rowsPerPage)
+  const before = info.auto
+  paperPref.height = 260
+  assert.ok(paperRowsInfo().auto > before, '加高纸张后自动行数应变多')
+  paperPref.rowsPerPage = 25
+  info = paperRowsInfo()
+  assert.equal(info.manual, true)
+  assert.equal(info.rowsPerPage, 25, '手动行数优先')
+  assert.equal(info.auto, customSpec(100, 260, 0).rowsPerPage)
+  resetPaperPref()
+})
+
+await t('标头行数：首页商品行数 = 每页行数 - 标头行数（与 buildPrintHtml 的切片一致）', () => {
+  resetPaperPref()
+  const p = paperSpec('A4')
+  const doc = docOf(rowsOf(80))
+  const head = headRowsOf(p, doc)
+  assert.ok(head >= 2, `带标题/副标题/信息块的单据标头不应少于 2 行，实际 ${head}`)
+  const html = buildPrintHtml({ ...doc, repeatHeader: true })
+  const firstTable = html.split('<table class="pg')[1].split('</table>')[0]
+  const firstCount = (firstTable.match(/<tr>/g) || []).length - 1
+  assert.equal(firstCount, Math.max(1, p.rowsPerPage - head))
+  // 没有标题/副标题/信息块（列表、模板打印）→ 标头 0 行，首页整页都是商品
+  assert.equal(headRowsOf(p, {}), 0)
+  assert.equal(headRowsOf(p, { headerFields: [['客户', ''], ['日期', null]] }), 0)
+  // 窄自定义纸：信息块折行更多，标头行数应比 A4 多
+  paperPref.mode = 'custom'
+  paperPref.width = 80
+  paperPref.height = 200
+  assert.ok(headRowsOf(paperSpec(), doc) > head, '窄纸信息块折行更多，标头应占更多行')
+  resetPaperPref()
+})
+
+await t('打印设置弹层：自动行数 / 标头 / 商品行数随纸张即时显示', async () => {
+  const { page, context } = await openApp('/sale/X202610301100000001')
+  try {
+    await page.locator('.paper-btn').click()
+    const cap = page.locator('.pp-cap')
+    await cap.waitFor()
+    const text = () => cap.innerText()
+    // 默认 A4 纵向：自动行数、标头、商品三行都在
+    let t1 = await text()
+    assert.match(t1, /每页 \d+ 行/)
+    assert.match(t1, /自动/)
+    assert.match(t1, /首页：标头 [1-9]\d* 行 \+ 商品 [1-9]\d* 行/)
+    assert.match(t1, /后续页：商品 \d+ 行/)
+    const rowsOfText = (s) => Number((s.match(/每页 (\d+) 行/) || [])[1])
+    const headOfText = (s) => Number((s.match(/标头 (\d+) 行/) || [])[1])
+    const firstOfText = (s) => Number((s.match(/商品 (\d+) 行/) || [])[1])
+    const rowsA4 = rowsOfText(t1), head = headOfText(t1)
+    assert.equal(firstOfText(t1), rowsA4 - head)
+    // 切到 A5：行数变少，标头/商品同步重算
+    await page.locator('.pp').getByText('A5', { exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.includes('A5'))
+    const t2 = await text()
+    assert.ok(rowsOfText(t2) < rowsA4, `A5 每页 ${rowsOfText(t2)} 应少于 A4 ${rowsA4}`)
+    assert.equal(firstOfText(t2), rowsOfText(t2) - headOfText(t2))
+    // 自定义纸张：填窄纸后自动行数再变
+    await page.locator('.pp').getByText('自定义', { exact: true }).click()
+    await page.waitForFunction(() => document.querySelector('.paper-btn')?.textContent.includes('×'))
+    const t3 = await text()
+    assert.match(t3, /每页 \d+ 行/)
+    assert.equal(firstOfText(t3), rowsOfText(t3) - headOfText(t3))
+    // 手动填 12 行：标注「手动」并让商品行数跟着走
+    const num = page.locator('.pp .pp-row').filter({ hasText: '每页行数' }).locator('input')
+    await num.fill('12')
+    await num.blur()
+    await page.waitForFunction(() => document.querySelector('.pp-cap')?.textContent.includes('手动'))
+    const t4 = await text()
+    assert.match(t4, /每页 12 行/)
+    assert.match(t4, /手动/)
+    assert.equal(firstOfText(t4), Math.max(1, 12 - headOfText(t4)))
   } finally { await context.close() }
 })
 

@@ -158,6 +158,26 @@ export const paperSpec = (paper) => {
   return manual ? { ...spec, rowsPerPage: manual } : spec
 }
 
+/**
+ * 打印设置面板展示用：当前纸张「自动」能排多少行、是否被手动行数覆盖。
+ * 自动值必须与 paperSpec 的推算口径完全一致，否则面板写的行数和真打出来的对不上。
+ */
+export function paperRowsInfo(paper) {
+  const cfg = paperPref || {}
+  const preset = PAPER_SPECS[String(paper || cfg.paper || 'A4').toUpperCase()] || PAPER_SPECS.A4
+  let auto
+  if (cfg.mode === 'custom') {
+    // 手动行数传 0，只要自动值
+    auto = customSpec(cfg.width, cfg.height, 0).rowsPerPage
+  } else {
+    // 纵向＝纸宽纸高对调，行数按纵向纸高算（与 paperSpec 一致）
+    const h = cfg.orientation === 'portrait' ? preset.w : preset.h
+    auto = rowsPerPageOf(h, preset.marginMm, preset.base)
+  }
+  const manual = Number(cfg.rowsPerPage) > 0 ? Math.round(Number(cfg.rowsPerPage)) : 0
+  return { auto, rowsPerPage: manual || auto, manual: manual > 0 }
+}
+
 // 字号一律由 base 推导：换纸张时整套版式等比缩放，「金额 = 其他字体的 1.2 倍」这条比例不会走样
 // repeatHeader=false 时必须把 thead 的 table-header-group 一起关掉：
 // 只关掉我们的分片还不够，Chromium 自己会按这条声明在续页顶上重排表头，
@@ -371,15 +391,19 @@ export function packPageSlices(costs, rowsPerPage, headReserve = 0, footReserve 
  * 以前所有纸张都写死 6 行（A4 够用），但自定义纸张（尤其窄纸）里信息块会折成好几行，
  * 6 行不够 → 首页多溢出几像素 → 浏览器把最后一行挤到下一张纸，那张纸看着就像「表头丢了」。
  * 这里按纸宽算信息块会折几行、再按行高折成「行数」，并多留 1 行安全余量。
+ *
+ * 导出成公共函数：打印设置面板要显示「标头占几行」，必须与真正切片用的数字同源。
  */
-const headReserveOf = (sec, p) => {
-  const fields = normFields(sec.headerFields)
-  if (!sec.title && !sec.subtitle && !fields.length) return 0
+export function headRowsOf(p, head = {}) {
+  const fields = normFields(head.headerFields)
+  const title = head.title || ''
+  const subtitle = head.subtitle || ''
+  if (!title && !subtitle && !fields.length) return 0
   const rowPx = rowPxOf(p.base)
   const contentW = Math.max(120, (p.w - p.marginMm * 2) * MM_PX)
   let px = 0
-  if (sec.title) px += p.base * 2.2
-  if (sec.subtitle) px += p.base * 1.8
+  if (title) px += p.base * 2.2
+  if (subtitle) px += p.base * 1.8
   if (fields.length) {
     // .fields 里的 .f 有 min-width:180px，一行能放几个按内容宽算
     const perRow = Math.max(1, Math.floor(contentW / 190))
@@ -387,6 +411,8 @@ const headReserveOf = (sec, p) => {
   }
   return Math.max(1, Math.ceil(px / rowPx) + 1)
 }
+
+const headReserveOf = (sec, p) => headRowsOf(p, sec)
 
 // 一节（一张单据）的打印内容：单头信息只在首页出现，落款只在末页出现
 const sectionHtml = (sec, p, withFooter, repeatHeader = true) => {
