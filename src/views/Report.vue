@@ -102,7 +102,7 @@
         </div>
         <div class="stat-item">
           <el-statistic title="毛利" :value="stats.profit" :precision="2" prefix="¥" />
-          <div class="stat-sub">销售总额 − 销售成本</div>
+          <div class="stat-sub">净销售额（已扣折扣与优惠）− 销售成本</div>
         </div>
         <div class="stat-item">
           <el-statistic title="应收款（未收合计）" :value="stats.receivable" :precision="2" prefix="¥" value-style="color:var(--color-danger)" />
@@ -282,7 +282,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, h } from 'vue'
 import { api } from '../api'
 import { matchText } from '../utils/search'
 import { aggregateByItem } from '../utils/catalog'
-import { receivableOf, payableOf, ensurePayments, isVoided } from '../utils/account'
+import { receivableOf, payableOf, ensurePayments, isVoided, grossOf } from '../utils/account'
 import TableToolbar from '../components/TableToolbar.vue'
 
 const purchases = ref([])
@@ -373,7 +373,7 @@ const customerOptions = computed(() => [...new Set((sales.value || []).map(s => 
 
 const stats = reactive({
   purchaseTotal: 0, purchasePaid: 0, purchasePayCount: 0,
-  saleTotal: 0, profit: 0,
+  saleTotal: 0, netSaleTotal: 0, profit: 0,
   payable: 0, payableCount: 0, payableOpen: 0,
   receivable: 0, receivableCount: 0, receivableOpen: 0
 })
@@ -398,7 +398,10 @@ function recompute() {
   for (const [code, v] of Object.entries(stockObj)) costMap[code] = v.cost || 0
   const totalCost = sList.reduce((sum, s) =>
     sum + (s.items || []).reduce((c, i) => c + i.qty * (costMap[i.code] || 0), 0), 0)
-  stats.profit = money(stats.saleTotal - totalCost)
+  // 毛利按净销售额算：合计 × 折扣链 − 整单优惠，再减成本。
+  // 与看板同一口径；用 saleTotal（原价合计）会把折扣和优惠都算成利润。
+  stats.netSaleTotal = money(sList.reduce((sum, s) => sum + grossOf(s), 0))
+  stats.profit = money(stats.netSaleTotal - totalCost)
 
   // 采购：累计实付与流水笔数（付款流水）
   stats.purchasePaid = money(pList.reduce((s, p) => s + ensurePayments(p, 'paid').reduce((t, x) => t + Number(x.amount || 0), 0), 0))

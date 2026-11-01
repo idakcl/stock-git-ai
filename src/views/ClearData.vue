@@ -8,13 +8,14 @@
       </template>
 
       <el-alert type="error" :closable="false" show-icon class="danger-intro">
-        清空后数据<b>不可恢复</b>，执行前请务必先到「数据备份」页「导出全部数据」备份。每项清空均需<b>两步确认</b>：先确认警告，再输入<b>管理密码</b>与 <b>CLEAR</b>。清空由服务端<b>一次提交</b>完成，并在操作日志里留痕（时间、目标、条数、来源 IP）。
+        清空后数据<b>不可恢复</b>，执行前请务必先到「数据备份」页「导出全部数据」备份。每项清空均需<b>两步确认</b>：先确认警告，再输入<b>管理密码</b>与 <b>CLEAR</b>。清空由服务端<b>一次提交</b>完成，并在操作日志里留痕（时间、目标、条数、来源 IP）。<br />
+        订单不会被清空：已过账的订单会退回「未过账」，未过账订单原样保留。
       </el-alert>
 
       <!-- 清空所有数据 -->
       <el-card shadow="never" class="panel danger-panel">
         <template #header><b class="danger-title">清空所有数据</b></template>
-        <p class="desc">一次性清空全部五类数据（商品 / 客户 / 供应商 / 销售单 / 采购单），执行后将自动刷新页面恢复统计。</p>
+        <p class="desc">一次性清空全部业务单据（商品 / 客户 / 供应商 / 销售单 / 采购单 / 收款单 / 付款单 / 退款单），执行后将自动刷新页面恢复统计。订单保留：已过账订单退回「未过账」，未过账订单保持不变。</p>
         <el-button type="danger" :loading="clearing && clearTarget === 'all'" @click="requestClear('all')">清空所有数据</el-button>
       </el-card>
 
@@ -22,7 +23,7 @@
       <el-card shadow="never" class="panel">
         <template #header><b>仅清空某一类</b></template>
         <p class="desc">
-          单项清空只影响对应数据：清空客户/供应商时，其名下销售单/采购单会保留并标记为「(已删除…)」，<b>不会连同单据一起删除</b>；清空销售单/采购单不影响客户/供应商档案。
+          单项清空只影响对应数据：清空客户/供应商时，其名下销售单/采购单会保留并标记为「(已删除…)」，<b>不会连同单据一起删除</b>；清空销售单/采购单不影响客户/供应商档案，但对应的已过账订单会退回「未过账」。清空退款单会把退款在退货单、核销记录、预存/预付流水上的痕迹一起回滚。
         </p>
         <div class="clear-group">
           <div class="clear-block" v-for="t in typeRows" :key="t.key">
@@ -66,7 +67,8 @@ const TYPES = [
   { key: 'sales', label: '销售单', unit: '单' },
   { key: 'purchases', label: '采购单', unit: '单' },
   { key: 'receipts', label: '收款单', unit: '单' },
-  { key: 'payment-vouchers', label: '付款单', unit: '单' }
+  { key: 'payment-vouchers', label: '付款单', unit: '单' },
+  { key: 'refunds', label: '退款单', unit: '单' }
 ]
 const typeRows = ref(TYPES.map(t => ({ ...t, count: null })))
 const FETCHERS = {
@@ -76,7 +78,8 @@ const FETCHERS = {
   sales: () => api.getSales(),
   purchases: () => api.getPurchases(),
   receipts: () => api.getReceipts(),
-  'payment-vouchers': () => api.getPaymentVouchers()
+  'payment-vouchers': () => api.getPaymentVouchers(),
+  refunds: () => api.getRefunds()
 }
 async function loadCounts() {
   await Promise.all(TYPES.map(async t => {
@@ -101,16 +104,17 @@ const clearTarget = ref('')
 const clearTargetLabel = ref('')
 const clearWarnText = ref('')
 
-const CLEAR_LABELS = { all: '全部数据', items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单', receipts: '收款单', 'payment-vouchers': '付款单' }
+const CLEAR_LABELS = { all: '全部数据', items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单', receipts: '收款单', 'payment-vouchers': '付款单', refunds: '退款单' }
 const CLEAR_WARN = {
-  all: '将清空全部数据（商品、客户、供应商、销售单、采购单、收款单、付款单），此操作不可恢复！',
+  all: '将清空全部业务单据（商品、客户、供应商、销售单、采购单、收款单、付款单、退款单），此操作不可恢复！订单不会被清空：已过账订单退回「未过账」，未过账订单保留。',
   items: '将清空全部商品，已建立的库存与历史价关系将丢失。',
   customers: '将清空全部客户档案（含预存款流水）；其名下销售单将标记为「(已删除客户) …」，不再计入客户档案。',
   suppliers: '将清空全部供应商档案（含预付款流水）；其名下采购单将标记为「(已删除供应商) …」，不再计入供应商档案。',
-  sales: '将清空全部销售单。',
-  purchases: '将清空全部采购单。',
+  sales: '将清空全部销售单，并回滚相关退款；对应的已过账订单退回「未过账」。',
+  purchases: '将清空全部采购单，并回滚相关退款；对应的已过账订单退回「未过账」。',
   receipts: '将清空全部收款单（不影响销售单本身的已收记录）。',
-  'payment-vouchers': '将清空全部付款单（不影响采购单本身的已付记录）。'
+  'payment-vouchers': '将清空全部付款单（不影响采购单本身的已付记录）。',
+  refunds: '将清空全部退款单，并回滚它们在退货单、核销记录和预存/预付流水上的痕迹（对应单据会恢复为未退款状态）。'
 }
 
 // 第一步：警告确认；通过后弹出密码输入框

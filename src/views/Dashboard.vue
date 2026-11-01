@@ -32,6 +32,9 @@
         </div>
         <div class="stat-item">
           <el-statistic :title="`${periodTitle}毛利`" :value="profit" :precision="2" prefix="¥" />
+          <!-- 毛利按净额算：折扣与优惠不计入利润。这句话必须挂在数字旁边，
+               否则用户会比以前的报表看到更低的数，以为账错了。 -->
+          <div class="stat-hint">已扣折扣与优惠 ¥{{ discountTotal.toFixed(2) }}</div>
         </div>
         <div class="stat-item">
           <el-statistic :title="`${periodTitle}单据数`" :value="filteredPurchases.length + filteredSales.length" suffix="张" />
@@ -165,7 +168,7 @@ import { matchText } from '../utils/search'
 import { orderTimeOf } from '../utils/time.js'
 import { isReturn } from '../utils/refunds.js'
 import { orderDepositSum, isUnposted } from '../utils/orders.js'
-import { isVoided } from '../utils/account.js'
+import { isVoided, grossOf } from '../utils/account.js'
 
 const PAGE_SIZE = 20
 
@@ -255,10 +258,15 @@ const money = (n) => {
 }
 const purchaseTotal = computed(() => money(filteredPurchases.value.reduce((sum, p) => sum + Number(p.total || 0), 0)))
 const saleTotal = computed(() => money(filteredSales.value.reduce((sum, s) => sum + Number(s.total || 0), 0)))
+// 毛利口径：净销售额（已扣整单折扣链与整单优惠）− 成本。
+// 以前用的是「原价合计 − 成本」，等于把折扣和优惠都算成利润：优惠给得越多，毛利显示越高。
+// grossOf 对作废单返回 0，所以作废单自动不参与，不需要额外过滤。
+const netSaleTotal = computed(() => money(filteredSales.value.reduce((sum, s) => sum + grossOf(s), 0)))
+const discountTotal = computed(() => money(saleTotal.value - netSaleTotal.value))
 const profit = computed(() => {
   const cost = filteredSales.value.reduce(
     (sum, s) => sum + (s.items || []).reduce((c, i) => c + Number(i.qty || 0) * Number(costMap.value[i.code] || 0), 0), 0)
-  return money(saleTotal.value - cost)
+  return money(netSaleTotal.value - cost)
 })
 const filteredLowStock = computed(() => lowStock.value.filter(i => matchText(keyword.value, i.code, i.name)))
 // 待过账订单里已收的订金：这是「钱已经动了、单还没开」的风险提示，值得单独看一眼
@@ -327,6 +335,7 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.stat-hint { color: var(--text-secondary); font-size: var(--fs-sub); margin-top: 2px; }
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .orders-card { margin-top: 16px; }
 .orders-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
