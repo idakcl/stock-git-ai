@@ -63,9 +63,9 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      # 打印/排版用例要量中文字体下的行高与分页；runner 默认没有 CJK 字体，装一套再跑
-      - name: Install CJK fonts
-        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      # 打印/排版用例要量中文字体下的行高与分页，还要用 pdfinfo 量纸张与页数
+      - name: Install CJK fonts and poppler
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk poppler-utils
 
       # 脚本自己起 vite dev server（127.0.0.1:5173），跑完自动关。
       - name: Browser regression (shard ${{ matrix.shard }})
