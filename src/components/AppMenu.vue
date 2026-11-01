@@ -99,6 +99,11 @@
         <el-icon><FolderOpened /></el-icon>
         <span>数据备份</span>
       </el-menu-item>
+      <!-- 日志是只读排障入口：谁在什么时候改了什么，比翻 git 提交直观 -->
+      <el-menu-item index="/logs">
+        <el-icon><Document /></el-icon>
+        <span>操作日志</span>
+      </el-menu-item>
       <!-- 破坏性操作必须一眼可辨：和「数据备份」挨着放（保险 vs 自毁），但用红色区分 -->
       <el-menu-item index="/clear" class="danger">
         <el-icon><Delete /></el-icon>
@@ -112,7 +117,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Key, RefreshLeft
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Key, RefreshLeft, Document
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

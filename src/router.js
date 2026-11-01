@@ -25,6 +25,7 @@ import Shares from './views/Shares.vue'
 import ShareView from './views/ShareView.vue'
 import OrderTemplates from './views/OrderTemplates.vue'
 import AiApi from './views/AiApi.vue'
+import Logs from './views/Logs.vue'
 
 const routes = [
   { path: '/', component: Dashboard },
@@ -59,6 +60,7 @@ const routes = [
   { path: '/profile', component: Profile },
   { path: '/shares', component: Shares },
   { path: '/ai-api', component: AiApi },
+  { path: '/logs', component: Logs },
   // 外链分享页：公开访问，不经过登录与后台布局（meta.public 由 App.vue 识别）
   { path: '/share/:token', component: ShareView, meta: { public: true } }
 ]
