@@ -612,7 +612,7 @@ async function onOrderSaved({ entry, depositDeduct, payRows }) {
 }
 
 // 变更明细由弹窗自己落库（服务端一次提交生成退货单/补差单），这里只负责整页重拉：
-// 库存、客户往来账、销售价历史都是派生的，本地无法拼出变更后的结果
+// 库存、客户来往账、销售价历史都是派生的，本地无法拼出变更后的结果
 async function onAmended() {
   try {
     const [s, it, cu] = await Promise.all([api.getSales(), api.getItems(), api.getCustomers()])

@@ -42,7 +42,7 @@
       </div>
     </el-card>
 
-    <!-- 待过账订单：订单住在 orders.json，不占库存也不进往来账，
+    <!-- 待过账订单：订单住在 orders.json，不占库存也不进来往账，
          不提醒就容易被忘掉（客户钱都收了单还没开），所以看板上只放这一个数字 -->
     <el-card v-if="pendingOrders.length" class="orders-card">
       <div class="orders-row">

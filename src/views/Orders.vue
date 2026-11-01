@@ -15,9 +15,9 @@
             <!-- 清空未过账订单：一次请求统统作废，避免几十张草稿各写一次 git 提交；
                  已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮。
                  危险操作放最右端，离「新建订单」最远 -->
-            <el-button type="danger" :disabled="!draftCount || busy || loading"
-              title="作废未过账且未收订金的订单（记录保留可查）；已过账 / 已收订金的会跳过" @click="clearDrafts">
-              清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
+            <el-button type="danger" :disabled="!clearableCount || busy || loading"
+              :title="clearDraftsTitle" @click="clearDrafts">
+              清空未过账订单{{ clearableCount ? `（可作废 ${clearableCount} 张）` : '' }}
             </el-button>
           </div>
         </div>
@@ -70,7 +70,7 @@
           <el-table-column label="订单号" width="210" class-name="id-col">
             <template #default="{ row }">
               <router-link :to="`/order/${row.id}`" class="link">{{ row.id }}</router-link>
-              <span v-if="depositSumOf(row) > 0" class="dep-flag" :title="`已收订金 ¥${depositSumOf(row).toFixed(2)}`">订</span>
+              <span v-if="depositSumOf(row) > 0" class="dep-flag" :title="`${row.kind === 'purchase' ? '已付' : '已收'}订金 ¥${depositSumOf(row).toFixed(2)}`">订</span>
               <div v-if="row.no && row.no !== row.id" class="biz-no" :title="row.no">业务单号 {{ row.no }}</div>
             </template>
           </el-table-column>
@@ -109,7 +109,7 @@
           <el-table-column label="操作" width="640" class-name="ops-col">
             <template #default="{ row }">
               <el-button size="small" type="primary" :disabled="!isUnposted(row.status)" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="success" :disabled="!isUnposted(row.status)" @click="openDeposit(row)">收订金</el-button>
+              <el-button size="small" type="success" :disabled="!isUnposted(row.status)" @click="openDeposit(row)">{{ row.kind === 'purchase' ? '付订金' : '收订金' }}</el-button>
               <el-button size="small" type="warning" :disabled="!isUnposted(row.status) || busy" @click="askPost([row])">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <!-- 作废而不是删除：记录保留，「删除」这个词会让人以为是抹掉 -->
@@ -161,7 +161,7 @@
       placeholder="例如：客户要求月底前交货、发票待补、尾款下周付…" @saved="onRemarkSaved" />
 
     <!-- 收订金：直接开一张真实收款单/付款单（SK-/FK-），过账时这笔会搬成单据的第一条流水 -->
-    <el-dialog v-model="depositDialog" :title="`收订金 · ${depositOrder?.id || ''}`" width="440" :close-on-click-modal="false">
+    <el-dialog v-model="depositDialog" :title="`${depositOrder?.kind === 'purchase' ? '付订金' : '收订金'} · ${depositOrder?.id || ''}`" width="440" :close-on-click-modal="false">
       <el-form label-width="100px" :disabled="saving">
         <el-form-item label="往来单位"><el-input :model-value="partyOf(depositOrder || {})" disabled /></el-form-item>
         <el-form-item label="订金金额">
@@ -173,7 +173,7 @@
       </el-form>
       <template #footer>
         <el-button :disabled="saving" @click="depositDialog = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submitDeposit">确认收订金</el-button>
+        <el-button type="primary" :loading="saving" @click="submitDeposit">确认{{ depositOrder?.kind === 'purchase' ? '付订金' : '收订金' }}</el-button>
       </template>
     </el-dialog>
 
@@ -251,6 +251,7 @@ import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
 import PostSettleDialog from '../components/PostSettleDialog.vue'
+import { draftCount } from '../utils/draftBadge.js'
 
 const PAGE_SIZE = 60
 
@@ -319,7 +320,14 @@ const filtered = computed(() => list.value
 )
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 // 可清空的草稿数：与后端 clearDrafts 的判据一一对应（未过账 + 没收过订金），按钮上的数字就是「真会删掉的张数」
-const draftCount = computed(() => list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) === 0).length)
+const clearableCount = computed(() => list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) === 0).length)
+// 侧栏角标数的是「全部未过账」，这个按钮数的是「其中能直接作废的」。
+// 两个数字本来就不同义，按钮把差异写在 title 上，不再让人以为角标算错了。
+const keptDepositCount = computed(() => list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) > 0).length)
+const clearDraftsTitle = computed(() =>
+  `可作废 ${clearableCount.value} 张未过账订单（记录保留可查）`
+  + (keptDepositCount.value ? `；另有 ${keptDepositCount.value} 张因已收订金会跳过（订金凭证已开，需先处理订金）` : '')
+  + '；已过账订单不受影响')
 // 换筛选条件后旧勾选可能已经不在列表里，直接清空，避免「看不见的单被打印/删除」
 watch([keyword, status, kind, dateStart, dateEnd], () => {
   page.value = 1
@@ -555,6 +563,9 @@ async function load() {
       } catch { legacyMigrating = false }
     }
     list.value = orders
+    // 侧栏/顶部「开单」角标与这里同源：写操作后都会重新 load()，角标因此立刻跟着变，
+    // 不必再单独发一次 /api/orders（过账后角标半天不动的老问题就是这么来的）。
+    draftCount.value = orders.filter(x => isUnposted(x.status)).length
     itemOptions.value = it || []
     customerOptions.value = cu || []
     supplierOptions.value = sup || []
@@ -776,9 +787,9 @@ async function remove(row) {
 // 清空未过账订单：只作废「未过账 + 没收过订金」的单（未过账但收过订金的凭证已开，作废会成孤儿），
 // 按钮上的数字就是真会作废掉的张数，确认框再把跳过原因说清楚
 async function clearDrafts() {
-  const n = draftCount.value
+  const n = clearableCount.value
   if (!n) return
-  const keptDeposit = list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) > 0).length
+  const keptDeposit = keptDepositCount.value
   try {
     await ElMessageBox.confirm(
       `将作废 ${n} 张未过账订单，作废后不再参与任何业务，记录保留可查。${keptDeposit ? `另有 ${keptDeposit} 张未过账订单因已收订金会跳过；` : ''}已过账订单不受影响。`,

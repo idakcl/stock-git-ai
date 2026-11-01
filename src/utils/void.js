@@ -42,7 +42,7 @@ export function applyVoidOperation(snapshot, input, now = new Date().toISOString
     return { state, code: doc.id, duplicate: true, vouchers: doc.voidedVouchers || [] }
   }
   // 闸门①：有退货/补差单时先处理子单——子单金额是基于原单算出来的，
-  // 原单作废后它们就成了无源之水，库存与往来账都无从解释。
+  // 原单作废后它们就成了无源之水，库存与来往账都无从解释。
   // 只认「还有效」的子单：子单自己作废后（见下面闸门②③），原单就该解锁。
   const child = [...state.sales, ...state.purchases].find(o => o.sourceOrderId === doc.id && !isVoided(o))
   if (child) fail(`这张单已有变更单 ${child.id}（退货/补差），请先处理那张单再作废`, 409)

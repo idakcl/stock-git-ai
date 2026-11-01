@@ -96,6 +96,41 @@ export function serialize(data) {
   return JSON.stringify(data, null, 0)
 }
 
+// 资金保护校验：整表覆盖前确认没有偷偷改动「已经动过钱 / 已被下游引用」的记录。
+// 从 writeJSON 里抽出来，是为了让「一次提交多个文件」的新路径（syncDerived 派生写回）
+// 也能拿到同一份保护——否则换一条写路径就等于绕过退货锁、关联单锁、核销锁。
+// before / after 是解析后的整表；分片库上传入该片的单据，语义与整表一致。
+export function assertSafeWrite(file, before, after) {
+  const isDocFile = /^(?:purchases|sales)(?:-\d{4})?\.json$/.test(file)
+  const isPartyFile = /^(?:customers|suppliers)\.json$/.test(file)
+  if (!isDocFile && !isPartyFile) return
+  const data = Array.isArray(after) ? after : []
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+  if (isDocFile) {
+    const parentIds = new Set(before.filter(o => o.sourceOrderId).map(o => o.sourceOrderId))
+    for (const old of before) {
+      const next = data.find(o => o.id === old.id)
+      const returnLocked = Number(old.total) < 0 || String(old.type || '').endsWith('-return')
+      if (returnLocked) {
+        const financial = o => { const { photos, remark, ...rest } = o; return rest }
+        if (!next || !same(financial(old), financial(next))) throw new Error(`退货单 ${old.id} 只允许在退货退款页面操作，请刷新`)
+      }
+      if (parentIds.has(old.id)) {
+        if (!next || ['items', 'total', 'discount', 'discountRate', 'discountRates', 'customer', 'supplier'].some(k => !same(old[k], next[k]))) throw new Error(`原单 ${old.id} 已有关联退货，不允许修改货款或删除`)
+      }
+      if ((old.settlements || []).length && (!next || !same(old.settlements, next.settlements))) throw new Error(`单据 ${old.id} 核销已更新，请刷新后重试`)
+    }
+    return
+  }
+  const field = file === 'customers.json' ? 'deposits' : 'advances'
+  for (const old of before) {
+    const protectedRows = (old[field] || []).filter(p => p.voucher?.startsWith('HX-'))
+    if (!protectedRows.length) continue
+    const next = data.find(p => p.code === old.code)
+    if (!next || protectedRows.some(p => !(next[field] || []).some(n => same(n, p)))) throw new Error('退货转余额记录已更新，请刷新后重试')
+  }
+}
+
 export async function writeJSON(env, file, data, message, opts = {}) {
   const payload = serialize(data)
   // 资金保护对「按年分片后的单据文件」同样必须生效：分片只是把同一批单据拆到不同文件，
@@ -145,31 +180,7 @@ export async function writeJSON(env, file, data, message, opts = {}) {
         let current = existing
         if (!current.content && current.size > 0) current = await gh(`/git/blobs/${current.sha}`, env)
         if (!current.content) throw new Error('资金保护校验无法读取原数据，已中止')
-        const before = JSON.parse(b64d(current.content))
-        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-        if (isDocFile) {
-          const parentIds = new Set(before.filter(o => o.sourceOrderId).map(o => o.sourceOrderId))
-          for (const old of before) {
-            const next = data.find(o => o.id === old.id)
-            const returnLocked = Number(old.total) < 0 || String(old.type || '').endsWith('-return')
-            if (returnLocked) {
-              const financial = o => { const { photos, remark, ...rest } = o; return rest }
-              if (!next || !same(financial(old), financial(next))) throw new Error(`退货单 ${old.id} 只允许在退货退款页面操作，请刷新`)
-            }
-            if (parentIds.has(old.id)) {
-              if (!next || ['items', 'total', 'discount', 'discountRate', 'discountRates', 'customer', 'supplier'].some(k => !same(old[k], next[k]))) throw new Error(`原单 ${old.id} 已有关联退货，不允许修改货款或删除`)
-            }
-            if ((old.settlements || []).length && (!next || !same(old.settlements, next.settlements))) throw new Error(`单据 ${old.id} 核销已更新，请刷新后重试`)
-          }
-        } else {
-          const field = file === 'customers.json' ? 'deposits' : 'advances'
-          for (const old of before) {
-            const protectedRows = (old[field] || []).filter(p => p.voucher?.startsWith('HX-'))
-            if (!protectedRows.length) continue
-            const next = data.find(p => p.code === old.code)
-            if (!next || protectedRows.some(p => !(next[field] || []).some(n => same(n, p)))) throw new Error('退货转余额记录已更新，请刷新后重试')
-          }
-        }
+        assertSafeWrite(file, JSON.parse(b64d(current.content)), data)
       }
       return await gh(`/contents/${file}`, env, 'PUT', body)
     } catch (e) {

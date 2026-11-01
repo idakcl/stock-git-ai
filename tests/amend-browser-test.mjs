@@ -329,7 +329,7 @@ await t('清空未过账订单：按钮只算纯草稿，确认后提交一次 c
   const { page, context, errors, state } = await open('/orders', s)
   try {
     const btn = page.getByRole('button', { name: /清空未过账订单/ })
-    assert.match((await btn.innerText()).replace(/\s+/g, ''), /清空未过账订单（2）/, '只数得出真会删掉的那两张')
+    assert.match((await btn.innerText()).replace(/\s+/g, ''), /清空未过账订单（可作废2张）/, '只数得出真会作废的那两张，并写明是可作废张数（与侧栏「全部未过账」角标不同义）')
     await btn.click()
     const box = page.locator('.el-message-box')
     const text = (await box.innerText()).replace(/\s+/g, ' ')

@@ -272,7 +272,7 @@ async function saveDeposit() {
     customers.value = list
     depositDialog.value = false
     ElMessage.success('已存入预存款')
-    // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的收款单
+    // 与「来往账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的收款单
     const note = '存入客户预存款'
     try {
       const { all, created } = await appendVouchers(api, 'receivable', [{
@@ -348,7 +348,7 @@ async function saveDepositEdit() {
     ElMessage.error(`保存失败：${e.message || e}`)
   } finally { depSaving.value = false }
 }
-// 作废单不参与客户往来账（金额已归零，留着只会让「结清/挂账」与台账口径打架）
+// 作废单不参与客户来往账（金额已归零，留着只会让「结清/挂账」与台账口径打架）
 const saleList = computed(() => (sales.value || []).filter(s => s.customer === customer.value.name && !isVoided(s)))
 const products = computed(() => {
   const codes = new Set()

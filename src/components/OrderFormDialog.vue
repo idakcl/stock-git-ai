@@ -35,7 +35,7 @@
       </el-form-item>
       <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       <el-form-item label="单据照片"><PhotoUpload ref="photoUpload" :key="photoKey" v-model="form.photos" /></el-form-item>
-      <el-form-item v-if="deposits.length" label="已收订金">
+      <el-form-item v-if="deposits.length" :label="isPurchase ? '已付订金' : '已收订金'">
         <div class="deposit-list">
           <div v-for="(d, i) in deposits" :key="i" class="deposit-row">
             <span>{{ d.date }}</span>

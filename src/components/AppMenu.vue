@@ -24,7 +24,7 @@
       <el-menu-item index="/orders">
         <el-icon><Tickets /></el-icon>
         <span>订单</span>
-        <span v-if="draftCount" class="menu-badge warn">{{ badgeText(draftCount) }}</span>
+        <span v-if="draftCount" class="menu-badge warn" title="待过账订单（含已收订金，其中部分需先处理订金才能作废）">{{ badgeText(draftCount) }}</span>
       </el-menu-item>
       <el-menu-item index="/purchases">
         <el-icon><Download /></el-icon>

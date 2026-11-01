@@ -160,7 +160,7 @@ function addOne() {
 }
 
 // 用预存款/预付款抵扣货款：从对应档案余额扣减，记一笔「来源=预存款」的流水（金额计入实收/实付）
-// 保存时父组件据此从客户预存款/供应商预付款余额中扣减对应金额，并在往来账/预存款页体现
+// 保存时父组件据此从客户预存款/供应商预付款余额中扣减对应金额，并在来往账/预存款页体现
 function payFromDeposit() {
   if (editingIndex.value >= 0) return ElMessage.warning('正在编辑流水，请先取消编辑')
   if (depositAvailable.value <= 0) return ElMessage.warning(`该${props.kind === 'payable' ? '供应商' : '客户'}暂无可用${depositLabel.value}`)

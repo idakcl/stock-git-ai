@@ -41,7 +41,7 @@
           <div class="stat-sub">{{ stats.payCount }} 笔流水</div>
         </div>
         <div class="stat-item">
-          <el-statistic title="抹零优惠（未实际收款）" :value="stats.discount" :precision="2" prefix="¥" />
+          <el-statistic :title="`抹零优惠（未实际${L.paid}）`" :value="stats.discount" :precision="2" prefix="¥" />
           <div class="stat-sub">{{ stats.discountCount }} 单含优惠</div>
         </div>
         <div class="stat-item">
@@ -86,7 +86,7 @@
             </el-table-column>
             <el-table-column label="优惠" width="100" align="right">
               <template #default="{ row }">
-                <span v-if="Number(row.discount || 0) > 0" class="discount" title="抹零优惠，未实际收款">-{{ Number(row.discount).toFixed(2) }}</span>
+                <span v-if="Number(row.discount || 0) > 0" class="discount" :title="`抹零优惠，未实际${L.paid}`">-{{ Number(row.discount).toFixed(2) }}</span>
                 <span v-else class="none">—</span>
               </template>
             </el-table-column>
@@ -283,7 +283,7 @@ const byParty = computed(() => {
 
 // 下拉选项：全部单据中出现过的往来单位
 const partyOptions = computed(() => [...new Set((list.value || []).map(r => r[partyKey.value]).filter(Boolean))])
-// 往来单位名 → 编码：列表里点名字跳转往来账详情
+// 往来单位名 → 编码：列表里点名字跳转来往账详情
 const partyCodeMap = computed(() => {
   const m = {}
   ;(parties.value || []).forEach(p => { if (p && p.name) m[p.name] = p.code })

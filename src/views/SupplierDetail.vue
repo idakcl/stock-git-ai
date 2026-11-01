@@ -299,7 +299,7 @@ async function saveAdvance() {
     suppliers.value = list
     advanceDialog.value = false
     ElMessage.success('已存入预付款')
-    // 与「往来账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的付款单
+    // 与「来往账 · 存预存/预付」同一口径：充值即资金变动，生成一张无关联单号的付款单
     const note = '存入供应商预付款'
     try {
       const { all, created } = await appendVouchers(api, 'payable', [{
@@ -460,7 +460,7 @@ async function remove(row) {
   ElMessage.success('已删除')
   load()
 }
-// 作废单不参与供应商往来账（金额已归零）
+// 作废单不参与供应商来往账（金额已归零）
 const purchaseList = computed(() => (purchases.value || []).filter(p => p.supplier === supplier.value.name && !isVoided(p)))
 const filteredPurchases = computed(() => purchaseList.value.filter(p => {
   if (dateStart.value && (p.date || '') < dateStart.value) return false
