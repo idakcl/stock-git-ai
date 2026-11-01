@@ -106,12 +106,12 @@
         <el-table-column label="操作" width="470" class-name="ops-col">
           <template #default="{ row }">
             <el-button size="small" @click="$router.push(`/sale/${row.id}`)">查看</el-button>
-            <el-button size="small" type="primary" :disabled="isVoided(row)" @click="openDialog(row)">编辑</el-button>
-            <el-button size="small" type="success" :disabled="isVoided(row)" @click="openPay(row)">收款</el-button>
-            <el-button size="small" type="warning" @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button>
+            <el-button size="small" :disabled="isVoided(row)" @click="openDialog(row)">编辑</el-button>
+            <el-button size="small" type="success" plain :disabled="isVoided(row)" @click="openPay(row)">收款</el-button>
+            <el-button size="small" type="warning" plain @click="openPhotos(row)">照片{{ (row.photos || []).length ? `(${row.photos.length})` : '' }}</el-button>
             <!-- 作废＝整单撤销并连带作废收款单；已作废、退货单、已有变更单的单据都不给作废 -->
-            <el-button size="small" type="info" :disabled="!canVoid(row)" @click="voidOrder(row)">作废</el-button>
-            <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+            <el-button size="small" type="warning" plain :disabled="!canVoid(row)" @click="voidOrder(row)">作废</el-button>
+            <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>

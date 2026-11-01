@@ -23,7 +23,7 @@
               :head-subtitle="docSubtitle" :head-fields="docHeaderFields" />
             <el-button v-if="found && !externalView && !isVoided(purchase)" @click="shareDialog = true">分享</el-button>
             <el-button v-if="!externalView" type="primary" :disabled="!found || isReturn(purchase) || isVoided(purchase)" @click="editDialog = true">编辑</el-button>
-            <el-button v-if="!externalView" type="danger" :disabled="!found || isReturn(purchase) || isVoided(purchase) || purchases.some(o => o.sourceOrderId === purchase.id)" @click="removeOrder">删除</el-button>
+            <el-button v-if="!externalView" type="danger" plain :disabled="!found || isReturn(purchase) || isVoided(purchase) || purchases.some(o => o.sourceOrderId === purchase.id)" @click="removeOrder">删除</el-button>
             <el-button v-if="found && !externalView && !isVoided(purchase)" type="warning" @click="$router.push({ path: '/returns', query: { kind: 'purchase', source: isReturn(purchase) ? undefined : purchase.id } })">退货 / 退款</el-button>
             <el-button @click="$router.push('/purchases')">返回列表</el-button>
           </div>

@@ -68,7 +68,7 @@
             <template #default="{ row }">{{ (Number(row.qty || 0) * Number(row.price || 0)).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column label="" width="60">
-            <template #default="{ $index }"><el-button size="small" type="danger" @click="extra.splice($index, 1)">×</el-button></template>
+            <template #default="{ $index }"><el-button size="small" type="danger" plain @click="extra.splice($index, 1)">×</el-button></template>
           </el-table-column>
         </el-table>
       </div>

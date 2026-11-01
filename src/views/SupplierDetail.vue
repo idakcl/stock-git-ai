@@ -38,7 +38,7 @@
           <ProductTable :items="products" search-placeholder="搜索该供应商商品" :show-cost="true" :show-supplier="false" :price-columns="supplierPriceColumns" :page-size="60">
             <template #actions="{ row }">
               <el-button size="small" @click="openDialog(row)">编辑</el-button>
-              <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+              <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
             </template>
           </ProductTable>
         </el-tab-pane>

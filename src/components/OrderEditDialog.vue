@@ -140,7 +140,7 @@
             </template>
           </el-table-column>
           <el-table-column v-if="!moneyLocked" label="" width="60">
-            <template #default="{ $index }"><el-button size="small" type="danger" @click="form.lines.splice($index,1)">×</el-button></template>
+            <template #default="{ $index }"><el-button size="small" type="danger" plain @click="form.lines.splice($index,1)">×</el-button></template>
           </el-table-column>
         </el-table>
       </div>

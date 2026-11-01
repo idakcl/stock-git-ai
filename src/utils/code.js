@@ -17,14 +17,22 @@ export function nextEntityCode(list, prefix, digits = 5) {
 }
 
 // 单据号：单字母 + 年月日时分秒 + 本日开单流水号(4位)
+// 流水号取「当天已有单号的最大后缀 + 1」，**不是**「当天单据数量 + 1」：
+//   数量法在「删掉一张再开一张」时会算出同一个后缀（3 张 → 删 1 → 又是 3），
+//   号码被重复使用，打印件和聊天记录里就出现两个「同一个单号」。
+//   取最大值则只在「当天号码被整段清空」时才会回落（例如清空数据后重新开单），
+//   这是无外部计数器方案的固有边界，已在 README 写明。
 export function genOrderId(prefix, list, dateStr) {
   const ymd = (dateStr || '').replace(/-/g, '') ||
     todayCN().replace(/-/g, '')
   // 编号里的时分秒取北京时间，避免设备时区不同导致单号与实际开单时刻不一致
   const hhmmss = cnHMS()
-  let seq = 1
+  let max = 0
   for (const o of (list || [])) {
-    if ((o.date || '').replace(/-/g, '') === ymd) seq++
+    const id = String((o && o.id) || '')
+    if (!id.startsWith(prefix + ymd)) continue
+    const m = /(\d{4})$/.exec(id.slice(prefix.length + ymd.length + 6))
+    if (m) max = Math.max(max, parseInt(m[1], 10) || 0)
   }
-  return `${prefix}${ymd}${hhmmss}${String(seq).padStart(4, '0')}`
+  return `${prefix}${ymd}${hhmmss}${String(max + 1).padStart(4, '0')}`
 }

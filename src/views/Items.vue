@@ -49,7 +49,7 @@
       <ProductTable ref="tableRef" :items="filteredItems" search-placeholder="搜索编码 / 名称" :show-cost="true" :price-columns="itemPriceColumns" :page-size="60">
         <template #actions="{ row }">
           <el-button size="small" @click="openDialog(row)">编辑</el-button>
-          <el-button size="small" type="danger" @click="remove(row)">删除</el-button>
+          <el-button size="small" type="danger" plain @click="remove(row)">删除</el-button>
         </template>
       </ProductTable>
     </el-card>

@@ -15,7 +15,7 @@
             <!-- 清空未过账订单：一次请求统统作废，避免几十张草稿各写一次 git 提交；
                  已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮。
                  危险操作放最右端，离「新建订单」最远 -->
-            <el-button type="danger" :disabled="!clearableCount || busy || loading"
+            <el-button type="danger" plain :disabled="!clearableCount || busy || loading"
               :title="clearDraftsTitle" @click="clearDrafts">
               清空未过账订单{{ clearableCount ? `（可作废 ${clearableCount} 张）` : '' }}
             </el-button>
@@ -53,7 +53,7 @@
         <el-button size="small" :disabled="!selected.length" @click="openDetailPrint">打印勾选订单详情页</el-button>
         <el-button size="small" :disabled="!paged.length" @click="exportPageCsv">导出CSV（当前页）</el-button>
         <!-- 勾选后一键过账：只对未过账的单生效，过账方式（结清/挂账）在弹窗里选 -->
-        <el-button size="small" type="warning" :disabled="!postableSelected.length || busy" @click="askPost(postableSelected)">
+        <el-button size="small" type="warning" plain :disabled="!postableSelected.length || busy" @click="askPost(postableSelected)">
           过账勾选{{ postableSelected.length ? `（${postableSelected.length}）` : '' }}
         </el-button>
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
@@ -108,12 +108,12 @@
           </el-table-column>
           <el-table-column label="操作" width="640" class-name="ops-col">
             <template #default="{ row }">
-              <el-button size="small" type="primary" :disabled="!isUnposted(row.status)" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="success" :disabled="!isUnposted(row.status)" @click="openDeposit(row)">{{ row.kind === 'purchase' ? '付订金' : '收订金' }}</el-button>
-              <el-button size="small" type="warning" :disabled="!isUnposted(row.status) || busy" @click="askPost([row])">过账</el-button>
+              <el-button size="small" :disabled="!isUnposted(row.status)" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" type="success" plain :disabled="!isUnposted(row.status)" @click="openDeposit(row)">{{ row.kind === 'purchase' ? '付订金' : '收订金' }}</el-button>
+              <el-button size="small" type="warning" plain :disabled="!isUnposted(row.status) || busy" @click="askPost([row])">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
               <!-- 作废而不是删除：记录保留，「删除」这个词会让人以为是抹掉 -->
-              <el-button size="small" type="danger" :disabled="!isUnposted(row.status) || busy" @click="remove(row)">作废</el-button>
+              <el-button size="small" type="danger" plain :disabled="!isUnposted(row.status) || busy" @click="remove(row)">作废</el-button>
               <el-button size="small" plain @click="openRemark(row)">备注</el-button>
               <el-button size="small" plain @click="printOrder(row)">打印</el-button>
               <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>

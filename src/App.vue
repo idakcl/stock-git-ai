@@ -15,18 +15,18 @@
   <!-- 已登录：主界面 -->
   <el-container v-else class="layout">
     <el-header class="header">
-      <el-button class="menu-btn" text @click="drawer = true">
+      <el-button class="menu-btn" text aria-label="打开导航菜单" @click="drawer = true">
         <el-icon :size="22"><Menu /></el-icon>
       </el-button>
       <div class="header-right">
         <!-- 全局开单入口：订单用得最频繁，任何页面都能一步开单；角标是待过账的草稿数 -->
-        <el-button class="quick-new" type="primary" @click="quickNewOrder"
+        <el-button class="quick-new" type="primary" aria-label="新建订单" @click="quickNewOrder"
           :title="draftCount ? `${draftCount} 张订单还没过账` : '新建订单'">
           <el-icon><Plus /></el-icon>
           <span class="quick-new-text">开单</span>
           <span v-if="draftCount" class="quick-new-badge">{{ draftCount > 99 ? '99+' : draftCount }}</span>
         </el-button>
-        <el-button text class="logout-btn" @click="onLogout">
+        <el-button text class="logout-btn" aria-label="退出登录" @click="onLogout">
           <el-icon><SwitchButton /></el-icon>
           <span class="logout-text">退出</span>
         </el-button>
@@ -201,7 +201,9 @@ async function onLogout() {
   /* 文字 */
   --text-primary: #303133;
   --text-regular: #606266;
-  --text-secondary: #909399;
+  /* 次要文字：原 #909399 在白底上只有 3.0:1，达不到 WCAG AA 的 4.5:1；
+     加深到 #6b7280（约 4.8:1），提示/说明文字不再发灰看不清 */
+  --text-secondary: #6b7280;
   --text-placeholder: #c0c4cc;
   --text-disabled: #a8abb2;
   /* 线条 / 背景 */
@@ -233,6 +235,12 @@ async function onLogout() {
 
 /* ==================== 全局基础 ==================== */
 * { margin: 0; padding: 0; box-sizing: border-box; }
+/* 键盘可达性：只在键盘聚焦（:focus-visible）时画焦点环，鼠标点击不出现；
+   颜色用主色，深浅底上都看得见。Element 的按钮/输入框默认焦点样式偏淡，这里统一加强 */
+:where(a, button, [tabindex], .el-button, .el-input__wrapper, .el-select__wrapper, .el-textarea__inner):focus-visible {
+  outline: 2px solid var(--color-primary) !important;
+  outline-offset: 2px;
+}
 html, body, #app { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, sans-serif;
@@ -393,11 +401,13 @@ body {
 .el-button--small { font-size: var(--fs-sub); }
 .el-button--large { font-size: var(--fs-base); }
 
-/* ==================== 方块语义：状态=空心，可点=实心 ====================
-   全站只有两种「方块」，一眼能分清能不能按：
-     ① 只表示状态/类别（不可点）→ 白底 + 同色描边 + 同色字（空心）
-     ② 可以点击（按钮、开关）→ 同色实心填充 + 白字（文字像镂空）
-   色相一律沿用上面已定义的语义色，不新增颜色；禁用态按「不可点」归到 ①。 */
+/* ==================== 方块语义：状态=空心，可点=有色 ====================
+   方块分三类，一眼能分清「是什么」和「该不该按」：
+     ① 状态/类别（不可点）→ 白底 + 同色描边 + 同色字（空心）+ 右上角小圆点
+     ② 主按钮（新建/保存/确认）→ 实心填充 + 白字，整页同一屏只留一个
+     ③ 次按钮（查看/打印/导出/刷新）→ 白底 + 蓝字蓝边，可点但不抢主按钮
+   危险与警示（删除/作废/过账）用 plain 空心，只有真正不可逆的确认框才用实心 danger。
+   色相一律沿用已定义的语义色；禁用态按「不可点」归到 ①。 */
 
 /* ① 状态标签：el-tag 全站只做状态与类别展示，一律白底空心。
    空心块再在内部右上角点一颗与文字同色的小圆点：白底描边的块单独看像「没上色」，
@@ -414,54 +424,33 @@ body {
 .el-tag--large { padding-right: 19px; }
 .el-tag--large::after { top: 6px; right: 7px; width: 6px; height: 6px; }
 
-/* ② 可点按钮：Element 的 plain / text / link 默认是空心，统一改成与实心按钮同一套配色 */
-.el-button--primary.is-plain, .el-button--primary.is-text, .el-button--primary.is-link {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-primary); --el-button-border-color:var(--el-color-primary);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-primary-light-3); --el-button-hover-border-color:var(--el-color-primary-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-primary-dark-2); --el-button-active-border-color:var(--el-color-primary-dark-2);
-}
-.el-button--success.is-plain, .el-button--success.is-text, .el-button--success.is-link {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-success); --el-button-border-color:var(--el-color-success);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-success-light-3); --el-button-hover-border-color:var(--el-color-success-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-success-dark-2); --el-button-active-border-color:var(--el-color-success-dark-2);
-}
-.el-button--warning.is-plain, .el-button--warning.is-text, .el-button--warning.is-link {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-warning); --el-button-border-color:var(--el-color-warning);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-warning-light-3); --el-button-hover-border-color:var(--el-color-warning-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-warning-dark-2); --el-button-active-border-color:var(--el-color-warning-dark-2);
-}
-.el-button--danger.is-plain, .el-button--danger.is-text, .el-button--danger.is-link {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-danger); --el-button-border-color:var(--el-color-danger);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-danger-light-3); --el-button-hover-border-color:var(--el-color-danger-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-danger-dark-2); --el-button-active-border-color:var(--el-color-danger-dark-2);
-}
-.el-button--info.is-plain, .el-button--info.is-text, .el-button--info.is-link {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-info); --el-button-border-color:var(--el-color-info);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-info-light-3); --el-button-hover-border-color:var(--el-color-info-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-info-dark-2); --el-button-active-border-color:var(--el-color-info-dark-2);
-}
-/* 未指定 type 的中性按钮：以前是实心灰，但灰底和「禁用/白底灰字」在列表里挤在一起时很难分辨，
-   而且灰色看起来总像“不能点”。统一改成实心蓝（与 primary 同色同三档），
-   实心 = 可点 这条语义就不会被灰色削弱 */
+/* ② 主按钮：实心。Element 的 primary/success/warning/danger/info 默认就是实心，无需改。
+   ③ 次按钮（未指定 type）：白底 + 蓝字蓝边。以前这里是实心蓝，导致「查看/打印/导出」
+   和「新建/保存」长得一模一样，一屏十几个蓝块分不出主次；改成空心后主按钮自然凸显，
+   同时保留蓝色，不会像灰按钮那样被误认为不可点。 */
 .el-button:not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info) {
-  --el-button-text-color:#fff; --el-button-bg-color:var(--el-color-primary); --el-button-border-color:var(--el-color-primary);
-  --el-button-hover-text-color:#fff; --el-button-hover-bg-color:var(--el-color-primary-light-3); --el-button-hover-border-color:var(--el-color-primary-light-3);
-  --el-button-active-text-color:#fff; --el-button-active-bg-color:var(--el-color-primary-dark-2); --el-button-active-border-color:var(--el-color-primary-dark-2);
+  --el-button-text-color:var(--el-color-primary); --el-button-bg-color:#fff; --el-button-border-color:var(--el-color-primary-light-5);
+  --el-button-hover-text-color:var(--el-color-primary-dark-2); --el-button-hover-bg-color:var(--el-color-primary-light-9); --el-button-hover-border-color:var(--el-color-primary-light-3);
+  --el-button-active-text-color:var(--el-color-primary-dark-2); --el-button-active-bg-color:var(--el-color-primary-light-8); --el-button-active-border-color:var(--el-color-primary);
 }
-/* text / link 被 Element 重置成无边框透明底小字，这里显式补上实心底与描边，并恢复三档尺寸 */
+/* plain 一律空心（删掉以前强制实心的覆盖，恢复 Element 自带的浅底同色字）。
+   列表里的删除/作废/过账都用 plain，避免每行挂一排实心色块。 */
+/* text / link：真正的小字按钮（透明底、无边框），用于表内「清除 / 改结清」这类三级操作；
+   只保留原来的三档尺寸，保证点击区域不缩水 */
 .el-button.is-text, .el-button.is-link {
-  background-color: var(--el-button-bg-color);
-  border-width: 1px; border-style: solid; border-color: var(--el-button-border-color);
+  background-color: transparent; border-width: 1px; border-style: solid; border-color: transparent;
   padding: 8px 15px; height: 32px;
 }
 .el-button.is-text.el-button--small, .el-button.is-link.el-button--small { padding: 5px 11px; height: 24px; }
 .el-button.is-text.el-button--large, .el-button.is-link.el-button--large { padding: 12px 19px; height: 40px; }
 .el-button.is-text:hover:not(.is-disabled), .el-button.is-link:hover:not(.is-disabled) {
-  background-color: var(--el-button-hover-bg-color); border-color: var(--el-button-hover-border-color); color: var(--el-button-hover-text-color);
+  background-color: var(--bg-hover); color: var(--el-button-hover-text-color);
 }
 .el-button.is-text:active:not(.is-disabled), .el-button.is-link:active:not(.is-disabled) {
-  background-color: var(--el-button-active-bg-color); border-color: var(--el-button-active-border-color); color: var(--el-button-active-text-color);
+  background-color: var(--bg-hover); color: var(--el-button-active-text-color);
 }
+/* plain 的悬停底色：Element 默认是浅-9，和页面底太接近，这里稍加深一档 */
+.el-button.is-plain:hover:not(.is-disabled) { background-color: var(--el-button-hover-bg-color); }
 /* 禁用＝不可点：不论原来什么色，一律白底空心灰字 */
 .el-button.is-disabled, .el-button:disabled {
   background-color:#fff !important; border-color:var(--border-color) !important; color:var(--text-disabled) !important;
@@ -548,6 +537,13 @@ body {
   /* 手机上头部空间紧张：开单按钮只留图标，退出登录只留图标（原有规则） */
   .quick-new-text { display: none; }
   .quick-new { padding: 8px 10px; }
+  /* 手机端表格密度：行高、单元格内边距、字号各收一档，
+     让 6~8 列的单据表一屏能多看到两三行；操作列按钮保持 24px 高度，触达区域不缩水 */
+  :root { --td-pad: 6px; --fs-table: 12px; }
+  .el-table .cell { padding-left: 8px; padding-right: 8px; }
+  .el-table .ops-col .cell { padding-left: 6px; padding-right: 6px; }
+  .el-table .ops-col .el-button + .el-button { margin-left: 4px; }
+  .el-table__empty-text { font-size: var(--fs-sub); }
 }
 @media (min-width: 769px) {
   .menu-btn { display: none; }
