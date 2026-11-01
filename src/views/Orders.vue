@@ -12,11 +12,11 @@
             <el-button @click="openTemplatePicker">从模板导入</el-button>
             <!-- 订单模板不再占侧边栏：低频配置收到这里，和「从模板导入」挨着，动线更顺 -->
             <el-button @click="$router.push('/templates')">模板管理</el-button>
-            <!-- 清空未过账订单：一次请求删干净，避免几十张草稿各写一次 git 提交；
+            <!-- 清空未过账订单：一次请求统统作废，避免几十张草稿各写一次 git 提交；
                  已过账与已收订金的订单会保留（前者连着正式单据、后者凭证已开），数量见按钮。
                  危险操作放最右端，离「新建订单」最远 -->
             <el-button type="danger" :disabled="!draftCount || busy || loading"
-              title="删除未过账且未收订金的订单；已过账 / 已收订金的会保留" @click="clearDrafts">
+              title="作废未过账且未收订金的订单（记录保留可查）；已过账 / 已收订金的会跳过" @click="clearDrafts">
               清空未过账订单{{ draftCount ? `（${draftCount}）` : '' }}
             </el-button>
           </div>
@@ -31,6 +31,7 @@
           <el-option value="all" label="显示全部订单" />
           <el-option value="draft" label="仅显示未过账订单" />
           <el-option value="posted" label="仅显示已过账订单" />
+          <el-option value="voided" label="仅显示已作废订单" />
         </el-select>
         <span class="filter-label">类型</span>
         <el-radio-group v-model="kind">
@@ -45,7 +46,7 @@
         <el-button v-if="dateStart || dateEnd" text type="primary" @click="dateStart=''; dateEnd=''">清除</el-button>
         <el-button :disabled="loading" @click="load">刷新</el-button>
       </div>
-      <!-- 勾选后批量操作：打印列表 / 打印详情（可直接打印或隐藏金额）/ 批量删除 -->
+      <!-- 勾选后批量操作：打印列表 / 打印详情（可直接打印或隐藏金额）/ 批量作废 -->
       <div class="export-bar">
         <!-- 纸张只有一个来源：「打印设置」，所以这里也只剩一个打印按钮 -->
         <el-button size="small" :disabled="!selected.length" @click="printSelectedList()">打印勾选订单列表</el-button>
@@ -56,7 +57,7 @@
           过账勾选{{ postableSelected.length ? `（${postableSelected.length}）` : '' }}
         </el-button>
         <el-button size="small" type="danger" plain :disabled="!selected.length || busy" @click="removeSelected">
-          删除勾选{{ selected.length ? `（${selected.length}）` : '' }}
+          作废勾选{{ selected.length ? `（${selected.length}）` : '' }}
         </el-button>
         <!-- 跨页是否重复商品表头：行打印、列表打印、批量详情打印都用这一个选择 -->
         <PrintHeaderToggle />
@@ -101,17 +102,18 @@
           </el-table-column>
           <el-table-column label="状态" width="200">
             <template #default="{ row }">
-              <el-tag :type="row.status === POSTED ? 'success' : 'warning'" size="small" disable-transitions>{{ orderStatusText(row.status) }}</el-tag>
+              <el-tag :type="row.status === POSTED ? 'success' : row.status === VOIDED_ORDER ? 'info' : 'warning'" size="small" disable-transitions>{{ orderStatusText(row.status) }}</el-tag>
               <router-link v-if="row.postedOrderId" :to="`${row.kind === 'purchase' ? '/purchase/' : '/sale/'}${row.postedOrderId}`" class="link posted-link">{{ row.postedOrderId }}</router-link>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="640" class-name="ops-col">
             <template #default="{ row }">
-              <el-button size="small" type="primary" :disabled="row.status === POSTED" @click="openEdit(row)">编辑</el-button>
-              <el-button size="small" type="success" :disabled="row.status === POSTED" @click="openDeposit(row)">收订金</el-button>
-              <el-button size="small" type="warning" :disabled="row.status === POSTED || busy" @click="askPost([row])">过账</el-button>
+              <el-button size="small" type="primary" :disabled="!isUnposted(row.status)" @click="openEdit(row)">编辑</el-button>
+              <el-button size="small" type="success" :disabled="!isUnposted(row.status)" @click="openDeposit(row)">收订金</el-button>
+              <el-button size="small" type="warning" :disabled="!isUnposted(row.status) || busy" @click="askPost([row])">过账</el-button>
               <el-button size="small" :disabled="row.status !== POSTED || busy" @click="unpost(row)">撤销过账</el-button>
-              <el-button size="small" type="danger" :disabled="row.status === POSTED || busy" @click="remove(row)">删除</el-button>
+              <!-- 作废而不是删除：记录保留，「删除」这个词会让人以为是抹掉 -->
+              <el-button size="small" type="danger" :disabled="!isUnposted(row.status) || busy" @click="remove(row)">作废</el-button>
               <el-button size="small" plain @click="openRemark(row)">备注</el-button>
               <el-button size="small" plain @click="printOrder(row)">打印</el-button>
               <el-button size="small" plain @click="exportOrderCsv(row)">CSV</el-button>
@@ -244,7 +246,7 @@ import { round2, discountRatesTextOf, effectiveRateOf, allocateUnitOf } from '..
 import { downloadCSV, printA4, printA4Sections, joinLimited } from '../utils/export'
 import { repeatHeaderPref } from '../utils/printPrefs'
 import PrintHeaderToggle from '../components/PrintHeaderToggle.vue'
-import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED } from '../utils/orders.js'
+import { orderAmount, orderDepositSum, orderStatusText, isUnposted, LEGACY_DRAFT, POSTED, VOIDED_ORDER } from '../utils/orders.js'
 import { todayCN, orderTimeOf } from '../utils/time.js'
 import OrderFormDialog from '../components/OrderFormDialog.vue'
 import OrderRemarkDialog from '../components/OrderRemarkDialog.vue'
@@ -294,7 +296,7 @@ const postTargets = ref([])
 const postAfterSave = ref(null)
 const postSubmitting = ref(false)
 // 勾选里可能混着已过账的单：批量过账只取未过账的
-const postableSelected = computed(() => selected.value.filter(o => o.status !== POSTED))
+const postableSelected = computed(() => selected.value.filter(o => isUnposted(o.status)))
 
 const partyOf = (row) => (row && row.kind === 'purchase' ? row.supplier : row && row.customer) || ''
 const depositSumOf = (row) => orderDepositSum(row)
@@ -305,6 +307,7 @@ const filtered = computed(() => list.value
   .filter(row => {
     if (status.value === 'draft' && !isUnposted(row.status)) return false
     if (status.value === 'posted' && row.status !== POSTED) return false
+    if (status.value === 'voided' && row.status !== VOIDED_ORDER) return false
     if (kind.value !== 'all' && row.kind !== kind.value) return false
     if (dateStart.value && (row.date || '') < dateStart.value) return false
     if (dateEnd.value && (row.date || '') > dateEnd.value) return false
@@ -316,7 +319,7 @@ const filtered = computed(() => list.value
 )
 const paged = computed(() => filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE))
 // 可清空的草稿数：与后端 clearDrafts 的判据一一对应（未过账 + 没收过订金），按钮上的数字就是「真会删掉的张数」
-const draftCount = computed(() => list.value.filter(o => o.status !== POSTED && orderDepositSum(o) === 0).length)
+const draftCount = computed(() => list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) === 0).length)
 // 换筛选条件后旧勾选可能已经不在列表里，直接清空，避免「看不见的单被打印/删除」
 watch([keyword, status, kind, dateStart, dateEnd], () => {
   page.value = 1
@@ -327,12 +330,12 @@ watch([keyword, status, kind, dateStart, dateEnd], () => {
 const summaryAmount = ({ columns }) => {
   const rows = filtered.value
   return columns.map((c) => {
-    if (c.label === '订单号') return `合计（${rows.length} 单，未过账 ${rows.filter(r => r.status !== POSTED).length}）`
+    if (c.label === '订单号') return `合计（${rows.length} 单，未过账 ${rows.filter(r => isUnposted(r.status)).length}）`
     if (c.label === '订单金额') return rows.reduce((s, r) => s + orderAmount(r), 0).toFixed(2)
     return ''
   })
 }
-const STATUS_TEXT = { all: '显示全部订单', draft: '仅显示未过账订单', posted: '仅显示已过账订单' }
+const STATUS_TEXT = { all: '显示全部订单', draft: '仅显示未过账订单', posted: '仅显示已过账订单', voided: '仅显示已作废订单' }
 const subtitle = computed(() => {
   const parts = [`共 ${filtered.value.length} 单`, STATUS_TEXT[status.value]]
   if (kind.value !== 'all') parts.push(kind.value === 'purchase' ? '仅采购' : '仅销售')
@@ -515,20 +518,21 @@ function printSelectedDetails(masked) {  const rows = selectedSorted.value
   printA4Sections(sections, masked ? '订单详情（隐藏金额）' : '订单详情', '', repeatHeaderPref.value)
 }
 
-// 批量删除：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量
+// 批量作废：一次请求、一次提交；已过账/已收订金的由服务端跳过并回报数量。
+// 2026-11-01 起不再硬删除：作废后记录仍在，切到「仅显示已作废订单」可查。
 async function removeSelected() {
   const rows = selected.value
   if (!rows.length) return
   try {
     await ElMessageBox.confirm(
-      `将批量删除勾选的 ${rows.length} 张订单（已过账 / 已收订金的会自动跳过），删除后不可恢复。`,
-      '删除勾选订单', { type: 'warning', confirmButtonText: `删除 ${rows.length} 张` }
+      `将作废勾选的 ${rows.length} 张订单（已过账 / 已收订金的会自动跳过）。作废后不再参与任何业务，记录保留可查。`,
+      '作废勾选订单', { type: 'warning', confirmButtonText: `作废 ${rows.length} 张` }
     )
   } catch { return }
   busy.value = true
   try {
     const r = await api.orderOperation({ action: 'deleteMany', orderIds: rows.map(o => o.id) })
-    ElMessage.success(`已删除 ${r.removed || 0} 张订单${r.skipped ? `，跳过 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    ElMessage.success(`已作废 ${r.removed || 0} 张订单${r.skipped ? `，跳过 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
     tableRef.value?.clearSelection()
     selected.value = []
     await load()
@@ -690,7 +694,7 @@ async function submitDeposit() {
 // ---- 过账：先选方式（结清 / 挂账），再到服务端一次事务生成正式单据 ----
 // 结清：差额记为本次实收/实付并自动开收款单 SK / 付款单 FK；挂账：只生成单据，应收/应付保留。
 function askPost(rows) {
-  const targets = (rows || []).filter(o => o && o.status !== POSTED)
+  const targets = (rows || []).filter(o => o && isUnposted(o.status))
   if (!targets.length) return ElMessage.warning('这些订单都已过账，无需再过账')
   postAfterSave.value = null
   postTargets.value = targets
@@ -759,32 +763,32 @@ async function unpost(row) {
 
 async function remove(row) {
   try {
-    await ElMessageBox.confirm(`删除订单 ${row.id}？删除后不可恢复（已收订金的订单不能删）。`, '删除订单', { type: 'warning' })
+    await ElMessageBox.confirm(`作废订单 ${row.id}？作废后不再参与任何业务，记录保留可查（已收订金的订单不能作废）。`, '作废订单', { type: 'warning' })
   } catch { return }
   busy.value = true
   try {
     await api.orderOperation({ action: 'delete', orderId: row.id })
-    ElMessage.success('订单已删除')
+    ElMessage.success('订单已作废')
     await load()
   } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
 }
 
-// 清空未过账订单：只删「未过账 + 没收过订金」的单（未过账但收过订金的凭证已开，删了会成孤儿），
-// 按钮上的数字就是真会删掉的张数，确认框再把保留原因说清楚
+// 清空未过账订单：只作废「未过账 + 没收过订金」的单（未过账但收过订金的凭证已开，作废会成孤儿），
+// 按钮上的数字就是真会作废掉的张数，确认框再把跳过原因说清楚
 async function clearDrafts() {
   const n = draftCount.value
   if (!n) return
-  const keptDeposit = list.value.filter(o => o.status !== POSTED && orderDepositSum(o) > 0).length
+  const keptDeposit = list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) > 0).length
   try {
     await ElMessageBox.confirm(
-      `将删除 ${n} 张未过账订单，删除后不可恢复。${keptDeposit ? `另有 ${keptDeposit} 张未过账订单因已收订金会保留；` : ''}已过账订单不受影响。`,
-      '清空未过账订单', { type: 'warning', confirmButtonText: '全部删除' }
+      `将作废 ${n} 张未过账订单，作废后不再参与任何业务，记录保留可查。${keptDeposit ? `另有 ${keptDeposit} 张未过账订单因已收订金会跳过；` : ''}已过账订单不受影响。`,
+      '清空未过账订单', { type: 'warning', confirmButtonText: '全部作废' }
     )
   } catch { return }
   busy.value = true
   try {
     const r = await api.orderOperation({ action: 'clearDrafts' })
-    ElMessage.success(`已清空 ${r.removed || 0} 张未过账订单${r.skipped ? `，保留 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    ElMessage.success(`已作废 ${r.removed || 0} 张未过账订单${r.skipped ? `，跳过 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
     tableRef.value?.clearSelection()
     selected.value = []
     await load()

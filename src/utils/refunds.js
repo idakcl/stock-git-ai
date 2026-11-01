@@ -1,4 +1,4 @@
-import { grossOf, netOf, ensurePayments, syncPayments, round2, depositSumOf } from './account.js'
+import { grossOf, netOf, ensurePayments, syncPayments, round2, depositSumOf, isVoided } from './account.js'
 import { genVoucherCode } from './voucher.js'
 
 export const isReturn = o => Number(o?.total) < 0 || ['sale-return', 'purchase-return'].includes(o?.type)
@@ -18,7 +18,9 @@ export function returnableLines(source, orders) {
       : Math.round(cents(grossOf(source)) * cumulativeWeight / (totalWeight || 1))
     const lineNet = nextAllocated - allocated
     allocated = nextAllocated
-    const prior = orders.filter(o => isReturn(o) && o.sourceOrderId === source.id)
+    // 只算「还有效」的退货单：作废掉的退货单不再占用可退额度，
+    // 否则误开的未核销退货单一作废，原单那部分数量就永远退不了了。
+    const prior = orders.filter(o => isReturn(o) && !isVoided(o) && o.sourceOrderId === source.id)
       .flatMap(o => o.items || []).filter(r => r.sourceLine === index)
     const returnedQty = prior.reduce((s, r) => s - Number(r.qty), 0)
     const returnedMoney = prior.reduce((s, r) => s - cents(r.total), 0)

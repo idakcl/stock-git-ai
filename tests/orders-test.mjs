@@ -2,7 +2,7 @@
 // ——「订单不占库存、不进应收」。跑法：node tests/orders-test.mjs
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, orderStatusText, isUnposted, DRAFT, POSTED } from '../src/utils/orders.js'
+import { applyOrderOperation, orderToOrderDoc, canUnpost, orderAmount, validateOrder, orderKeys, orderStatusText, isUnposted, DRAFT, POSTED, VOIDED_ORDER } from '../src/utils/orders.js'
 import { grossOf, receivableOf } from '../src/utils/account.js'
 import { derive, rebuildStock } from '../api/routes.js'
 
@@ -181,7 +181,7 @@ test('批量过账 postMany：一次事务生成多张单据，已过账的跳�
   const batchDocs = r.state.orders.slice(1).map(o => r.state.sales.find(d => d.id === o.postedOrderId))
   batchDocs.forEach(o => assert.equal(o.settle, '结清'))
   // 全都已过账时不再产生空事务
-  assert.throws(() => applyOrderOperation(r.state, { action: 'postMany', orderIds: ids }), /已过账状态/)
+  assert.throws(() => applyOrderOperation(r.state, { action: 'postMany', orderIds: ids }), /已过账或已作废/)
   assert.throws(() => applyOrderOperation(r.state, { action: 'postMany', orderIds: [] }), /选择/)
 })
 
@@ -202,10 +202,25 @@ test('撤销过账：没动钱的单可以退回草稿，动过钱的不行', ()
   assert.throws(() => applyOrderOperation(s, { action: 'unpost', orderId: id }), /还没过账/)
 })
 
-test('删草稿：收过订金不许删（凭证已开），已过账不许删', () => {
+test('作废草稿：记录保留、状态转已作废；收过订金/已过账的不许作废', () => {
   const s = saveOrder(fixture(), draft()).state
   const id = s.orders[0].id
-  assert.equal(applyOrderOperation(s, { action: 'delete', orderId: id }).state.orders.length, 0)
+  const v = applyOrderOperation(s, { action: 'delete', orderId: id, reason: '开错了' })
+  assert.equal(v.state.orders.length, 1, '不再从文件里抹掉，记录必须留得住')
+  assert.equal(v.state.orders[0].status, VOIDED_ORDER)
+  assert.equal(v.state.orders[0].voidedReason, '开错了')
+  assert.ok(v.state.orders[0].voidedAt, '作废时间要留痕')
+  assert.equal(v.state.orders[0].items.length, s.orders[0].items.length, '明细原样保留')
+  // 幂等：重复作废不报错、不再改时间
+  assert.equal(applyOrderOperation(v.state, { action: 'delete', orderId: id }).duplicate, true)
+  // 作废后所有写入口都关上
+  assert.throws(() => applyOrderOperation(v.state, { action: 'post', orderId: id }), /已作废/)
+  assert.throws(() => applyOrderOperation(v.state, { action: 'deposit', orderId: id, amount: 1 }), /已作废/)
+  assert.throws(() => applyOrderOperation(v.state, { action: 'remark', orderId: id, remark: 'x' }), /已作废/)
+  assert.throws(() => applyOrderOperation(v.state, { action: 'save', order: { ...draft(), id } }), /已作废/)
+  assert.throws(() => applyOrderOperation(v.state, { action: 'unpost', orderId: id }), /已作废/)
+  // 作废单不算未过账：不能被「清空草稿」再算一次，也不进待过账
+  assert.equal(isUnposted(VOIDED_ORDER), false)
   const withDep = applyOrderOperation(s, { action: 'deposit', orderId: id, amount: 5, date: '2026-10-29' }).state
   assert.throws(() => applyOrderOperation(withDep, { action: 'delete', orderId: id }), /订金/)
   const posted = applyOrderOperation(s, { action: 'post', orderId: id }).state
@@ -223,7 +238,7 @@ test('孤儿订单（过账生成的单据已被删掉）：撤销退回草稿�
   assert.equal(back.state.orders[0].status, DRAFT)
   assert.equal(back.state.orders[0].postedOrderId, '')
   assert.equal(back.removedDocId, '')
-  assert.equal(applyOrderOperation(orphan, { action: 'delete', orderId: id }).state.orders.length, 0)
+  assert.equal(applyOrderOperation(orphan, { action: 'delete', orderId: id }).state.orders[0].status, VOIDED_ORDER)
   // 单据还在时依旧必须先撤销过账，不能绕过状态机直接把两张单留成两套账
   assert.throws(() => applyOrderOperation(posted, { action: 'delete', orderId: id }), /撤销过账/)
 })
@@ -238,17 +253,19 @@ test('清空草稿：一次请求删掉全部纯草稿，已过账与已收订�
   assert.equal(s.orders.length, 5)
 
   const r = applyOrderOperation(s, { action: 'clearDrafts' })
-  // 3 张纯草稿被删，收过订金的（凭证已开）与已过账的（连着正式单据）都保留
+  // 3 张纯草稿转「已作废」，收过订金的（凭证已开）与已过账的（连着正式单据）原样保留
   assert.equal(r.removed, 3)
   assert.equal(r.skipped, 2)
-  assert.equal(r.state.orders.length, 2)
-  assert.deepEqual(r.state.orders.map(o => o.id).sort(), [withDeposit.code, posted.code].sort())
+  assert.equal(r.state.orders.length, 5, '作废不清行：记录全部留得住')
+  assert.equal(r.state.orders.filter(o => o.status === VOIDED_ORDER).length, 3)
+  assert.deepEqual(r.state.orders.filter(o => o.status !== VOIDED_ORDER).map(o => o.id).sort(),
+    [withDeposit.code, posted.code].sort())
   // 单据集合没被牵连：清草稿不产生也不删除任何正式单据
   assert.deepEqual(r.state.sales.map(o => o.id), s.sales.map(o => o.id))
-  // 幂等：再清一次没有可删的
+  // 幂等：再清一次没有可作废的
   const again = applyOrderOperation(r.state, { action: 'clearDrafts' })
   assert.equal(again.removed, 0)
-  assert.equal(again.state.orders.length, 2)
+  assert.equal(again.state.orders.filter(o => o.status === VOIDED_ORDER).length, 3)
   // 快照不被就地修改
   assert.equal(s.orders.length, 5)
 })
@@ -270,7 +287,10 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
   })
   assert.equal(r.removed, 3)
   assert.equal(r.skipped, 3)
-  assert.deepEqual(r.state.orders.map(o => o.id).sort(), [withDeposit.code, posted.code].sort())
+  assert.equal(r.state.orders.length, 5, '批量作废同样不删行')
+  assert.equal(r.state.orders.filter(o => o.status === VOIDED_ORDER).length, 3)
+  assert.deepEqual(r.state.orders.filter(o => o.status !== VOIDED_ORDER).map(o => o.id).sort(),
+    [withDeposit.code, posted.code].sort())
   // 单据集合不受影响
   assert.deepEqual(r.state.sales.map(o => o.id), s.sales.map(o => o.id))
   // 快照不被就地修改
@@ -279,7 +299,7 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
   // 全都不能删时直接报错，而不是静默返回 0
   assert.throws(() => applyOrderOperation(s, {
     action: 'deleteMany', orderIds: [withDeposit.code, posted.code]
-  }), /都不能删除/)
+  }), /都不能作废/)
   assert.throws(() => applyOrderOperation(s, { action: 'deleteMany', orderIds: [] }), /请选择/)
   // 孤儿订单（过账单据已被删）与单张删除同一口径，允许删
   const orphanDocId = s.orders.find(o => o.id === posted.code).postedOrderId

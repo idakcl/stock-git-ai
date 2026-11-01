@@ -17,6 +17,9 @@ import { todayCN } from './time.js'
 
 export const DRAFT = '未过账'
 export const POSTED = '已过账'
+// 作废：订单不再参与任何业务，但记录保留（谁、什么时候、为什么作废都能查）。
+// 2026-11-01 owner 拍板：订单不再硬删除——草稿也是业务痕迹，删掉就再也说不清「那张单去哪了」。
+export const VOIDED_ORDER = '已作废'
 // 早期版本草稿状态存的是「草稿」；保留常量用于一次性迁移与兼容判断
 export const LEGACY_DRAFT = '草稿'
 
@@ -35,12 +38,14 @@ export function orderKeys(kind) {
 export const orderAmount = order => grossOf({ ...(order || {}), total: round2((order?.items || []).reduce((s, l) => s + Number(l.total || 0), 0)) })
 export const orderDepositSum = order => round2(depositSumOf(order?.deposits))
 
-// 状态判定：不是「已过账」的都算未过账（兼容早期存成「草稿」的历史数据）
-export const isUnposted = status => status !== POSTED
+// 状态判定：不是「已过账」的都算未过账（兼容早期存成「草稿」的历史数据）。
+// 作废单不算未过账：它既不能被过账，也不该出现在「待过账」计数与「清空未过账」里。
+export const isUnposted = status => status !== POSTED && status !== VOIDED_ORDER
+export const isVoidOrder = o => !!o && o.status === VOIDED_ORDER
 
 // 状态显示口径：界面上「草稿」统一叫「未过账」。库里历史数据仍是 '草稿'，凡是「非已过账」都按未过账显示，
 // 这样老订单、备份恢复的数据不用迁移也能显示一致。
-export const orderStatusText = status => (status === POSTED ? POSTED : DRAFT)
+export const orderStatusText = status => (status === POSTED ? POSTED : status === VOIDED_ORDER ? VOIDED_ORDER : DRAFT)
 
 // 校验：返回错误数组（空数组＝通过）。前端与服务端共用，避免「界面能提交、服务端拒」
 export function validateOrder(order, { items = [] } = {}) {
@@ -189,6 +194,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
       const idx = state.orders.findIndex(o => o.id === draft.id)
       if (idx < 0) fail('订单不存在，可能已被删除')
       if (state.orders[idx].status === POSTED) fail('订单已过账，请先撤销过账再修改')
+      if (state.orders[idx].status === VOIDED_ORDER) fail('订单已作废，不能再修改；请新建一张')
       const kept = state.orders[idx]
       state.orders[idx] = { ...kept, ...draft, status: DRAFT, postedOrderId: '', updatedAt: now }
       return { state, code: draft.id }
@@ -203,6 +209,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
   if (action === 'remark') {
     const order = find(input.orderId)
     if (!order) fail('订单不存在')
+    if (order.status === VOIDED_ORDER) fail('订单已作废，不能再补备注')
     const remark = String(input.remark ?? '').trim()
     if (remark.length > 500) fail('备注最多 500 字')
     order.remark = remark
@@ -214,6 +221,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     const order = find(input.orderId)
     if (!order) fail('订单不存在')
     if (order.status === POSTED) fail('订单已过账，请到该单据里「记录收款」')
+    if (order.status === VOIDED_ORDER) fail('订单已作废，不能再收订金')
     const amount = round2(Number(input.amount || 0))
     if (!(amount > 0)) fail('订金金额必须大于 0')
     const { partyKey, voucherFile, voucherPrefix, orderType } = orderKeys(order.kind)
@@ -235,6 +243,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     const order = find(input.orderId)
     if (!order) fail('订单不存在')
     if (order.status === POSTED) return { state, code: order.postedOrderId, posted: true, duplicate: true }
+    if (order.status === VOIDED_ORDER) fail('订单已作废，不能过账')
     const errors = validateOrder(order, { items: state.items })
     if (errors.length) fail(errors[0])
     const { listKey, docPrefix } = orderKeys(order.kind)
@@ -262,7 +271,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     let skipped = 0
     for (const id of ids) {
       const idx = state.orders.findIndex(o => o.id === id)
-      if (idx < 0 || state.orders[idx].status === POSTED) { skipped++; continue }
+      if (idx < 0 || state.orders[idx].status === POSTED || state.orders[idx].status === VOIDED_ORDER) { skipped++; continue }
       const order = state.orders[idx]
       const errors = validateOrder(order, { items: state.items })
       if (errors.length) fail(`订单 ${id}：${errors[0]}`)
@@ -275,13 +284,14 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
       state.orders[idx] = { ...order, status: POSTED, postedOrderId: doc.id, postedAt: now, updatedAt: now }
       codes.push(doc.id)
     }
-    if (!codes.length) fail('勾选的订单都已是已过账状态，无需再过账')
+    if (!codes.length) fail('勾选的订单都已过账或已作废，无需再过账')
     return { state, code: codes[0], posted: codes.length, skipped, settleMode }
   }
 
   if (action === 'unpost') {
     const order = find(input.orderId)
     if (!order) fail('订单不存在')
+    if (order.status === VOIDED_ORDER) fail('订单已作废，无需撤销过账')
     if (order.status !== POSTED) fail('订单还没过账，无需撤销')
     const { listKey } = orderKeys(order.kind)
     const list = (state[listKey] || []).slice()
@@ -301,19 +311,30 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     return { state, code: order.id, removedDocId: order.postedOrderId }
   }
 
-  if (action === 'delete') {
+  // 作废订单（原「删除」）：2026-11-01 起不再硬删。
+  // 硬删的代价是「这张单去哪了」永远说不清——订金凭证、打印件、聊天记录都可能还指着它。
+  // 作废保留全部字段，只加状态与时间/原因，之后所有写入口都拒绝它（过账、改单、收订金、补备注）。
+  if (action === 'delete' || action === 'void') {
     const order = find(input.orderId)
     if (!order) fail('订单不存在')
+    if (order.status === VOIDED_ORDER) return { state, code: order.id, duplicate: true }
     if (order.status === POSTED) {
-      // 「清空数据」这类整库操作会把过账生成的单据直接删掉，留下一个状态还是「已过账」的孤儿订单：
-      // 撤销过账找不到单、删除又要求先撤销，它就永远卡在列表里。只有这种单据确实不存在的情况才允许原地删。
+      // 已过账的订单连着正式单据：必须先在单据侧撤销过账，订单才回得到草稿，
+      // 否则作废订单会让那张正式单据失去来源（对账时无法解释）。
+      // 例外：单据已经被「清空数据」整库清掉，此时原地作废即可，否则它会永远卡在列表里。
       const { listKey } = orderKeys(order.kind)
       const exists = (state[listKey] || []).some(o => o.id === order.postedOrderId)
       if (exists) fail('已过账的订单请先撤销过账')
     }
-    if (orderDepositSum(order) > 0) fail('这张订单已收过订金（订金凭证已开），不能删除；请过账后在单据里处理退款')
-    state.orders = state.orders.filter(o => o.id !== order.id)
-    return { state, code: order.id }
+    if (orderDepositSum(order) > 0) fail('这张订单已收过订金（订金凭证已开），不能作废；请过账后在单据里处理退款')
+    const idx = state.orders.findIndex(o => o.id === order.id)
+    state.orders[idx] = {
+      ...order,
+      status: VOIDED_ORDER,
+      voidedAt: now,
+      voidedReason: String(input.reason || '').trim().slice(0, 200)
+    }
+    return { state, code: order.id, voided: true }
   }
 
   // 批量删除：勾选多张订单后一次提交，只写一次 orders.json。
@@ -329,7 +350,7 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
     let skipped = 0
     for (const id of ids) {
       const order = find(id)
-      if (!order) { skipped++; continue }
+      if (!order || order.status === VOIDED_ORDER) { skipped++; continue }
       if (order.status === POSTED) {
         const { listKey } = orderKeys(order.kind)
         const exists = (state[listKey] || []).some(o => o.id === order.postedOrderId)
@@ -338,9 +359,11 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
       if (orderDepositSum(order) > 0) { skipped++; continue }
       removable.push(id)
     }
-    if (!removable.length) fail('勾选的订单都不能删除：已过账的需先撤销过账，收过订金的需先处理订金')
+    if (!removable.length) fail('勾选的订单都不能作废：已过账的需先撤销过账，收过订金的需先处理订金')
     const drop = new Set(removable)
-    state.orders = state.orders.filter(o => !drop.has(o.id))
+    state.orders = state.orders.map(o => drop.has(o.id)
+      ? { ...o, status: VOIDED_ORDER, voidedAt: now, voidedReason: String(input.reason || '').trim().slice(0, 200) }
+      : o)
     return { state, code: '', removed: removable.length, skipped }
   }
 
@@ -348,12 +371,19 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
   // 两条不删的硬约束与单张删除完全一致，不能让批量入口绕过它们：
   //   ① 已过账的要先撤销过账（它连着一条正式单据）；
   //   ② 收过订金的不删（订金凭证已经开了，删了订单凭证就成孤儿）。
+  // 清空未过账订单：与单张作废同一口径——置「已作废」而不是从文件里抹掉。
+  // 按钮上显示的 N 仍然是「这次会作废掉的张数」，用户看到的行为不变，但记录留得住。
   if (action === 'clearDrafts') {
-    const droppable = o => o.status !== POSTED && orderDepositSum(o) === 0
-    const kept = state.orders.filter(o => !droppable(o))
-    const removed = state.orders.length - kept.length
-    state.orders = kept
-    return { state, code: '', removed, skipped: kept.length }
+    const droppable = o => isUnposted(o.status) && orderDepositSum(o) === 0
+    let removed = 0
+    // skipped 必须在改写前算：改写后草稿已变成「已作废」，再按 droppable 数会把它们算进 skipped
+    const skipped = state.orders.filter(o => !droppable(o)).length
+    state.orders = state.orders.map(o => {
+      if (!droppable(o)) return o
+      removed += 1
+      return { ...o, status: VOIDED_ORDER, voidedAt: now, voidedReason: String(input.reason || '清空未过账订单').slice(0, 200) }
+    })
+    return { state, code: '', removed, skipped }
   }
 
   fail('不支持的订单操作')

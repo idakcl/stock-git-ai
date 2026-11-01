@@ -308,11 +308,12 @@ await t('清空草稿：一次提交删完纯草稿，已过账的留着（remov
   const r = await call('/orders', 'POST', { action: 'clearDrafts' })
   assert.equal(r.removed, 2)
   assert.equal(r.skipped, 1, '上一条用例过账的那张订单不能被清掉')
-  assert.equal(commits() - before, 1, '删干净只应有一次提交')
+  assert.equal(commits() - before, 1, '整批作废只应有一次提交')
   const orders = read('orders.json')
-  assert.equal(orders.length, 1)
-  assert.equal(orders[0].status, '已过账')
-  assert.ok(!orders.some(o => o.id === a.code || o.id === b.code))
+  // 2026-11-01 起清空未过账订单是「作废」，不是删行：记录留着，状态转已作废
+  assert.equal(orders.filter(o => o.status === '已过账').length, 1)
+  assert.equal(orders.filter(o => o.status === '已作废').length, 2)
+  assert.ok(orders.some(o => o.id === a.code) && orders.some(o => o.id === b.code), '作废单必须留得住')
 })
 
 await t('restore 兼容旧备份：status「草稿」写成「未过账」；migrateStatus 幂等不空提交', async () => {

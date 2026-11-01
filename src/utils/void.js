@@ -11,6 +11,7 @@
 // 不可恢复：作废是一次单向操作（确认框里写明）。需要重新开单就再录一张——
 // 这样「作废」永远是账实一致的分界线，不会出现「作废又恢复、凭证废了又活」的中间态。
 import { ensurePayments, isVoided, round2, VOIDED } from './account.js'
+import { isReturn } from './refunds.js'
 import { todayCN } from './time.js'
 import { DRAFT } from './orders.js'
 
@@ -32,6 +33,7 @@ export function applyVoidOperation(snapshot, input, now = new Date().toISOString
   state.sales = Array.isArray(state.sales) ? state.sales : []
   state.purchases = Array.isArray(state.purchases) ? state.purchases : []
   state.orders = Array.isArray(state.orders) ? state.orders : []
+  state.refunds = Array.isArray(state.refunds) ? state.refunds : []
 
   const doc = state[listKey].find(o => o.id === input.id)
   if (!doc) fail('单据不存在，可能已被删除', 404)
@@ -40,11 +42,28 @@ export function applyVoidOperation(snapshot, input, now = new Date().toISOString
     return { state, code: doc.id, duplicate: true, vouchers: doc.voidedVouchers || [] }
   }
   // 闸门①：有退货/补差单时先处理子单——子单金额是基于原单算出来的，
-  // 原单作废后它们就成了无源之水，库存与往来账都无从解释
-  const child = [...state.sales, ...state.purchases].find(o => o.sourceOrderId === doc.id)
+  // 原单作废后它们就成了无源之水，库存与往来账都无从解释。
+  // 只认「还有效」的子单：子单自己作废后（见下面闸门②③），原单就该解锁。
+  const child = [...state.sales, ...state.purchases].find(o => o.sourceOrderId === doc.id && !isVoided(o))
   if (child) fail(`这张单已有变更单 ${child.id}（退货/补差），请先处理那张单再作废`, 409)
-  // 闸门②：退货核销记录同理（退款业务双边核销，原单一作废，核销的另一半就悬空了）
-  if ((doc.settlements || []).length) fail('这张单已有退货核销记录，请先处理退货再作废', 409)
+  // 闸门②：核销/抵扣记录——退款是双边核销，单据一作废，核销的另一半就悬空了。
+  // 这条对退货单同样成立：退货单被 offset/deposit 方式结过，说明它的待退金额已经用掉。
+  if ((doc.settlements || []).length) {
+    fail(isReturn(doc)
+      ? '这张退货单已有核销/抵扣记录，请先冲销对应退款再作废'
+      : '这张单已有退货核销记录，请先处理退货再作废', 409)
+  }
+  // 闸门③：退货单已经开出退款凭证（TK- 现金退款 / HX- 抵扣凭证）。
+  // 以前这条路是敞开的：作废退货单后凭证仍然有效，等于钱付出去了、单子却不存在。
+  // 已核销的走闸门②，这里是给「现金退款但没写 settlements」的情况兜底。
+  if (isReturn(doc)) {
+    const refundCodes = (state.refunds || [])
+      .filter(v => !isVoided(v) && (v.items || []).some(it => it && it.orderId === doc.id))
+      .map(v => v.code)
+    if (refundCodes.length) {
+      fail(`这张退货单已开出退款凭证 ${refundCodes.join('、')}，请先冲销退款再作废`, 409)
+    }
+  }
 
   // ---- 定位要一起作废的凭证 ----
   // 优先用单据流水上回写的编号（这是最可靠的绑定）；再兜底 items 里指向本单的凭证。
