@@ -50,15 +50,30 @@ import { fmtCNTime } from '../utils/time.js'
 // 来源到中文名的映射；没有列到的类型直接显示原值（不吞信息）
 const LABELS = {
   refund: '退款', order: '订单', void: '作废', restore: '恢复', ai: 'AI-API',
-  clear: '清空', merge: '合并导入', amend: '变更', derive: '编码修正', login: '登录'
+  clear: '清空', merge: '合并导入', amend: '变更', derive: '编码修正', login: '登录',
+  save: '字段修改'
 }
 const TAG_TYPES = {
   refund: 'danger', void: 'warning', clear: 'danger', restore: 'info',
-  ai: 'success', derive: 'warning', amend: 'info'
+  ai: 'success', derive: 'warning', amend: 'info', save: 'primary'
 }
 const ACTION_LABELS = {
   create: '新建', delete: '删除', post: '过账', unpost: '撤销过账', save: '保存',
   remark: '备注', restore: '恢复', clear: '清空', deposit: '订金'
+}
+const KIND_LABELS = { sale: '销售单', purchase: '采购单', order: '订单' }
+const MONEY = new Set(['total', 'discount', 'received', 'paid'])
+const moneyText = (v) => Number(v || 0).toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+
+// 一条 docs 摘要 → 「金额 1,000 → 900、客户 甲 → 乙」
+function fieldsText(doc) {
+  return Object.entries((doc && doc.fields) || {}).map(([k, v]) => {
+    if (k === '_new') return '新建'
+    if (k === '_deleted') return '移除'
+    if (!v || !v.label) return k
+    if (MONEY.has(k)) return `${v.label} ${moneyText(v.from)} → ${moneyText(v.to)}`
+    return `${v.label} ${v.from || '空'} → ${v.to || '空'}`
+  }).join('、') || '无字段变化'
 }
 
 const rows = ref([])
@@ -86,7 +101,7 @@ function summary(row) {
   const parts = []
   if (row.action) parts.push(ACTION_LABELS[row.action] || row.action)
   if (row.target) parts.push(String(row.target))
-  if (row.kind) parts.push(String(row.kind))
+  if (row.kind) parts.push(KIND_LABELS[row.kind] || String(row.kind))
   if (row.code) parts.push(String(row.code))
   if (row.orderId && row.orderId !== row.code) parts.push(`订单 ${row.orderId}`)
   if (row.party) parts.push(String(row.party))
@@ -100,6 +115,11 @@ function summary(row) {
   if (row.fixed != null) parts.push(`修正编码 ${row.fixed} 处`)
   if (Array.isArray(row.results)) parts.push(row.results.map(x => `${x.key} ${x.count}`).join('、'))
   if (row.key) parts.push(`密钥 ${row.key}`)
+  if (row.changed != null) parts.push(`改 ${row.changed} 张`)
+  if (Array.isArray(row.docs) && row.docs.length) {
+    const shown = row.docs.slice(0, 3).map(d => `${d.id}（${fieldsText(d)}）`).join('；')
+    parts.push(row.docs.length > 3 ? `${shown} 等` : shown)
+  }
   return parts.filter(Boolean).join(' · ') || '—'
 }
 

@@ -1,5 +1,5 @@
 import { readJSON, writeJSON, assertSafeWrite } from './github.js'
-import { readCollection, writeCollection, sortOrders, SPLIT_KEYS } from './storage.js'
+import { readCollection, readCollectionWithRaw, writeCollection, sortOrders, SPLIT_KEYS } from './storage.js'
 import { refundTransaction } from './refunds.js'
 import { orderTransaction } from './orders.js'
 import { amendTransaction } from './amends.js'
@@ -18,6 +18,7 @@ import { listAiLogs } from './ai-logs.js'
 import { pruneItem, normalizeOrderPayments } from './write-normalize.js'
 import { restoreTransaction } from './restore.js'
 import { auditState } from './audit.js'
+import { diffDocuments } from './diff.js'
 
 // 对外仍从 routes.js 取（tests/storage-test.mjs 的旧入口），实现已挪到 write-normalize.js
 export { pruneItem, normalizeOrderPayments }
@@ -317,10 +318,10 @@ export function rebuildStock(purchases, sales, items) {
 //
 // 入参只保留签名兼容（调用方历史上传过「刚落库的整表」和 known 快照）：
 // 文档在写派生数据之前已经落库，固定快照读到的就是权威现状，不需要也不该再信任入参。
-async function syncDerived(env) {
+async function syncDerived(env, extraLog) {
   const tx = await openTransaction(env,
-    ['items', 'suppliers', 'customers', 'purchases', 'sales', 'stock'],
-    { optional: ['customers'] })
+    ['items', 'suppliers', 'customers', 'purchases', 'sales', 'stock', 'logs'],
+    { optional: ['customers', 'logs'] })
   const { items, suppliers, customers } = tx.state
   // derive 会就地改写单据明细行（乱码编码 → 正式 P 编码）。必须传副本：
   // tx.state 里的对象既是「提交前」也是「提交后」的比较基准，就地改掉会让
@@ -352,10 +353,14 @@ async function syncDerived(env) {
     assertSafeWrite('customers.json', customers || [], next.customers || [])
     assertSafeWrite('suppliers.json', suppliers || [], next.suppliers)
     // 编码修正不再静默：一次派生里改过哪些行，写进 logs.json（最多保留最近 200 条）
-    const logEntry = derived.codeFixes && derived.codeFixes.length
-      ? { source: 'derive', codeFixes: derived.codeFixes.slice(0, 50), fixed: derived.codeFixes.length }
-      : undefined
-    await commitTransaction(tx, { next, message: 'derive 同步派生数据（商品/供应商/客户/库存）', logEntry })
+    // extraLog：本次保存的字段级 diff，与编码修正同一笔提交写入，不额外多一次 GitHub 写。
+    const entries = []
+    if (derived.codeFixes && derived.codeFixes.length) {
+      entries.push({ source: 'derive', codeFixes: derived.codeFixes.slice(0, 50), fixed: derived.codeFixes.length })
+    }
+    if (extraLog) entries.push(extraLog)
+    const logEntry = entries.length ? (entries.length === 1 ? entries[0] : entries) : undefined
+    await commitTransaction(tx, { next, message: 'derive 同步派生数据（商品/供应商/客户/库存）', logEntry, forceLog: Boolean(extraLog) })
   } catch (e) {
     throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
   }
@@ -472,14 +477,15 @@ export async function handleApi(req, url, env, execCtx) {
     // 对账体检：只读，把「单头/明细、实收/流水、结算状态、凭证引用、退货额度、重复单号」的矛盾一次列出。
     // 资金单据与退款单在老数据仓里可能没有，按空集合读，不能因为缺文件就让整个体检失败。
     if (path === '/audit' && method === 'GET') {
-      const [purchases, sales, receipts, paymentVouchers, refunds] = await Promise.all([
+      const [purchases, sales, receipts, paymentVouchers, refunds, stock] = await Promise.all([
         readCollection(env, 'purchases'),
         readCollection(env, 'sales'),
         readOptionalArray(env, 'receipts.json'),
         readOptionalArray(env, 'payment-vouchers.json'),
-        readOptionalArray(env, 'refunds.json')
+        readOptionalArray(env, 'refunds.json'),
+        readOptionalArray(env, 'stock.json')
       ])
-      return json(req, env, auditState({ purchases, sales, receipts, paymentVouchers, refunds }))
+      return json(req, env, auditState({ purchases, sales, receipts, paymentVouchers, refunds, stock }))
     }
     // 用户信息：打印落款用，单独一个文件；缺失按空资料处理
     if (path === '/profile' && method === 'GET') return json(req, env, await readProfile(env))
@@ -616,14 +622,19 @@ export async function handleApi(req, url, env, execCtx) {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
         // sortOrders：与存储层落库次序同一口径，派生（库存/历史价）才不会因次序不同而每次算出不同结果
         const purchases = sortOrders((body.purchases || []).map(p => normalizeOrderPayments(p, 'paid')))
-        await writeCollection(env, 'purchases', purchases, 'update purchases')
-        await syncDerived(env)
+        // 字段级留痕：先读现状再写，按单号对比出「金额/客户/日期」等真正变了的字段
+        const current = await readCollectionWithRaw(env, 'purchases')
+        const changes = diffDocuments(current.value, purchases, 'purchase')
+        await writeCollection(env, 'purchases', purchases, 'update purchases', { known: current.known })
+        await syncDerived(env, changes ? { source: 'save', kind: 'purchase', changed: changes.changed, docs: changes.docs } : null)
         return json(req, env, { ok: true })
       }
       if (path === '/sales') {
         const sales = sortOrders((body.sales || []).map(s => normalizeOrderPayments(s, 'received')))
-        await writeCollection(env, 'sales', sales, 'update sales')
-        await syncDerived(env)
+        const current = await readCollectionWithRaw(env, 'sales')
+        const changes = diffDocuments(current.value, sales, 'sale')
+        await writeCollection(env, 'sales', sales, 'update sales', { known: current.known })
+        await syncDerived(env, changes ? { source: 'save', kind: 'sale', changed: changes.changed, docs: changes.docs } : null)
         return json(req, env, { ok: true })
       }
       // 数据整理：重跑一次全量 derive 并写回，把历史单据里残留的乱码编码（N…）改回正式 P 编码，

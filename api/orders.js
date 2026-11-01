@@ -1,5 +1,6 @@
 import { applyOrderOperation } from '../src/utils/orders.js'
 import { openTransaction, commitTransaction } from './tx.js'
+import { diffDocuments } from './diff.js'
 
 // 订单事务要读的集合。
 // orders.json 是新上线的集合，数据仓里还没有 → 由 optional 声明为「可为缺失」，
@@ -32,10 +33,19 @@ export async function orderTransaction(env, input, derive, rebuildStock, prepare
     next.stock = rebuildStock(next.purchases, next.sales, next.items)
   }
 
+  // 字段级留痕：草稿的新建/改价/改客户同样要能追溯（订单号是后续过账的依据）。
+  // 只在 save 时记录：过账/作废/删除已由 action 本身表达，再记一条「移除」只是噪音。
+  const logs = []
+  if (input.action === 'save') {
+    const diff = diffDocuments(tx.state.orders || [], next.orders || [], 'order')
+    if (diff) logs.push({ source: 'save', kind: 'order', changed: diff.changed, docs: diff.docs })
+  }
+  logs.push({ source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed, vouchers: result.vouchers })
+
   const r = await commitTransaction(tx, {
     next,
     message: `order: ${input.action} ${result.code || input.orderId || (result.removed != null ? `${result.removed} orders` : result.restored != null ? `${result.restored} orders` : result.migrated != null ? `${result.migrated} status` : '')}`.trim(),
-    logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed, vouchers: result.vouchers }
+    logEntry: logs
   })
   if (r.unchanged) return { ok: true, code: result.code, unchanged: true, removed: result.removed || 0, skipped: result.skipped || 0, restored: result.restored, migrated: result.migrated || 0 }
   // code 按操作含义不同：save/post/delete = 订单号，post 时 result.orderId 也是订单号、code 是新单据号，

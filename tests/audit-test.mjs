@@ -118,6 +118,38 @@ await t('单号重复 → error', () => {
   assert.ok(codes(r).includes('duplicate-id'))
 })
 
+await t('实收超过应收 → warn（多收的钱应转预存）', () => {
+  const r = auditState({ sales: [sale('S1', { received: 120, payments: [{ date: '2026-10-20', amount: 120 }] })] })
+  const hit = r.items.find(i => i.code === 'overpaid')
+  assert.ok(hit)
+  assert.equal(hit.level, 'warn')
+  assert.match(hit.detail, /多收\/多付 ¥20\.00/)
+})
+
+await t('实收恰好等于应收不算超收', () => {
+  const r = auditState({ sales: [sale('S1', { received: 100, settle: '结清', payments: [{ date: '2026-10-20', amount: 100 }] })] })
+  assert.ok(!codes(r).includes('overpaid'))
+})
+
+await t('负库存 → warn，按商品编码定位', () => {
+  const r = auditState({ sales: [], purchases: [], stock: { P00001: { qty: -3, cost: 5 }, P00002: { qty: 2, cost: 5 } } })
+  const hit = r.items.find(i => i.code === 'negative-stock')
+  assert.ok(hit)
+  assert.equal(hit.level, 'warn')
+  assert.equal(hit.id, 'P00001')
+  assert.equal(r.items.length, 1)
+})
+
+await t('同一张凭证里同一单出现两次 → warn', () => {
+  const r = auditState({
+    sales: [sale('S1', { total: 100 })],
+    receipts: [{ code: 'SK-1', total: 60, items: [{ orderId: 'S1', amount: 30 }, { orderId: 'S1', amount: 30 }] }]
+  })
+  const hit = r.items.find(i => i.code === 'voucher-duplicate-line')
+  assert.ok(hit)
+  assert.equal(hit.level, 'warn')
+})
+
 await t('输出按 错误 → 警告 → 提示 排序，计数一致', () => {
   const r = auditState({
     sales: [sale('S1', { settle: '挂账', received: 100, payments: [{ date: '2026-10-20', amount: 100 }] }), sale('S2', { total: 120 })],

@@ -67,7 +67,7 @@ export async function openTransaction(env, keys, { optional = [] } = {}) {
 
 // 把 next 相对 state 的差异提交成一次 commit。
 // logEntry 传对象则追加到 logs.json（仅在确实有写入时），与退款链路同一口径。
-export async function commitTransaction(tx, { next, message, logEntry }) {
+export async function commitTransaction(tx, { next, message, logEntry, forceLog }) {
   const { env, parent, baseTree, treeByName, split, state, keys } = tx
   const target = (keys || Object.keys(next)).filter(k => k !== 'logs')
   const changed = target.filter(k => JSON.stringify(next[k]) !== JSON.stringify(state[k]))
@@ -109,9 +109,15 @@ export async function commitTransaction(tx, { next, message, logEntry }) {
     }
   }
 
-  if (!set.length && !remove.length) return { unchanged: true, changed: [] }
-  if (logEntry) {
-    const logs = [...(state.logs || []), { time: new Date().toISOString(), ...logEntry }].slice(-200)
+  // logEntry 可以是单条，也可以是同一笔提交要追加的多条（保存 diff + 编码修正）
+  // 只有数据真的变了才写日志：否则像「清空已空库」这种幂等请求会凭空多一次提交。
+  // forceLog：单据已经由上一个提交落库（整表保存 → 派生同步），此时快照里看不到差异，
+  // 但这次留痕必须跟着派生提交一起写，否则保存日志会丢。
+  const logEntries = Array.isArray(logEntry) ? logEntry.filter(Boolean) : (logEntry ? [logEntry] : [])
+  if (!set.length && !remove.length && !(forceLog && logEntries.length)) return { unchanged: true, changed: [] }
+  if (logEntries.length) {
+    const now = new Date().toISOString()
+    const logs = [...(state.logs || []), ...logEntries.map(e => ({ time: now, ...e }))].slice(-200)
     set.push({ path: 'logs.json', content: JSON.stringify(logs, null, 0) })
   }
   const sha = await commitFiles(env, { set, remove, message, baseCommit: parent, baseTree })

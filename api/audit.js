@@ -4,7 +4,7 @@
 // 标了结清却还欠钱、资金凭证指向已不存在的单据、退货金额超过原单……
 // 发现问题只报告，不自动修：修复动作（重新保存单据 / 改结清 / 补录流水）必须由人确认。
 import {
-  isVoided, grossOf, receivableOf, payableOf, receivedSumOf, paidSumOf, round2
+  isVoided, grossOf, receivableOf, payableOf, receivedSumOf, paidSumOf, overpaidOf, round2
 } from '../src/utils/account.js'
 
 const TOL = 0.01
@@ -30,7 +30,7 @@ function totalMismatch(o) {
 }
 
 /**
- * @param {{purchases?:Array, sales?:Array, receipts?:Array, paymentVouchers?:Array, refunds?:Array}} state
+ * @param {{purchases?:Array, sales?:Array, receipts?:Array, paymentVouchers?:Array, refunds?:Array, stock?:object}} state
  * @returns {{items:Array, counts:{error:number,warn:number,info:number}, checkedAt:string}}
  */
 export function auditState(state) {
@@ -39,6 +39,7 @@ export function auditState(state) {
   const receipts = state.receipts || []
   const paymentVouchers = state.paymentVouchers || []
   const refunds = state.refunds || []
+  const stock = state.stock && typeof state.stock === 'object' ? state.stock : null
   const items = []
   const push = (level, code, title, detail, kind = '', id = '') => {
     items.push({ level, code, title, detail, kind, id: String(id || '') })
@@ -106,6 +107,7 @@ export function auditState(state) {
       }
       if (isVoided(v)) continue
       const rows = Array.isArray(v.items) ? v.items : []
+      const seenLines = new Set()
       const sum = round2(rows.reduce((s, it) => s + num(it.amount), 0))
       if (Math.abs(sum - num(v.total)) > TOL) {
         push('warn', 'voucher-total-mismatch', `${label}金额与分录不符`,
@@ -114,6 +116,13 @@ export function auditState(state) {
       for (const it of rows) {
         const oid = String(it.orderId || '')
         if (!oid) continue
+        // 同一张凭证里重复挂同一单：金额会重复入账，凭证合计对得上也仍是错账
+        if (seenLines.has(oid)) {
+          push('warn', 'voucher-duplicate-line', `${label}同一单出现两次`,
+            `凭证 ${code} 里 ${oid} 有两条分录（本次 ¥${money(it.amount)}），核销会被重复计入`, vKind, code)
+        } else {
+          seenLines.add(oid)
+        }
         const type = it.orderType || (vKind === 'receipt' ? 'sale' : 'purchase')
         const target = type === 'sale' ? saleById : purchaseById
         if (!target.has(oid)) {
@@ -167,6 +176,28 @@ export function auditState(state) {
         `${kind === 'sale' ? '销售' : '采购'}单号 ${id} 出现了两次，保存时会互相覆盖`, kind, id)
     } else {
       seen.set(key, true)
+    }
+  }
+
+  // 8) 实收/实付超过应收/应付：多出来的钱应转成预存/预付，留在单据上会导致欠款恒为 0 却对不上账
+  for (const [kind, o] of allDocs) {
+    if (!o || isVoided(o) || isReturnOf(o)) continue
+    const over = overpaidOf(o, kind === 'sale' ? 'receivable' : 'payable')
+    if (over > TOL) {
+      push('warn', 'overpaid', '实收/实付超过单据金额',
+        `${kind === 'sale' ? '销售单' : '采购单'} ${o.id} 多收/多付 ¥${money(over)}（应收付 ¥${money(grossOf(o))}），应转预存/预付或冲抵其他单`,
+        kind, String(o.id || ''))
+    }
+  }
+
+  // 9) 负库存：出库多于入库（M58 只提示不拦截，给业务一个人工复核入口）
+  if (stock) {
+    for (const [code, s] of Object.entries(stock)) {
+      const qty = num(s && typeof s === 'object' ? s.qty : s)
+      if (qty < -1e-6) {
+        push('warn', 'negative-stock', '库存为负',
+          `商品 ${code} 当前库存 ${qty}（出库多于入库），请核对是否漏采或重复出库`, 'stock', code)
+      }
     }
   }
 
