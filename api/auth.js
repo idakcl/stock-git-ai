@@ -55,8 +55,10 @@ async function pbkdf2(password, saltHex, iterations) {
 
 // 读 auth.json。fresh=true 用于登录/改密这类「必须看到最新值」的场合；
 // 其余路径走 30 秒缓存，避免每个 API 请求都打一次 GitHub。
-// 读失败时沿用上一次已知值（GitHub 抖动不该把所有人踢下线）；404 表示还没设置过密码。
-let authCache = { at: 0, value: null }
+// 404 = 还没设置过密码（回退 APP_PASSWORD）；其他错误沿用上一次已知值（GitHub 抖动不该把所有人踢下线），
+// 但如果这次进程还从没成功读过，就**抛错**（fail-closed）：宁可让请求 401，也不能因为读不到版本号
+// 而把「已吊销的旧票」当成有效。
+let authCache = { at: 0, value: undefined }
 async function readAuth(env, fresh = false) {
   if (!fresh && authCache.value !== undefined && authCache.at && Date.now() - authCache.at < AUTH_CACHE_MS) {
     return authCache.value
@@ -74,7 +76,8 @@ async function readAuth(env, fresh = false) {
       authCache = { at: Date.now(), value: null }
       return null
     }
-    return authCache.value === undefined ? null : authCache.value
+    if (authCache.at && authCache.value !== undefined) return authCache.value
+    throw e
   }
 }
 
