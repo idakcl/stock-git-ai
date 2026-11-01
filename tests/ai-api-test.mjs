@@ -13,7 +13,9 @@ globalThis.atob = (s) => Buffer.from(s, 'base64').toString('binary')
 const env = {
   GITHUB_TOKEN: 't', GITHUB_OWNER: 'o', GITHUB_REPO: 'r', GITHUB_BRANCH: 'main',
   SESSION_SECRET: 'test-secret', ADMIN_USER: 'admin', ADMIN_PASSWORD: 'pw',
-  ALLOWED_ORIGINS: 'https://worker.test'
+  ALLOWED_ORIGINS: 'https://worker.test',
+  // 限流另有专测（tests/rate-limit-test.mjs）；这里一次跑上百次调用，关掉配额免得互相干扰
+  AI_RATE_LIMIT: '0', AI_RATE_GLOBAL: '0'
 }
 
 const SEED = {

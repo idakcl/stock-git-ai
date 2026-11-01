@@ -13,6 +13,7 @@ import { readCollection } from './storage.js'
 import { openTransaction, commitTransaction } from './tx.js'
 import { corsHeaders } from './auth.js'
 import { authenticateAi, assertScope, noteUsage } from './ai-keys.js'
+import { hit as rateHit } from './rate-limit.js'
 import { recordAiLog, makeAiLog, logPathOf, scheduleFlush } from './ai-logs.js'
 import { genVoucherCode } from '../src/utils/voucher.js'
 import { AI_ENDPOINTS, AI_SCOPE_GROUPS, AI_PRESETS } from '../src/utils/aiScopes.js'
@@ -812,6 +813,27 @@ export async function handleAi(req, url, env, deps) {
     // 鉴权失败也要留痕：否则「谁在用错密钥、被拒了多少次」完全不可见
     await writeLog(status, { error: e.message })
     return json(req, env, { error: e.message || '密钥无效' }, status)
+  }
+
+  // 配额：AI-API 是本项目唯一「按次花钱」的入口（每次调用要读 GitHub、写日志），
+  // 一旦密钥泄露或被脚本刷，烧的是子请求额度与数据仓提交次数。
+  // 两道滑动窗口：按密钥（一把钥匙出事不牵连别家）+ 全局（多签发几把也烧不穿）。
+  // 计数器在 isolate 内存里（见 api/rate-limit.js），多边缘节点各算各的，属于软约束。
+  // 注意 0 是合法配置（关闭限流），不能用 `Number(...) || 60` —— 那样 0 会被当成「没配」
+  const numOr = (v, dft) => (v === undefined || v === null || v === '' ? dft : Number(v))
+  const perMin = numOr(env.AI_RATE_LIMIT, 60)
+  const globalPerMin = numOr(env.AI_RATE_GLOBAL, 300)
+  const rlKey = rateHit(`ai:${ctx.key.id}`, perMin, 60000)
+  const rlAll = rateHit('ai:__all__', globalPerMin, 60000)
+  if (!rlKey.ok || !rlAll.ok) {
+    const retryAfter = Math.max(rlKey.retryAfter || 0, rlAll.retryAfter || 0) || 60
+    await writeLog(429, { error: '调用过于频繁' }, { key: ctx.key })
+    const res = json(req, env, {
+      error: `调用过于频繁（每把密钥每分钟最多 ${perMin} 次，全站 ${globalPerMin} 次），请 ${retryAfter} 秒后重试`,
+      retryAfter
+    }, 429)
+    res.headers.set('Retry-After', String(retryAfter))
+    return res
   }
 
   const finish = async (payload, status = 200, meta = {}) => {

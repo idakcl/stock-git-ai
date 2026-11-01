@@ -172,6 +172,15 @@ export const api = {
     return r
   },
   getRefunds: () => cachedGet('/refunds'),
+  // 备份恢复：密码二次校验 + 服务端一次提交（整库替换，不是逐表覆盖）。
+  // 成功后所有读缓存一律作废：恢复动的是整库，留任何一份旧缓存都会显示错的数。
+  restoreBackup: async (password, data) => {
+    const r = await request('/restore', { method: 'POST', body: JSON.stringify({ password, data }) })
+    for (const k of ['/items', '/customers', '/suppliers', '/sales', '/purchases', '/receipts',
+      '/payment-vouchers', '/refunds', '/orders', '/stock', '/logs', '/profile', '/templates',
+      '/shares', '/purchase-history', '/sale-history']) invalidate(k)
+    return r
+  },
   saveRefundOperation: async (operation) => {
     const result = await request('/refunds', { method: 'POST', body: JSON.stringify(operation) })
     for (const path of ['/refunds', '/sales', '/purchases', '/customers', '/suppliers', '/items', '/stock', '/purchase-history', '/sale-history']) invalidate(path)

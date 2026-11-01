@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "cf:deploy": "npm run build && npx wrangler deploy",
     "cf:secrets": "npx wrangler secret put GITHUB_TOKEN",
-    "test": "node tests/account-test.mjs && node tests/clear-test.mjs && node tests/derived-atomic-test.mjs && node tests/void-test.mjs && node tests/return-void-test.mjs && node tests/amend-test.mjs && node tests/orders-test.mjs && node refund-test.mjs && node tests/worker-cache-test.mjs && node tests/csv-export-test.mjs && node tests/ai-api-test.mjs && node tests/ai-deposit-balance-test.mjs && node tests/shares-test.mjs && node tests/templates-test.mjs && node tests/line-batch-test.mjs && node tests/refund-reason-test.mjs && node tests/void-api-test.mjs && node tests/orders-api-test.mjs && node tests/backup-api-test.mjs && node tests/auth-session-test.mjs"
+    "test": "node tests/account-test.mjs && node tests/clear-test.mjs && node tests/derived-atomic-test.mjs && node tests/void-test.mjs && node tests/return-void-test.mjs && node tests/amend-test.mjs && node tests/orders-test.mjs && node refund-test.mjs && node tests/worker-cache-test.mjs && node tests/csv-export-test.mjs && node tests/ai-api-test.mjs && node tests/ai-deposit-balance-test.mjs && node tests/shares-test.mjs && node tests/templates-test.mjs && node tests/line-batch-test.mjs && node tests/refund-reason-test.mjs && node tests/void-api-test.mjs && node tests/orders-api-test.mjs && node tests/backup-api-test.mjs && node tests/auth-session-test.mjs && node tests/restore-test.mjs && node tests/rate-limit-test.mjs && node tests/body-guard-test.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

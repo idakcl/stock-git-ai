@@ -8,8 +8,8 @@
       </template>
 
       <el-alert type="info" :closable="false" show-icon class="intro">
-        <b>全量导出</b>：把全部数据（商品、客户、供应商、销售单、采购单、收付款单、未过账订单、退款核销单）打包成 JSON 文件保存到本地，可用于定期存档或换设备恢复；库存由单据自动推导，无需备份。<br />
-        <b>全量导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，操作前建议先导出一份当前数据。<br />
+        <b>全量导出</b>：把业务数据（商品、客户、供应商、销售单、采购单、收付款单、未过账订单、退款核销单，以及订单模板、分享链接、用户信息）打包成 JSON 保存到本地，可用于定期存档或换设备恢复。<b>不含</b>：库存（由单据推导）、操作日志、AI 密钥与调用记录、登录密码。<br />
+        <b>全量导入</b>：选择以前导出的 JSON 文件写回系统，<b>会整体覆盖现有数据</b>，需要再输一次登录密码；服务端一次提交，失败即一个字都不写。操作前建议先导出一份当前数据。<br />
         <b>分类导入导出</b>：按数据类型单独导出、导入；导入时与库内现有数据<b>按编码/单号比对去重</b>，已存在的自动跳过，只追加新记录，不覆盖已有数据。
       </el-alert>
 
@@ -23,14 +23,14 @@
       <!-- 导出备份 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导出备份</b></template>
-        <p class="desc">将当前全部数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单、未过账订单、退款/核销单，以及客户/供应商的预存款、预付款流水）。</p>
+        <p class="desc">将当前业务数据保存为一个 JSON 文件（含商品、客户、供应商、销售单、采购单、收款单、付款单、未过账订单、退款/核销单，客户/供应商的预存款、预付款流水，以及订单模板、分享链接、用户信息）。库存、操作日志、AI 密钥与登录密码不导出。</p>
         <el-button type="primary" :loading="exporting" @click="doExport">导出全部数据</el-button>
       </el-card>
 
       <!-- 导入恢复 -->
       <el-card shadow="never" class="panel">
         <template #header><b>全量导入恢复</b></template>
-        <p class="desc">选择 JSON 备份文件，校验通过后会显示数据摘要，确认后才写入。<b class="danger-text">导入会覆盖全部现有数据，且不可撤销。</b></p>
+        <p class="desc">选择 JSON 备份文件，校验通过后显示数据摘要，确认并输入登录密码后才会写入。<b class="danger-text">导入会覆盖全部现有数据，且不可撤销。</b>服务端一次提交，中途失败不会留下半截数据。</p>
         <el-upload
           drag
           accept=".json"
@@ -188,7 +188,8 @@ const DATA_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases']
 const BACKUP_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
 const KEY_LABELS = {
   items: '商品', customers: '客户', suppliers: '供应商', sales: '销售单', purchases: '采购单',
-  receipts: '收款单', 'payment-vouchers': '付款单', orders: '未过账订单', refunds: '退款/核销单'
+  receipts: '收款单', 'payment-vouchers': '付款单', orders: '未过账订单', refunds: '退款/核销单',
+  'order-templates': '订单模板', shares: '分享链接', profile: '用户信息'
 }
 const MAX_SIZE = 30 * 1024 * 1024   // 30MB 上限：正常备份在几百 KB~几 MB
 
@@ -410,15 +411,19 @@ async function doNormalize() {
 async function doExport() {
   exporting.value = true
   try {
-    const [items, customers, suppliers, sales, purchases, receipts, paymentVouchers, orders, refunds] = await Promise.all([
+    const [items, customers, suppliers, sales, purchases, receipts, paymentVouchers, orders, refunds, profile, templates, shares] = await Promise.all([
       api.getItems(), api.getCustomers(), api.getSuppliers(), api.getSales(), api.getPurchases(),
-      api.getReceipts(), api.getPaymentVouchers(), api.getOrders(), api.getRefunds()
+      api.getReceipts(), api.getPaymentVouchers(), api.getOrders(), api.getRefunds(),
+      api.getProfile(), api.getTemplates(), api.getShares()
     ])
     const payload = {
       app: 'stock-git-ai',
       version: 1,
       exportedAt: new Date().toISOString(),
-      data: { items, customers, suppliers, sales, purchases, receipts, 'payment-vouchers': paymentVouchers, orders, refunds }
+      data: {
+        items, customers, suppliers, sales, purchases, receipts, 'payment-vouchers': paymentVouchers,
+        orders, refunds, profile, 'order-templates': templates, shares
+      }
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -429,7 +434,7 @@ async function doExport() {
     a.click()
     a.remove()
     URL.revokeObjectURL(url)
-    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length} · 未过账订单 ${orders.length} · 退款/核销 ${refunds.length}`)
+    ElMessage.success(`已导出：商品 ${items.length} · 客户 ${customers.length} · 供应商 ${suppliers.length} · 销售 ${sales.length} · 采购 ${purchases.length} · 收款单 ${receipts.length} · 付款单 ${paymentVouchers.length} · 未过账订单 ${orders.length} · 退款/核销 ${refunds.length} · 模板 ${templates.length} · 分享链接 ${shares.length}（含用户信息）`)
   } catch (e) {
     ElMessage.error(`导出失败：${e.message || '网络异常'}`)
   } finally {
@@ -487,45 +492,46 @@ function cancelPending() {
   parseError.value = ''
 }
 
-// 确认导入：强确认 → 主数据先行、单据在后逐类整表写回。
-// saveXxx 是整表替换语义，失败重试同一文件不会产生重复数据
+// 确认导入：强确认 + 密码二次校验 → 服务端一次提交完成整库替换。
+// 为什么不再逐表 saveXxx：中途失败会停在半截（商品换了、单据还是旧的），且整条链路不校验密码。
+// 现在的语义是「要么整库换成备份、要么一个字都不动」。
 async function doImport() {
   const p = pending.value
   if (!p) return
-  // 覆盖摘要：核心 5 类必含；收款单/付款单若备份中存在才一并提示（旧备份可能不含）
+  // 覆盖摘要：核心 5 类必含；其余集合若备份中存在才一并提示（旧备份可能不含）
   const summaryKeys = DATA_KEYS.concat(
     Array.isArray(p.data.receipts) ? ['receipts'] : [],
     Array.isArray(p.data['payment-vouchers']) ? ['payment-vouchers'] : [],
     Array.isArray(p.data.orders) ? ['orders'] : [],
-    Array.isArray(p.data.refunds) ? ['refunds'] : []
+    Array.isArray(p.data.refunds) ? ['refunds'] : [],
+    Array.isArray(p.data['order-templates']) ? ['order-templates'] : [],
+    Array.isArray(p.data.shares) ? ['shares'] : []
   )
-  const summary = summaryKeys.map(k => `${KEY_LABELS[k]} ${Array.isArray(p.data[k]) ? p.data[k].length : 0}`).join('、')
+  const summary = summaryKeys.map(k => `${KEY_LABELS[k] || k} ${Array.isArray(p.data[k]) ? p.data[k].length : 0}`).join('、')
+  let password = ''
   try {
-    await ElMessageBox.confirm(
-      `确定导入该备份？\n\n将整体覆盖：${summary}\n备份导出时间：${p.exportedAt}\n\n当前库内对应数据会被替换，此操作不可撤销。建议先「导出全部数据」保存当前数据。`,
+    const r = await ElMessageBox.prompt(
+      `确定导入该备份？\n\n将整体覆盖：${summary}\n备份导出时间：${p.exportedAt}\n\n` +
+      '当前库内对应数据会被替换，此操作不可撤销（建议先「导出全部数据」保存当前数据）。\n' +
+      '请输入登录密码确认：',
       '危险操作确认',
-      { type: 'warning', confirmButtonText: '确认覆盖导入', cancelButtonText: '取消', dangerouslyUseHTMLString: false }
+      {
+        type: 'warning', confirmButtonText: '确认覆盖导入', cancelButtonText: '取消',
+        inputType: 'password', inputPlaceholder: '登录密码', inputPattern: /\S/, inputErrorMessage: '请输入密码'
+      }
     )
+    password = r.value
   } catch { return }
 
   importing.value = true
   try {
-    // 顺序：主数据 → 单据（单据保存时后端会自动推导商品/客户/供应商档案）
-    await api.saveItems(p.data.items)
-    await api.saveSuppliers(p.data.suppliers)
-    await api.saveCustomers(p.data.customers)
-    await api.savePurchases(p.data.purchases)
-    await api.saveSales(p.data.sales)
-    // 收款单/付款单：旧备份可能不含这两者，存在才整体覆盖，避免清空调已产生的单据
-    if (Array.isArray(p.data.receipts)) await api.saveReceipts(p.data.receipts)
-    if (Array.isArray(p.data['payment-vouchers'])) await api.savePaymentVouchers(p.data['payment-vouchers'])
-    // 未过账订单与退款/核销单：旧备份可能不含，存在才整体覆盖（否则会无端清空现有草稿/凭证）
-    if (Array.isArray(p.data.orders)) await api.restoreOrders(p.data.orders)
-    if (Array.isArray(p.data.refunds)) await api.restoreRefunds(p.data.refunds)
-    ElMessage.success('导入完成，页面即将刷新')
+    const r = await api.restoreBackup(password, p.data)
+    const n = r && r.counts ? Object.values(r.counts).reduce((a, b) => a + (Number(b) || 0), 0) : 0
+    ElMessage.success(`导入完成（${n} 条记录），页面即将刷新`)
     setTimeout(() => window.location.reload(), 800)
   } catch (e) {
-    ElMessage.error(`导入失败：${e.message || '网络异常'}。已写入的部分会保留，可重试同一文件（整体替换，不会重复叠加）`)
+    // 服务端是「一次提交」，失败即一个字都没写，可以直接重试同一个文件
+    ElMessage.error(`导入失败：${e.message || '网络异常'}。本次未写入任何数据，可修正后重试`)
   } finally {
     importing.value = false
   }

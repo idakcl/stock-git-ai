@@ -53,11 +53,74 @@ function withSecurityHeaders(res) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers: h })
 }
 
+// ---- 请求体闸门：体积 + 媒体类型 ----
+// 为什么要在 Worker 层挡（api/routes.js 里也有业务上限）：
+//   · Worker 每个请求要读 GitHub，超大的 JSON 会先被 JSON.parse 撑爆内存/CPU，
+//     而那时才开始「深度校验」已经晚了；这里在解析之前用量级拒绝。
+//   · 只接受 application/json（上传走 multipart），挡住「把表单/纯文本当 JSON 塞进来」的试探，
+//     也让「跨站表单直接 POST」这类 CSRF 尝试在入口就 415 —— 它们发不出 application/json。
+// 体积上限按真实备份量级定：当前全量备份在几 MB 内，8MB 留足余量；
+// 上传单独 12MB（图床服务端另有 10MB/文件的限制）。
+const MAX_JSON_BYTES = 8 * 1024 * 1024
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024
+
+function jsonError(status, error, extra = {}) {
+  return new Response(JSON.stringify({ error, ...extra }), {
+    status,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }
+  })
+}
+
+// Content-Length 有值就先判；分块传输（没有长度头）时按流计数，超限立刻放弃。
+async function exceedsLimit(req, limit) {
+  const len = Number(req.headers.get('content-length') || 0)
+  if (len && len > limit) return true
+  if (!req.body || len) return false
+  const reader = req.clone().body.getReader()
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value ? value.byteLength : 0
+      if (total > limit) return true
+    }
+  } catch {
+    return false   // 读流失败交给正常处理路径去报错，不在这里假装「太大」
+  } finally {
+    reader.cancel().catch(() => {})
+  }
+  return false
+}
+
+async function guardBody(req, url) {
+  if (req.method !== 'POST') return null
+  const isUpload = url.pathname === '/api/upload'
+  const limit = isUpload ? MAX_UPLOAD_BYTES : MAX_JSON_BYTES
+  const type = String(req.headers.get('content-type') || '').toLowerCase()
+  if (isUpload) {
+    if (type && !type.startsWith('multipart/form-data')) {
+      return jsonError(415, '上传接口只接受 multipart/form-data')
+    }
+  } else if (!type.startsWith('application/json')) {
+    // 无 Content-Type 也拒绝：前端 fetch 一定会带；放行反而给跨站表单留了口子
+    return jsonError(415, '请求必须是 application/json')
+  }
+  if (await exceedsLimit(req, limit)) {
+    return jsonError(413, `请求体过大（上限 ${Math.round(limit / 1024 / 1024)}MB）`)
+  }
+  return null
+}
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url)
 
     if (url.pathname.startsWith('/api/')) {
+      // 入口闸门：未通过体积/类型校验的请求不进业务层，连 GitHub 都不会被打一下
+      const rejected = await guardBody(req, url)
+      if (rejected) return rejected
+
       // AI-API：响应内容随密钥权限（scope）而变，而 Authorization 不参与边缘缓存键 ——
       // 一旦缓存，A 密钥查到的结果会被 B 密钥直接读到（越权泄露）。因此这条路径完全绕开缓存层。
       // 调用日志同理：缓存 15s 会看到「刚调用却查不到」，排障时最需要它实时。

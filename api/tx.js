@@ -19,6 +19,10 @@ function bucketNamesAt(treeByName, key) {
     .sort((a, b) => (a.name < b.name ? -1 : 1))
 }
 
+// 这两类是「对象型」文件，不能按数组校验：stock 是编码 → 数量/成本的映射，
+// profile 是单条用户信息。其余集合必须是数组，否则视为文件损坏。
+const OBJECT_KEYS = new Set(['stock', 'profile'])
+
 // 读取一份固定快照。keys 里的集合按权威口径读出；optional 允许缺失（新集合上线时文件还不存在）。
 export async function openTransaction(env, keys, { optional = [] } = {}) {
   const branch = env.GITHUB_BRANCH || 'main'
@@ -52,7 +56,7 @@ export async function openTransaction(env, keys, { optional = [] } = {}) {
       throw new Error(`${key}.json 不存在，已中止`)
     }
     state[key] = await readAtRef(`${key}.json`)
-    if (key !== 'stock' && !Array.isArray(state[key])) throw new Error(`${key}.json 格式错误`)
+    if (!OBJECT_KEYS.has(key) && !Array.isArray(state[key])) throw new Error(`${key}.json 格式错误`)
   }))
 
   // keys 原样带出去：commitTransaction 只按这份清单落库。
