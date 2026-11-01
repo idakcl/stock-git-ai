@@ -205,7 +205,9 @@ async function onLogout() {
   --text-placeholder: #c0c4cc;
   --text-disabled: #a8abb2;
   /* 线条 / 背景 */
-  --border-color:var(--border-color);
+  /* 原写法 var(--border-color) 是自引用：CSS 规范下自定义属性引用自己 = 失效，
+     全站 23 处 1px 边框因此都退化成 currentColor（深灰黑线）。这里指向 Element 的线条色。 */
+  --border-color: var(--el-border-color, #dcdfe6);
   --border-light: #f5f7fa;
   --bg-page: #f5f7fa;
   --bg-soft: #fafbfc;
