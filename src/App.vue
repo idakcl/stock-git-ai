@@ -20,7 +20,7 @@
       </el-button>
       <div class="header-right">
         <!-- 全局开单入口：订单用得最频繁，任何页面都能一步开单；角标是待过账的草稿数 -->
-        <el-button class="quick-new" type="primary" aria-label="新建订单" @click="quickNewOrder"
+        <el-button class="quick-new" type="primary" aria-label="快速开单" @click="quickNewOrder"
           :title="draftCount ? `${draftCount} 张订单还没过账` : '新建订单'">
           <el-icon><Plus /></el-icon>
           <span class="quick-new-text">开单</span>

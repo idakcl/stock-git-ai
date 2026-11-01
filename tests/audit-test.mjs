@@ -140,6 +140,42 @@ await t('负库存 → warn，按商品编码定位', () => {
   assert.equal(r.items.length, 1)
 })
 
+await t('跨两张凭证累计核销超过单据金额 → warn', () => {
+  const r = auditState({
+    sales: [sale('S1', { total: 100 })],
+    receipts: [
+      { code: 'SK-1', total: 60, items: [{ orderId: 'S1', orderType: 'sale', amount: 60 }] },
+      { code: 'SK-2', total: 60, items: [{ orderId: 'S1', orderType: 'sale', amount: 60 }] }
+    ]
+  })
+  const hit = r.items.find(i => i.code === 'cross-voucher-over')
+  assert.ok(hit)
+  assert.equal(hit.level, 'warn')
+  assert.match(hit.detail, /多出 ¥20\.00/)
+})
+
+await t('分次付款但累计等于单据金额不算超核销', () => {
+  const r = auditState({
+    sales: [sale('S1', { total: 100 })],
+    receipts: [
+      { code: 'SK-1', total: 60, items: [{ orderId: 'S1', orderType: 'sale', amount: 60 }] },
+      { code: 'SK-2', total: 40, items: [{ orderId: 'S1', orderType: 'sale', amount: 40 }] }
+    ]
+  })
+  assert.ok(!codes(r).includes('cross-voucher-over'))
+})
+
+await t('已作废的凭证不参与跨凭证累计', () => {
+  const r = auditState({
+    sales: [sale('S1', { total: 100 })],
+    receipts: [
+      { code: 'SK-1', total: 60, items: [{ orderId: 'S1', orderType: 'sale', amount: 60 }] },
+      { code: 'SK-2', status: '作废', total: 60, items: [{ orderId: 'S1', orderType: 'sale', amount: 60 }] }
+    ]
+  })
+  assert.ok(!codes(r).includes('cross-voucher-over'))
+})
+
 await t('同一张凭证里同一单出现两次 → warn', () => {
   const r = auditState({
     sales: [sale('S1', { total: 100 })],

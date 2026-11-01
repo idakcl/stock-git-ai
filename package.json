@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "cf:deploy": "npm run build && npx wrangler deploy",
     "cf:secrets": "npx wrangler secret put GITHUB_TOKEN",
-    "test": "node tests/account-test.mjs && node tests/clear-test.mjs && node tests/derived-atomic-test.mjs && node tests/void-test.mjs && node tests/return-void-test.mjs && node tests/amend-test.mjs && node tests/orders-test.mjs && node tests/refund-test.mjs && node tests/worker-cache-test.mjs && node tests/csv-export-test.mjs && node tests/ai-api-test.mjs && node tests/ai-deposit-balance-test.mjs && node tests/shares-test.mjs && node tests/templates-test.mjs && node tests/line-batch-test.mjs && node tests/refund-reason-test.mjs && node tests/void-api-test.mjs && node tests/orders-api-test.mjs && node tests/backup-api-test.mjs && node tests/auth-session-test.mjs && node tests/restore-test.mjs && node tests/rate-limit-test.mjs && node tests/body-guard-test.mjs && node tests/storage-test.mjs && node tests/api-test.mjs && node tests/deposit-test.mjs && node tests/audit-test.mjs && node tests/diff-test.mjs"
+    "test": "node tests/account-test.mjs && node tests/clear-test.mjs && node tests/derived-atomic-test.mjs && node tests/void-test.mjs && node tests/return-void-test.mjs && node tests/amend-test.mjs && node tests/orders-test.mjs && node tests/refund-test.mjs && node tests/worker-cache-test.mjs && node tests/csv-export-test.mjs && node tests/ai-api-test.mjs && node tests/ai-deposit-balance-test.mjs && node tests/shares-test.mjs && node tests/templates-test.mjs && node tests/line-batch-test.mjs && node tests/refund-reason-test.mjs && node tests/void-api-test.mjs && node tests/orders-api-test.mjs && node tests/backup-api-test.mjs && node tests/auth-session-test.mjs && node tests/restore-test.mjs && node tests/rate-limit-test.mjs && node tests/body-guard-test.mjs && node tests/storage-test.mjs && node tests/api-test.mjs && node tests/deposit-test.mjs && node tests/audit-test.mjs && node tests/diff-test.mjs",
+    "test:browser": "node tests/run-browser.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -20,6 +21,7 @@
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",
+    "playwright": "^1.63.0",
     "vite": "^5.2.0",
     "wrangler": "^3.44.0"
   }

@@ -201,6 +201,38 @@ export function auditState(state) {
     }
   }
 
+  // 10) 跨凭证核销：同一张单在两张凭证里被重复核销 / 分摊金额超过单据金额
+  // 单张凭证内部的重复已在第 4 条拦；这里把 receipt + payment-voucher 的同一单分录汇总，
+  // 用来发现「同一笔钱被记了两次」——凭证之间各自合计都对，只有串起来才看得出来。
+  // 只比金额：早期数据里「分三次付款、每条分录都写 settle:true」是标记口径问题，不是错账，
+  // 拿 settle 次数当异常会在真实数据上误报（C202610260937210001 就是 6+1+3 的正常分次付款）。
+  const alloc = new Map()   // `${type}:${orderId}` → { amount }
+  for (const list of [receipts, paymentVouchers]) {
+    for (const v of (list || [])) {
+      if (!v || isVoided(v)) continue
+      for (const it of (Array.isArray(v.items) ? v.items : [])) {
+        const oid = String(it.orderId || '')
+        if (!oid) continue
+        const type = it.orderType || (v.kind === 'payable' ? 'purchase' : 'sale')
+        const key = `${type}:${oid}`
+        const cell = alloc.get(key) || { amount: 0 }
+        cell.amount = round2(cell.amount + num(it.amount))
+        alloc.set(key, cell)
+      }
+    }
+  }
+  for (const [key, cell] of alloc) {
+    const [type, oid] = key.split(':')
+    const doc = (type === 'sale' ? saleById : purchaseById).get(oid)
+    if (!doc || isVoided(doc)) continue
+    const gross = Math.abs(grossOf(doc))
+    if (cell.amount > gross + TOL) {
+      push('warn', 'cross-voucher-over', '多张凭证累计核销超过单据金额',
+        `${oid} 在资金凭证里共分摊 ¥${money(cell.amount)}，单据金额 ¥${money(gross)}，多出 ¥${money(cell.amount - gross)}（检查是否同一笔钱被记了两次）`,
+        type, oid)
+    }
+  }
+
   const counts = { error: 0, warn: 0, info: 0 }
   for (const it of items) counts[it.level] = (counts[it.level] || 0) + 1
   const order = { error: 0, warn: 1, info: 2 }

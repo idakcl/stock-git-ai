@@ -104,7 +104,9 @@ async function importBackup(page, payload) {
   await page.locator('.backup-upload input[type=file]').setInputFiles({ name: 'backup.json', mimeType: 'application/json', buffer: buf })
   await page.locator('.summary').waitFor()
   await page.getByRole('button', { name: '确认导入（覆盖现有数据）' }).click()
-  await page.locator('.el-message-box').getByRole('button', { name: '确认覆盖导入' }).click()
+  const box = page.locator('.el-message-box')
+  await box.locator('input').fill('pw')
+  await box.getByRole('button', { name: '确认覆盖导入' }).click()
   await page.waitForTimeout(500)
 }
 
@@ -123,13 +125,15 @@ await t('导入顺序与落库口径：9 类依次写入，订单/退款走 rest
     assert.equal(summary, 0)
     await importBackup(page, payload)
     const posts = state.posts || []
-    assert.deepEqual(posts.map(p => p.key), ['items', 'suppliers', 'customers', 'purchases', 'sales', 'receipts', 'payment-vouchers', 'orders', 'refunds'])
-    const orderPost = posts.find(p => p.key === 'orders')
-    assert.equal(orderPost.body.action, 'restore')
-    assert.equal(orderPost.body.orders.length, 1)
-    const refundPost = posts.find(p => p.key === 'refunds')
-    assert.equal(refundPost.body.action, 'restore')
-    assert.equal(refundPost.body.refunds.length, 1)
+    // 2026-11-01 起全量导入收敛为一次 POST /restore（服务端一次提交，失败不留半截），
+    // 不再逐类调用 SAVERS。这里验证「只有一次写、且九类数据都带齐」。
+    assert.deepEqual(posts.map(p => p.key), ['restore'])
+    const data = posts[0].body.data
+    for (const k of ['items', 'suppliers', 'customers', 'purchases', 'sales', 'receipts', 'payment-vouchers', 'orders', 'refunds']) {
+      assert.ok(Array.isArray(data[k]), `restore 必须带上 ${k}`)
+    }
+    assert.equal(data.orders.length, 1)
+    assert.equal(data.refunds.length, 1)
   } finally { await context.close() }
 })
 

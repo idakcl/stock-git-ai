@@ -2,8 +2,10 @@ name: Deploy to Cloudflare Workers
 
 # 发布门禁：测试不过，不发版。
 #   test job 先跑（纯 Node 用例，内存假仓，不需要真实数据与浏览器），
-#   deploy 用 needs: test 挂在它后面 —— test 红或超时，deploy 直接不启动，线上保持上一版。
-# 代价（owner 已知并接受）：每次发版多 2~4 分钟；测试自身写错也会挡住发版，没有应急绕行通道。
+#   browser job 再跑 23 个真浏览器套件（4 片并行），deploy 用 needs: [test, browser] 挂在最后
+#   —— 任一红或超时，deploy 直接不启动，线上保持上一版。
+# 代价（owner 已知并接受）：每次发版多 8~12 分钟（Node 2~4 分 + 浏览器 4 片并行约 6 分）；
+# 测试自身写错也会挡住发版，没有应急绕行通道。
 # 构建只在 deploy 里做一次（test 不做 build），避免每次发版白跑两遍 npm ci + vite build。
 on:
   push:
@@ -34,8 +36,46 @@ jobs:
       - name: Unit / API regression
         run: npm test
 
-  deploy:
+  # 真浏览器回归：弹窗时序、按钮位置、打印版面这些「肉眼所见」的东西纯 Node 测不出来。
+  # 与 test 分 job：装 Chromium 要一两分钟，失败原因一眼可辨（界面/测试问题，不是接口）。
+  # 23 个套件串行要 20 分钟以上，按 4 片并行，单个 job 约 6 分钟。
+  browser:
     needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # 打印/排版用例要量中文字体下的行高与分页；runner 默认没有 CJK 字体，装一套再跑
+      - name: Install CJK fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
+      # 脚本自己起 vite dev server（127.0.0.1:5173），跑完自动关。
+      - name: Browser regression (shard ${{ matrix.shard }})
+        run: npm run test:browser
+        env:
+          SHARD_TOTAL: 4
+          SHARD_INDEX: ${{ matrix.shard }}
+
+  deploy:
+    needs: [test, browser]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

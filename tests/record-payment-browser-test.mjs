@@ -61,7 +61,7 @@ try {
     if (discount) assert.deepEqual(state.sales.map(o => o.discount), [10, 10])
     if (amount > 150) assert.equal(state.customers[0].deposits[0].amount, 20)
     await page.goto('http://127.0.0.1:5173/vouchers')
-    if (kind === 'payable') await page.getByRole('tab', { name: '付款单', exact: true }).click()
+    if (kind === 'payable') await page.getByRole('tab', { name: '付款单 FK' }).click()
     await page.getByRole('link', { name: vouchers[0].code, exact: true }).waitFor()
     console.log(`PASS 记一笔 ${kind} 金额${amount} 优惠${discount}：流水和资金凭证对应、列表可见`)
   }
