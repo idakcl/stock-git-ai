@@ -1,8 +1,20 @@
 import { paperPref } from './printPrefs.js'
 
+// CSV 公式注入防护：以 = + - @ 或制表符/回车开头的单元格，Excel/WPS 打开时会当公式执行
+// （名字里写 `=HYPERLINK(...)` 就能变成可点链接，甚至外连取数）。导出前加一个单引号前缀，
+// 让它老老实实当文本；纯数字（含负号金额）不加，否则 -12.5 会变成 '-12.5 影响二次计算。
+const CSV_NUM = /^-?\d+(\.\d+)?$/
+const csvInjection = (s) => {
+  if (!s || CSV_NUM.test(s)) return false
+  const c = s.charCodeAt(0)
+  return c === 0x3d || c === 0x2b || c === 0x2d || c === 0x40 || c === 0x09 || c === 0x0d
+}
 const escCsv = (v) => {
-  const s = String(v ?? '')
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  let s = String(v ?? '')
+  const risky = csvInjection(s)
+  if (risky) s = "'" + s
+  // 加过前缀的一律再用引号包起来：可读性上让人一眼看出这里是「被当文本处理过的值」
+  return risky || /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
 }
 const escHtml = (v) => String(v ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
 const pick = (col, row) => (typeof col.value === 'function' ? col.value(row) : row?.[col.prop])
