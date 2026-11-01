@@ -75,7 +75,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { Menu, SwitchButton, Plus } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -100,6 +100,8 @@ const clock = ref(cnDateTime())
 let clockTimer = 0
 // 有票据不等于有效：启动时调 /session 自检一次
 const authed = ref(false)
+// 登录成功后补一次角标：首访时没票不请求，不补的话要等下一次路由跳转才显示草稿数（M22）
+watch(authed, v => { if (v) refreshDraftCount(true) })
 
 async function check() {
   // 公开页面不需要会话自检：带着过期票据去调 /session 只会触发一次无意义的「登录已过期」提示

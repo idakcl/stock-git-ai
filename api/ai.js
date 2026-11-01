@@ -397,6 +397,40 @@ async function readSummary(url, env, ctx) {
 
 // ---- 写接口 ----
 
+// 销售单价带出口径必须与页面开单弹窗一致（M09）：
+// 该客户最近成交价 → 客户类别对应分级售价 → 商品当前售价。
+// 以前 AI 路直接取商品档案售价，同样一张单网页开和 AI 开能差出一截。
+const CATEGORY_PRICE_FIELD = { '批发': 'priceWholesale', '零售': 'price', '安装师傅': 'priceInstaller' }
+function customerCategoryOf(state, name) {
+  const c = (state.customers || []).find(x => x && x.name === name)
+  return c && c.category ? c.category : ''
+}
+// 该客户在该商品上最近一次成交价；作废单、退货行（负数）不算成交
+function latestSalePriceOf(state, customer, code) {
+  if (!customer || !code) return null
+  let best = null
+  for (const s of (state.sales || [])) {
+    if (!s || isVoided(s) || (s.customer || '') !== customer) continue
+    for (const l of (s.items || [])) {
+      if (!l || l.code !== code) continue
+      if (!(Number(l.qty) >= 0)) continue
+      const price = Number(l.price)
+      if (!Number.isFinite(price) || price < 0) continue
+      const d = String(s.date || ''), id = String(s.id || '')
+      if (!best || d > best.d || (d === best.d && id > best.id)) best = { d, id, price }
+    }
+  }
+  return best ? best.price : null
+}
+function salePriceOf(state, customer, item) {
+  const recent = latestSalePriceOf(state, customer, item.code)
+  if (recent != null) return recent
+  const field = CATEGORY_PRICE_FIELD[customerCategoryOf(state, customer)]
+  const tier = field ? item[field] : null
+  if (tier !== '' && tier != null && Number(tier) > 0) return Number(tier)
+  return Number(item.price) || 0
+}
+
 // 直接开单：服务端按商品档案重算每一行。
 // 默认要求客户/供应商与商品都已建档（防手滑造出新名字）；
 // 传了 allowNewItems / allowNewSuppliers 时，才按名称自动建档（见 api/ai-catalog.js）。
@@ -424,7 +458,7 @@ function buildDirectDoc(kind, input, state, keyName, requestId, now, cat) {
     const it = cat.resolveItem(l, i, kind)
     const qty = Number(l.qty)
     if (!(qty > 0)) fail(`第 ${i + 1} 行数量必须大于 0`)
-    const fallback = Number(isSale ? it.price : it.cost) || 0
+    const fallback = isSale ? salePriceOf(state, party, it) : (Number(it.cost) || 0)
     const price = l.price == null || l.price === '' ? fallback : Number(l.price)
     if (!Number.isFinite(price) || price < 0) fail(`第 ${i + 1} 行单价不能为负`)
     const rate = l.discountRate == null ? 1 : Number(l.discountRate)
@@ -737,17 +771,19 @@ function schemaFor(env, ctx) {
 
 // 订单草稿同样由服务端补全：AI 只要给 kind + 往来单位 + [商品编码, 数量]，
 // 名称/单价/行金额/合计全部按商品档案算，validateOrder 的「金额与数量×单价×折扣不符」就不会被 AI 的算术误差触发。
-function normalizeDraftOrder(order, cat) {
+function normalizeDraftOrder(order, cat, state = {}) {
   const kind = order.kind
   if (!['sale', 'purchase'].includes(kind)) return order
   const partyKey = kind === 'purchase' ? 'supplier' : 'customer'
+  const party = String(order[partyKey] || '').trim()
   const date = isDate(order.date) ? order.date : todayCN()
   const lines = (Array.isArray(order.items) ? order.items : []).map((l, i) => {
     if (!l || typeof l !== 'object') fail(`第 ${i + 1} 行明细不是合法对象`)
     const it = cat.resolveItem(l, i, kind)
     const qty = Number(l.qty)
     if (!(qty > 0)) fail(`第 ${i + 1} 行数量必须大于 0（订单不支持负数）`)
-    const fallback = Number(kind === 'sale' ? it.price : it.cost) || 0
+    // 与正式单同一带价口径（M09）：销售走最近成交价 → 分级价 → 当前售价
+    const fallback = kind === 'sale' ? salePriceOf(state, party, it) : (Number(it.cost) || 0)
     const price = l.price == null || l.price === '' ? fallback : Number(l.price)
     if (!Number.isFinite(price) || price < 0) fail(`第 ${i + 1} 行单价不能为负`)
     const rate = l.discountRate == null ? 1 : Number(l.discountRate)
@@ -758,7 +794,7 @@ function normalizeDraftOrder(order, cat) {
   })
   return {
     ...order,
-    [partyKey]: String(order[partyKey] || '').trim(),
+    [partyKey]: party,
     date,
     items: lines,
     total: round2(lines.reduce((s, l) => s + l.total, 0)),
@@ -767,18 +803,20 @@ function normalizeDraftOrder(order, cat) {
 }
 
 // 订单草稿的「商品/供应商自动建档」：必须在订单事务的快照里做，才能和订单一起提交，
-// 不留「商品建了、订单没存」的半截状态。strict 模式（不传开关）行为与以前完全一致。
+// 不留「商品建了、订单没存」的半截状态。
+// 单价补全对 strict 模式同样生效：即使没开自动建档，AI 只给编码与数量时也要按
+// 「最近成交价 → 分级价 → 当前售价」带出（与网页开单一致），不再用 AI 传的或档案里的死价。
 function prepareDraftOrder(snapshot, input) {
-  if (input.action !== 'save' || !input.auto) return null
-  const cat = autoCatalog(snapshot, input.auto)
-  const order = normalizeDraftOrder(input.order, cat)
+  if (input.action !== 'save') return null
+  const auto = input.auto || {}
+  const cat = autoCatalog(snapshot, auto)
+  const order = normalizeDraftOrder(input.order, cat, snapshot)
   // 采购订单的供应商：开关打开时顺手建档（订单本身允许先写名字，过账时 derive 也会兜底）
-  if (order.kind === 'purchase' && order.supplier && input.auto.allowNewSuppliers) {
+  if (order.kind === 'purchase' && order.supplier && auto.allowNewSuppliers) {
     order.supplier = cat.resolveParty(order.supplier, '供应商').name
   }
   input.order = order
-  const state = (cat.createdItems.length || cat.createdSuppliers.length) ? cat.applyTo({ ...snapshot }) : snapshot
-  return { state, createdItems: cat.createdItems, createdSuppliers: cat.createdSuppliers }
+  return { state: cat.applyTo({ ...snapshot }), createdItems: cat.createdItems, createdSuppliers: cat.createdSuppliers }
 }
 
 export async function handleAi(req, url, env, deps) {

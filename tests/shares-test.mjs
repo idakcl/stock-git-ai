@@ -169,6 +169,36 @@ await t('公开数据脱敏：不含成本、收付款流水、照片、客户�
   }
 })
 
+await t('M34 备注默认不外泄：内部备注不出现在公开页', async () => {
+  const raw = JSON.stringify(await publicCall(saleShare.token))
+  assert.ok(!raw.includes('月底交货'), '备注默认不随分享页返回')
+})
+
+await t('M34 显式勾选「显示备注」后公开页才带备注；改标记不动有效期', async () => {
+  const before = read('shares.json')[0]
+  const r = await call('/shares', 'POST', { action: 'update', token: saleShare.token, showRemark: true })
+  assert.equal(r.share.showRemark, true)
+  assert.equal(r.share.expiresAt, before.expiresAt, '只改备注开关时不能重算有效期')
+  const d = await publicCall(saleShare.token)
+  assert.equal(d.doc.remark, '月底交货')
+  await call('/shares', 'POST', { action: 'update', token: saleShare.token, showRemark: false })
+  assert.equal((await publicCall(saleShare.token)).doc.remark, '')
+})
+
+await t('M34 公开页访问留痕：记 lastViewedAt 并写 share 日志，10 分钟内合并', async () => {
+  const a = read('shares.json').find(x => x.token === saleShare.token)
+  assert.ok(a.lastViewedAt, '应记录最近访问时间')
+  assert.ok(Number(a.views) >= 1)
+  const logs = read('logs.json')
+  assert.ok(logs.some(l => l.source === 'share' && l.action === 'view' && l.target === SALE_ID), '应写一条访问日志')
+  const viewsBefore = Number(read('shares.json').find(x => x.token === saleShare.token).views)
+  await publicCall(saleShare.token)
+  await publicCall(saleShare.token)
+  const after = read('shares.json').find(x => x.token === saleShare.token)
+  assert.equal(Number(after.views), viewsBefore, '同一链接 10 分钟内重复打开不重复计数/不重复提交')
+  assert.equal(read('logs.json').filter(l => l.source === 'share').length, logs.filter(l => l.source === 'share').length)
+})
+
 await t('重复生成同一张单：复用原链接，不新增记录', async () => {
   const r = await call('/shares', 'POST', { action: 'create', kind: 'sale', docId: SALE_ID, days: 30 })
   assert.equal(r.reused, true)

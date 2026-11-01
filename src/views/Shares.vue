@@ -44,6 +44,17 @@
           <el-tag :type="statusOf(row).type" size="small" disable-transitions>{{ statusOf(row).text }}</el-tag>
         </template>
       </el-table-column>
+      <el-table-column label="备注" width="90">
+        <template #default="{ row }">
+          <span :class="row.showRemark ? '' : 'muted'">{{ row.showRemark ? '对外显示' : '不显示' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="最近访问" width="170">
+        <template #default="{ row }">
+          <span v-if="row.lastViewedAt" :title="`记录 ${row.views || 0} 次（同一链接 10 分钟内合并）`">{{ fmtCNTime(row.lastViewedAt) || row.lastViewedAt }}</span>
+          <span v-else class="muted">从未打开</span>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="280" class-name="ops-col">
         <template #default="{ row }">
           <el-button size="small" @click="copy(row)">复制链接</el-button>
@@ -169,6 +180,7 @@ onMounted(load)
 .hint { color: var(--text-secondary); font-size: var(--fs-sub); }
 .actions { display: flex; gap: 8px; }
 .expired { color: var(--text-secondary); }
+.muted { color: var(--text-secondary); }
 .expiry-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .expiry-label { color: var(--text-regular); font-size: var(--fs-sub); }
 .expiry-tip { margin: 12px 0 0; color: var(--text-secondary); font-size: var(--fs-mini); line-height: 1.7; }

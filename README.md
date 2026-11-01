@@ -146,7 +146,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 | `/amends` | `{"kind","requestId","sourceOrderId","party","date","reason","mode","refundLines":[{index,qty}],"amendLines":[{code,name,unit,qty,price}]}` | **操作接口**：原单不动，减少的商品生成退货单（复用退款四档资金处理）、增加的商品生成补差单，一次提交落库；`requestId` 幂等，金额一律服务端重算 |
 | `/voids` | `{"kind":"sale"\|"purchase","id":"单据号","reason":"可选"}` | **操作接口**：整单作废并同步作废关联的 `SK-`/`FK-`，一次提交回滚库存/应收；重复作废幂等；子单/核销/合并凭证未拆时 `409`。详见 [docs/void.md](docs/void.md) |
 | `/profile` | `{"name","phone","address","remark"}` | 整份覆盖写入 `profile.json`；服务端逐字段裁剪空白并限长（40 / 60 / 160 / 200），多余字段丢弃 |
-| `/shares` | `{"action": "create" / "cancel" / "update", …}` | **操作接口**，见 [docs/shares.md](docs/shares.md)。`create` 需要 `{kind, docId, days}`（`days` 取 `1/7/30`，`0` 为长期），同一张单已有有效链接时**复用**并返回 `reused: true`；`cancel` 需要 `{token}`；`update` 需要 `{token, days}`（按「现在」重新起算）|
+| `/shares` | `{"action": "create" / "cancel" / "update", …}` | **操作接口**，见 [docs/shares.md](docs/shares.md)。`create` 需要 `{kind, docId, days}`（`days` 取 `1/7/30`，`0` 为长期），同一张单已有有效链接时**复用**并返回 `reused: true`；`cancel` 需要 `{token}`；`update` 需要 `{token}`，`days` 可省略（省略＝只改 `showRemark`，不重算有效期；传了才按「现在」重新起算）|
 | `/templates` | `{"action": "create" / "update" / "delete" / "duplicate", …}` | **操作接口**，见 [docs/templates.md](docs/templates.md)。只写 `order-templates.json`，不碰单据；`create`/`update` 传 `{template:{id?, name, kind, items}}`，`delete`/`duplicate` 传 `{id}`；上限 100 个模板、单模板 200 行 |
 | `/upload` | `multipart/form-data`，字段名 `file` | 转发图床，返回 `{"url":"https://…"}`；≤10MB，仅 `image/*` |
 | `/stock` | 任意 | **403**：库存为派生数据，禁止直写 |
@@ -538,6 +538,7 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 3. 都没有时用商品当前售价 `price`。
 切换客户会按新客户的最近售价刷新已填行的单价。
 > 口径提示：本系统**历史成交价优先于档位价**。这是 2026-11-01 由 owner 明确拍板的顺序——老客户按上次成交价续，报价不跳档；想让「档案标准报价」压过历史价，等于改变既有单据的带出口径，需要重新评估后再动。
+> AI-API 开单（`POST /api/ai/v1/sales` 与 `POST /api/ai/v1/orders` 的草稿）用的是同一套顺序（`api/ai.js` 的 `salePriceOf()`：最近成交价 → 客户类别档位价 → 当前售价）。以前 AI 路只取档案售价，同一张单网页开与 AI 开会差一截——这是 M09 的整改点，两条路现在同价。
 
 ### 照片（图床）
 - 商品可上传**商品照片**；采购单 / 销售单可上传**原始单据照片**，支持多张（单张 ≤10MB，最多 9 张）。
@@ -690,9 +691,12 @@ Worker 入口 `web/index.js` 对所有 `GET /api/*` 响应加 `Cache-Control: s-
 | 待过账 / 可作废 | 角标数全部未过账订单；「清空未过账订单」按钮数其中可直接作废的张数 | 两处混用同一个数字 |
 
 ### 已知限制（确实还没做的）
+> 提交信息里的 `Mxx` 编号有两套体系，见 [问题编号口径](docs/issue-numbering.md)。
 1. **对账检查按「金额与引用」判断，读不出业务意图**：`/audit` 已覆盖单头/明细、实收/流水、结算状态、凭证引用、退货额度、重复单号、超额收付、同凭证重复挂单、跨凭证累计超核销、负库存；但「一笔钱到底是收款还是退款」「同额两笔是否同一笔业务」仍需人工判断。
 2. **字段级留痕只保留最近 200 条**：`logs.json` 有上限（避免把数据仓撑大），超出的旧留痕会滚动淘汰；更早的字段变化只能翻 git 提交。明细行内部的价格/数量微调只体现在单头「金额」与「明细行数」上，不逐行记录。
 3. **一张资金凭证不能跨往来单位**：「合并收付款」按客户/供应商分组，每组一张凭证、组内可跨多张单据分摊；跨不同单位合并成一张凭证不支持（会破坏按单位对账）。
+4. **已登录的持票人仍可直接整表覆盖**（`POST /api/purchases`、`POST /api/sales` 收的是全量数组）：这是**有意保留**的——它同时是备份恢复、批量导入与手工救数据的唯一通道，也是「AI 只给操作型接口、不给整表覆盖」这条红线能够成立的前提。写入端已强制过 `normalizeOrderPayments`（空数组+旧实付先转正式流水），但没有逐行校验（负数数量、错编码仍可写进去）。防的是「手滑」，不是「懂接口的人」：拿到管理员票据的人本来就能改数据仓。若要收紧，可加「只允许 append + 按单号 patch、禁止删除已存在单据」的白名单，代价是批量导入与恢复链路要另开凭据——**这条需要 owner 点头后才动**。
+5. **公开分享页的访问次数是「合并计数」**：同一 token 10 分钟内重复打开只记一次（每次记录＝一次 git commit，不限频会被刷新刷爆数据仓），因此 `views` 不等于精确 PV；需要精确访问统计要另接外部日志。分享页的单据备注**默认不显示**，需要在分享弹窗里显式勾选。
 
 已经具备、不再列为限制的能力：**同一往来单位跨单核销**（来往账勾选多单 → 合并收付款，超额转预存/预付）、**退款/退货**（`XT-`/`CT-` 红字单 + `TK-`/`HX-` 凭证，见 [docs/refunds.md](docs/refunds.md)）、**预收预付**（客户 `deposits` / 供应商 `advances`，负数即抵扣）、**单据作废**（见 [docs/void.md](docs/void.md)）与**操作日志**（`/logs`）。
 

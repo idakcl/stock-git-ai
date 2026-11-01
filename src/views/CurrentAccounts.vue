@@ -327,6 +327,12 @@ const codeOf = (name, kind) => kind === 'payable' ? (supplierCode.value[name] ||
 // 作废单只留档：不参与应收/应付列表与汇总（原始列表保留，避免保存时丢掉作废单）
 const activeSales = computed(() => (salesList.value || []).filter(o => !isVoided(o)))
 const activePurchases = computed(() => (purchasesList.value || []).filter(o => !isVoided(o)))
+// 时间段要一路联到汇总卡、排行、分桶：以前只有「单据明细」过滤了日期，
+// 上面的应收/应付合计与 Top 榜仍是全量，卡片写着「随时间段联动」却对不上（M16）。
+const inRange = (o) => (!dateStart.value || (o.date || '') >= dateStart.value)
+  && (!dateEnd.value || (o.date || '') <= dateEnd.value)
+const scopedSales = computed(() => activeSales.value.filter(inRange))
+const scopedPurchases = computed(() => activePurchases.value.filter(inRange))
 
 const ordersAll = computed(() => {
   const sales = activeSales.value.map(s => ({
@@ -365,21 +371,21 @@ const partyRows = computed(() => {
     g.deposit = round2(g.deposit + (deposit || 0))
   }
   for (const c of (customers.value || [])) {
-    const ss = activeSales.value.filter(s => s.customer === c.name)
+    const ss = scopedSales.value.filter(s => s.customer === c.name)
     const gross = ss.reduce((s, r) => s + grossOf(r), 0)
     const net = ss.reduce((s, r) => s + netOf(r, 'receivable'), 0)
     add(c.name, '客户', 'receivable', gross, gross - net, ss.length, c.code, '/customer/', depositSumOf(c.deposits))
   }
   for (const s of (suppliers.value || [])) {
-    const pp = activePurchases.value.filter(p => p.supplier === s.name)
+    const pp = scopedPurchases.value.filter(p => p.supplier === s.name)
     const gross = pp.reduce((s, r) => s + grossOf(r), 0)
     const net = pp.reduce((s, r) => s + netOf(r, 'payable'), 0)
     add(s.name, '供应商', 'payable', gross, gross - net, pp.length, s.code, '/supplier/', depositSumOf(s.advances))
   }
   for (const g of Object.values(map)) {
     g.net = round2((g.recv - g.recvPaid) - (g.pay - g.payPaid))
-    const sales = activeSales.value.filter(o => o.customer === g.party)
-    const purchases = activePurchases.value.filter(o => o.supplier === g.party)
+    const sales = scopedSales.value.filter(o => o.customer === g.party)
+    const purchases = scopedPurchases.value.filter(o => o.supplier === g.party)
     g.recvPaid = round2(sales.reduce((s, o) => s + ensurePayments(o, 'received').reduce((n, p) => n + Number(p.amount || 0), 0), 0))
     g.payPaid = round2(purchases.reduce((s, o) => s + ensurePayments(o, 'paid').reduce((n, p) => n + Number(p.amount || 0), 0), 0))
     g.refundDue = round2(sales.reduce((s, o) => s + Math.max(0, -netOf(o, 'receivable')), 0))
@@ -412,8 +418,8 @@ watch([keyword, dateStart, dateEnd, typeFilter, onlyOpen, partyTypeFilter], () =
 
 const stats = computed(() => {
   const rows = partyFiltered.value
-  const recvCount = activeSales.value.length
-  const payCount = activePurchases.value.length
+  const recvCount = scopedSales.value.length
+  const payCount = scopedPurchases.value.length
   const depositCust = round2((customers.value || []).reduce((s, c) => s + depositSumOf(c.deposits), 0))
   const depositSup = round2((suppliers.value || []).reduce((s, x) => s + depositSumOf(x.advances), 0))
   return {

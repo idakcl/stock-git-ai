@@ -13,6 +13,11 @@
             <el-radio-button :value="0">长期有效</el-radio-button>
           </el-radio-group>
         </div>
+        <div class="share-row">
+          <span class="share-label">备注</span>
+          <el-checkbox v-model="showRemark">在分享页显示单据备注</el-checkbox>
+        </div>
+        <p class="share-tip">备注默认不对外显示：里面常写底价、利润或催款话术，只给拿到链接的人看单不用看这些。</p>
         <el-button type="primary" class="share-create" :loading="saving" @click="create">生成分享链接</el-button>
       </template>
 
@@ -28,6 +33,10 @@
           <span class="share-label">状态</span>
           <el-tag :type="share.expired ? 'info' : 'success'" size="small" disable-transitions>{{ share.expired ? '已过期' : '有效' }}</el-tag>
           <span class="share-exp">{{ share.expiresAt ? `至 ${fmtCNTime(share.expiresAt) || share.expiresAt}` : '长期有效' }}</span>
+        </div>
+        <div class="share-row">
+          <span class="share-label">备注</span>
+          <el-checkbox :model-value="!!share.showRemark" :disabled="saving" @change="toggleRemark">在分享页显示单据备注</el-checkbox>
         </div>
         <div v-if="share.expired" class="share-row">
           <span class="share-label">重新生成</span>
@@ -78,6 +87,7 @@ const loading = ref(false)
 const saving = ref(false)
 const share = ref(null)
 const days = ref(7)
+const showRemark = ref(false)
 const qrVisible = ref(false)
 const link = computed(() => (share.value ? shareLinkOf(share.value.token) : ''))
 
@@ -101,19 +111,34 @@ async function loadShare() {
 }
 
 watch(() => props.modelValue, v => {
-  if (v) { share.value = null; days.value = 7; loadShare() }
+  if (v) { share.value = null; days.value = 7; showRemark.value = false; loadShare() }
 })
 watch(() => props.docId, () => { if (props.modelValue) { share.value = null; loadShare() } })
 
 async function create() {
   saving.value = true
   try {
-    const r = await api.shareOperation({ action: 'create', kind: props.kind, docId: props.docId, days: days.value })
+    const r = await api.shareOperation({ action: 'create', kind: props.kind, docId: props.docId, days: days.value, showRemark: showRemark.value })
     share.value = r.share
     if (r.reused) ElMessage.info('该单据已有有效分享，已为你打开原链接')
     else ElMessage.success('分享链接已生成')
   } catch (e) {
     ElMessage.error(e.message || '生成分享链接失败')
+  } finally {
+    saving.value = false
+  }
+}
+
+// 备注开关：只改这一个标记，不传 days（避免把「长期有效」改成 7 天）
+async function toggleRemark(v) {
+  if (!share.value) return
+  saving.value = true
+  try {
+    const r = await api.shareOperation({ action: 'update', token: share.value.token, showRemark: !!v })
+    share.value = r.share || { ...share.value, showRemark: !!v }
+    ElMessage.success(v ? '分享页将显示单据备注' : '分享页不再显示备注')
+  } catch (e) {
+    ElMessage.error(e.message || '保存失败')
   } finally {
     saving.value = false
   }

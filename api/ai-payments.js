@@ -12,6 +12,7 @@ import { openTransaction, commitTransaction } from './tx.js'
 import { genVoucherCode } from '../src/utils/voucher.js'
 import { round2, payableOf, receivableOf, appendPayment, syncPayments, isVoided } from '../src/utils/account.js'
 import { isReturn } from '../src/utils/refunds.js'
+import { normalizeOrderPayments } from './write-normalize.js'
 import { todayCN } from '../src/utils/time.js'
 
 const fail = (message, status = 400) => { const e = new Error(message); e.status = status; throw e }
@@ -34,7 +35,11 @@ export async function paymentWrite(input, env, ctx, requestId) {
   const list = (Array.isArray(tx.state[listKey]) ? tx.state[listKey] : []).map(o => ({ ...o }))
   const idx = list.findIndex(o => o && o.id === id)
   if (idx < 0) fail(`单据「${id}」不存在`, 404)
-  const doc = list[idx]
+  // 老脏单（payments:[] + 钱躺在旧 received/paid 上）：先按写入端同一规则转成正式流水，
+  // 否则这里会把旧钱当成「没有流水」直接覆盖掉——网页保存路已经修了，AI 追加路不能漏（M05）。
+  // 转换只发生在「空数组且旧字段非 0」，正常单据原样通过。
+  const doc = normalizeOrderPayments(list[idx], kind === 'sale' ? 'received' : 'paid')
+  list[idx] = doc
   if (isVoided(doc)) fail('单据已作废，不能收付款', 409)
   if (isReturn(doc)) fail('退货 / 退款单请走 POST /refunds 核销，不能直接收付款', 409)
 

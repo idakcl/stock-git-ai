@@ -8,7 +8,7 @@
 // 两处都显示同一个数字，如果各自拉一次 /api/orders，每打开一页就多一次请求；
 // 这里做一层缓存 + 并发去重：3 秒内的重复调用直接复用上一次的结果。
 import { ref } from 'vue'
-import { api } from '../api'
+import { api, auth } from '../api'
 import { isUnposted } from './orders.js'
 
 export const draftCount = ref(0)
@@ -18,6 +18,8 @@ let at = 0
 
 // force=true 用于写操作之后（过账、删除、开单保存），需要立刻刷新计数
 export function refreshDraftCount(force = false) {
+  // 未登录不请求：首访时票据还没拿到，打 /orders 必然 401，白白多一次错误请求（M22）
+  if (!auth.get()) { draftCount.value = 0; return Promise.resolve() }
   if (!force && Date.now() - at < 3000) return inflight || Promise.resolve()
   at = Date.now()
   inflight = api.getOrders()

@@ -51,15 +51,15 @@ import { fmtCNTime } from '../utils/time.js'
 const LABELS = {
   refund: '退款', order: '订单', void: '作废', restore: '恢复', ai: 'AI-API',
   clear: '清空', merge: '合并导入', amend: '变更', derive: '编码修正', login: '登录',
-  save: '字段修改'
+  save: '字段修改', share: '外链分享'
 }
 const TAG_TYPES = {
   refund: 'danger', void: 'warning', clear: 'danger', restore: 'info',
-  ai: 'success', derive: 'warning', amend: 'info', save: 'primary'
+  ai: 'success', derive: 'warning', amend: 'info', save: 'primary', share: 'info'
 }
 const ACTION_LABELS = {
   create: '新建', delete: '删除', post: '过账', unpost: '撤销过账', save: '保存',
-  remark: '备注', restore: '恢复', clear: '清空', deposit: '订金'
+  remark: '备注', restore: '恢复', clear: '清空', deposit: '订金', view: '打开'
 }
 const KIND_LABELS = { sale: '销售单', purchase: '采购单', order: '订单' }
 const MONEY = new Set(['total', 'discount', 'received', 'paid'])
@@ -115,6 +115,7 @@ function summary(row) {
   if (row.fixed != null) parts.push(`修正编码 ${row.fixed} 处`)
   if (Array.isArray(row.results)) parts.push(row.results.map(x => `${x.key} ${x.count}`).join('、'))
   if (row.key) parts.push(`密钥 ${row.key}`)
+  if (row.token) parts.push(`链接 ${row.token}…`)
   if (row.changed != null) parts.push(`改 ${row.changed} 张`)
   if (Array.isArray(row.docs) && row.docs.length) {
     const shown = row.docs.slice(0, 3).map(d => `${d.id}（${fieldsText(d)}）`).join('；')

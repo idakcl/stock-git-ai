@@ -25,13 +25,21 @@
 |---|---|
 | `readOnly` | 恒为 `true`，前端据此不渲染任何操作入口 |
 | `kind` / `share` | 单据类型、`token`、`createdAt`、`expiresAt` |
-| `doc` | `id`、业务单号 `no`、`date`、往来单位及其标签、单据中文名、状态、备注、是否退款单 |
+| `doc` | `id`、业务单号 `no`、`date`、往来单位及其标签、单据中文名、状态、是否退款单；`remark` 仅在分享时勾选「显示备注」时才有值 |
 | `lines[]` | `code` / `name` / `unit` / `qty` / `price` / `discountRate` / `discount` / `total` / `net` |
 | `totals` | 原价合计、单项折扣、合计、折扣链文本、折后金额、整单优惠、应收（付）、实收（付）、未收（付），以及两个列开关 `hasLineDiscount` / `hasOrderDiscount` |
 
-**刻意不返回**：商品进价 `cost`、`payments` 收付款流水、照片、客户 / 供应商档案里的联系方式与地址、内部备注字段。
+**刻意不返回**：商品进价 `cost`、`payments` 收付款流水、照片、客户 / 供应商档案里的联系方式与地址。
+
+**备注默认不外泄**：单据 `remark` 里常写底价、利润、催款话术，属于内部信息。旧版无条件随公开页返回，
+是 M34 的一条残留；现在只有分享记录上带 `showRemark: true` 才返回。分享弹窗里勾选「在分享页显示单据备注」
+即写入该标记（`POST /shares` 的 `action=update` 只传 `showRemark`，不会顺手把长期有效改成 7 天）。
 金额口径全部复用 `src/utils/account.js` 与 `src/utils/orders.js` 的纯函数（与前端列表、打印同一份实现），
 不会出现「页面显示 20.85，别人打开是 21.85」这种对不齐。
+
+公开页访问会留痕：每次打开把 `lastViewedAt` 写回分享记录并追加一条 `source:'share'` 的操作日志
+（`kind` / 单号 / token 前 8 位）。云端写入＝一次 git commit，因此**同一 token 10 分钟内重复打开合并为一次**，
+`views` 记的是「记录次数」而不是精确 PV；管理页「最近访问」列可核对。
 
 `token` 是 `crypto.getRandomValues` 生成的 **36 位十六进制**随机串。格式不合法直接 `404`（不查库），挡住枚举与无效回源。
 

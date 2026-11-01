@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict'
 import { makeFakeRepo } from './fake-github.mjs'
 import { handleApi } from '../api/routes.js'
+import { writeJSON } from '../api/github.js'
 import { issueToken } from '../api/auth.js'
 import { invalidateKeyCache } from '../api/ai-keys.js'
 import { AI_ALL_SCOPE_IDS } from '../src/utils/aiScopes.js'
@@ -250,6 +251,50 @@ await t('缺少 requestId → 400', async () => {
   })
   assert.equal(r.status, 400)
   assert.match(r.data.error, /requestId/)
+})
+
+await t('M09 销售带价：该客户最近成交价优先于商品档案价', async () => {
+  // 先以 10.5 成交一次（P00002 在档案里是 9），下一单不传价应带出 10.5 而不是 9
+  await ok('/api/ai/v1/sales', {
+    key: maxKey, method: 'POST',
+    body: { customer: '客户甲', date: '2026-02-02', items: [{ code: 'P00002', qty: 1, price: 10.5 }], requestId: rid(13) }
+  })
+  const data = await ok('/api/ai/v1/sales', {
+    key: maxKey, method: 'POST',
+    body: { customer: '客户甲', date: '2026-02-03', items: [{ code: 'P00002', qty: 2 }], requestId: rid(14) }
+  })
+  assert.equal(data.amount, 21, '2 × 最近成交价 10.5')
+  const doc = salesFile().find(s => s.id === data.id)
+  assert.equal(doc.items[0].price, 10.5)
+})
+
+await t('M09 草稿订单同口径：只给编码+数量也按最近成交价带出', async () => {
+  const data = await ok('/api/ai/v1/orders', {
+    key: maxKey, method: 'POST',
+    body: { action: 'save', order: { kind: 'sale', customer: '客户甲', date: '2026-02-04', items: [{ code: 'P00002', qty: 1 }] }, requestId: rid(15) }
+  })
+  const orders = JSON.parse(repo.read('orders.json'))
+  const draft = orders.find(o => o.id === data.code)
+  assert.equal(draft.items[0].price, 10.5)
+})
+
+await t('M05 老脏单（payments:[] + 旧 received）走 AI 收款不丢旧钱', async () => {
+  const dirty = {
+    id: 'X202601051200000001', date: '2026-01-05', customer: '客户甲',
+    items: [{ code: 'P00002', name: '弯头', unit: '个', qty: 10, price: 3, total: 30 }],
+    total: 30, payments: [], received: 5, settle: '挂账', createdAt: '2026-01-05T02:00:00.000Z'
+  }
+  // 走一次真实提交（ai-payments 用 git 快照读，poke 只改 contents 视图，看不见）
+  await writeJSON(env, 'sales.json', [...salesFile(), dirty], 'seed dirty sale')
+  const data = await ok('/api/ai/v1/payments', {
+    key: maxKey, method: 'POST',
+    body: { requestId: rid(16), kind: 'sale', id: dirty.id, amount: 3, date: '2026-02-05' }
+  })
+  assert.equal(data.outstanding, 22, '未收 = 30 − 5 旧钱 − 3 新钱')
+  const doc = salesFile().find(o => o.id === dirty.id)
+  assert.equal(doc.payments.length, 2)
+  assert.ok(doc.payments.some(p => p.remark === '历史实付' && p.amount === 5), '旧钱必须转成正式流水')
+  assert.equal(doc.received, 8)
 })
 
 console.log('\n草稿与过账')

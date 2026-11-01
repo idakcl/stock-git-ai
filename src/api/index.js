@@ -44,9 +44,12 @@ function authHeaders(extra = {}) {
   return { ...extra, ...(t ? { Authorization: `Bearer ${t}` } : {}) }
 }
 
-async function handle(res) {
+// hadAuth：这次请求是否带着票据。只有「带着票却被拒」才是会话过期（该广播）；
+// 没带票的 401（首访自动刷新角标、登录密码输错）不是过期，广播会弹出误导的
+// 「登录已过期」提示（M22）。未登录状态由 App.vue 的 authed 决定是否渲染登录页。
+async function handle(res, hadAuth = false) {
   const data = await res.json().catch(() => ({}))
-  if (res.status === 401) onUnauthorized()
+  if (res.status === 401 && hadAuth) onUnauthorized()
   if (!res.ok) { const error = new Error(data.error || res.statusText); error.status = res.status; throw error }
   return data
 }
@@ -57,8 +60,10 @@ async function request(path, options = {}) {
   // 刚写入后的刷新：绕过 CDN 边缘缓存，确保读到最新数据（no-cache 让 Worker 回源，已实测有效）。
   // 不影响前端本地的 15s 内存缓存命中（命中时直接返回、不进此函数）。
   if (needFresh() && method === 'GET') headers['Cache-Control'] = 'no-cache'
+  // /login 的 401 是「密码不对」，与登录态过期无关，不能广播过期
+  const hadAuth = !!auth.get() && path !== '/login'
   const res = await fetch(BASE + path, { ...options, method, headers })
-  return handle(res)
+  return handle(res, hadAuth)
 }
 
 // ---------- 读接口短 TTL 内存缓存 ----------

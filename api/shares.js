@@ -7,8 +7,13 @@
 //     但只返回脱敏后的展示数据——不含成本价、内部单号、收付款流水、照片等内部信息。
 //   · 有效期 expiresAt 为 ISO 时间或 null（长期有效）；过期返回 410，取消即从集合里删除。
 //   · 同一张单只保留一条有效分享：重复生成返回已有链接，避免同一单据散落多个 token。
+//   · 备注默认不外泄（内部备注常写底价、利润、催款话术）：只有分享时显式勾选「显示备注」
+//     才会随公开页返回；这是 M34 的整改项。
+//   · 公开页访问留痕：记录 lastViewedAt 并写一条 source='share' 的日志；
+//     同一 token 10 分钟内重复打开合并为一次，避免把链接被刷新当成刷数据仓。
 import { readJSON } from './github.js'
 import { readCollection, writeCollection } from './storage.js'
+import { openTransaction, commitTransaction } from './tx.js'
 import {
   allocateNetOf, discountAmountOf, discountRatesTextOf, discountedTotalOf, effectiveRateOf,
   grossOf, isVoided, paidSumOf, payableOf, receivableOf, receivedSumOf, round2
@@ -22,6 +27,8 @@ const SHARES_KEY = 'shares'
 const KINDS = new Set(['sale', 'purchase', 'order'])
 const MAX_SHARES = 500
 const DAY_MS = 24 * 3600 * 1000
+// 访问留痕合并窗口：同一链接 10 分钟内重复打开只记一次
+const ACCESS_LOG_WINDOW_MS = 10 * 60 * 1000
 
 const fail = (message, status = 400) => { const e = new Error(message); e.status = status; throw e }
 const notFound = (message = '分享链接不存在或已失效') => fail(message, 404)
@@ -93,6 +100,9 @@ function shareView(share, doc, now = Date.now()) {
     createdAt: share.createdAt || '',
     expiresAt: share.expiresAt || null,
     expired: isExpired(share, now),
+    showRemark: !!share.showRemark,
+    lastViewedAt: share.lastViewedAt || '',
+    views: Number(share.views || 0),
     docLabel: doc ? docLabelOf(kind, doc) : '单据',
     party: doc ? partyOf(kind, doc) : '',
     date: doc ? doc.date || '' : '',
@@ -145,7 +155,12 @@ export async function shareOperation(env, input) {
     if (shares.length >= MAX_SHARES) fail(`分享数量已达 ${MAX_SHARES} 条上限，请先取消部分分享`)
     // 清掉同单据的过期记录：同一张单只保留一条分享，避免管理页越积越多
     const kept = shares.filter(s => !(s.kind === kind && s.docId === docId))
-    const share = { token: newToken(), kind, docId, createdAt: new Date(now).toISOString(), expiresAt: expiryFromDays(input.days, now) }
+    const share = {
+      token: newToken(), kind, docId,
+      createdAt: new Date(now).toISOString(),
+      expiresAt: expiryFromDays(input.days, now),
+      showRemark: input.showRemark === true
+    }
     await writeCollection(env, SHARES_KEY, [...kept, share], `share ${kind} ${docId}`)
     return { ok: true, share: shareView(share, doc, now) }
   }
@@ -163,11 +178,16 @@ export async function shareOperation(env, input) {
     const token = String(input.token || '')
     const idx = shares.findIndex(s => s.token === token)
     if (idx < 0) fail('该分享不存在或已取消', 404)
-    const expiresAt = expiryFromDays(input.days, now)
-    if (shares[idx].expiresAt === expiresAt) return { ok: true, share: shareView(shares[idx], await loadDoc(env, shares[idx].kind, shares[idx].docId), now) }
+    // days 不传＝只改「是否显示备注」；传了才重算有效期，避免一次勾选把长期有效改成 7 天
+    const hasDays = input.days != null && input.days !== ''
+    const expiresAt = hasDays ? expiryFromDays(input.days, now) : (shares[idx].expiresAt || null)
+    const showRemark = input.showRemark == null ? !!shares[idx].showRemark : input.showRemark === true
+    if (shares[idx].expiresAt === expiresAt && !!shares[idx].showRemark === showRemark) {
+      return { ok: true, share: shareView(shares[idx], await loadDoc(env, shares[idx].kind, shares[idx].docId), now) }
+    }
     const next = shares.slice()
-    next[idx] = { ...shares[idx], expiresAt }
-    await writeCollection(env, SHARES_KEY, next, 'update share expiry')
+    next[idx] = { ...shares[idx], expiresAt, showRemark }
+    await writeCollection(env, SHARES_KEY, next, `update share ${hasDays ? 'expiry' : 'remark flag'}`)
     return { ok: true, share: shareView(next[idx], await loadDoc(env, next[idx].kind, next[idx].docId), now) }
   }
 
@@ -186,7 +206,39 @@ export async function readPublicShare(env, token) {
   if (!doc) throw notFound('单据已删除，分享已失效')
   if (isVoided(doc)) throw notFound('单据已作废，分享已失效')
   const items = await readItems(env)
-  return buildPayload(share, doc, items)
+  // 访问留痕：放在返回之前、best-effort，失败不影响页面
+  const visit = await recordAccess(env, t, share)
+  return buildPayload({ ...share, ...(visit || {}) }, doc, items)
+}
+
+// 公开页访问留痕：同一 token 10 分钟内只记一次（云端写入＝一次 git commit，必须限频）。
+// 分两步：先读 shares 判断窗口，窗口内直接返回；需要记录时才开事务写 shares + logs。
+async function recordAccess(env, token, share) {
+  const now = Date.now()
+  const last = Date.parse(share.lastViewedAt || '') || 0
+  if (last && now - last < ACCESS_LOG_WINDOW_MS) return null
+  try {
+    const tx = await openTransaction(env, ['shares', 'logs'], { optional: ['logs'] })
+    const list = (Array.isArray(tx.state.shares) ? tx.state.shares : []).map(s => ({ ...s }))
+    const idx = list.findIndex(s => s && s.token === token)
+    if (idx < 0) return null
+    const cur = list[idx]
+    const stamp = new Date(now).toISOString()
+    list[idx] = {
+      ...cur,
+      views: Number(cur.views || 0) + 1,
+      lastViewedAt: stamp
+    }
+    await commitTransaction(tx, {
+      next: { shares: list, logs: tx.state.logs || [] },
+      message: `share view ${token.slice(0, 8)}`,
+      logEntry: { source: 'share', action: 'view', kind: cur.kind, target: cur.docId, token: token.slice(0, 8) },
+      forceLog: true
+    })
+    return list[idx]
+  } catch {
+    return null
+  }
 }
 
 function buildPayload(share, doc, items) {
@@ -236,7 +288,7 @@ function buildPayload(share, doc, items) {
         : (kind === 'sale' ? '客户' : '供应商'),
       docLabel: docLabelOf(kind, doc),
       status: isOrder ? orderStatusText(doc.status) : (isReturn(doc) ? '退货单' : '正常'),
-      remark: doc.remark || '',
+      remark: share.showRemark ? (doc.remark || '') : '',
       isReturn: !isOrder && isReturn(doc)
     },
     lines: rows,
