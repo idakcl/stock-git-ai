@@ -96,7 +96,7 @@ curl -s -H "Authorization: Bearer $TOKEN" https://stock-git-ai.1234.nyc.mn/api/s
 ```
 - `remember:true` 票据 30 天有效，省略或 `false` 为 12 小时；`expiresIn` 为毫秒时长。
 - 票据格式 `base64url(payload).base64url(HMAC-SHA256)`，脚本**原样存取复用**即可，不要解析或自行伪造（密钥 `SESSION_SECRET` 只存在于 Worker Secret）。
-- 管理密码是 Worker Secret `APP_PASSWORD`，不在仓库里，向系统所有者索取。
+- 管理密码是 Worker Secret `APP_PASSWORD`（应用内改过密码后，以数据仓 `auth.json` 的哈希为准）；不在仓库里，向系统所有者索取。
 - **401** = 票据缺失/过期 → 重新登录；**429** = 同一来源密码连错 6 次，锁定 15 分钟（响应里带剩余秒数）。
 - CORS 只约束浏览器跨域，curl / Node / Python 脚本不受影响。
 - 读接口有 **15 秒缓存**（Worker 边缘 + CDN 双层）：同一边缘节点写完会自动失效，跨节点/换会话可能读到写前的旧值。**写完要立即校验就带 `-H 'Cache-Control: no-cache'`**（前端写后 20 秒强刷窗口就是这么做的），仍不放心就等 15 秒、或改读 GitHub 数据仓原文。
@@ -304,7 +304,7 @@ console.log('已生成收款单', code, '｜本单未收', due)
   - 残留窗口只有一个：单据已提交、派生提交失败（网络/并发）。此时页面提示「请重新保存一次该单据自动修复」；`derive` 是由单据重建的纯函数，重存即自愈，不会悄悄丢数据。
   - 同理，「保存商品」与「供应商档案里的商品列表」也合并为一次提交；`POST /api/normalize` 直接复用同一条派生链路。
 - 验证方式：可用无效 token 调用 `POST /api/items`，应返回 `500 {"error":"GitHub 401: Bad credentials"}` 而非 200。
-- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（20 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿（作废而非删行）/ 批量作废 / 状态值统一与 `migrateStatus` / 备注 / `restore` 整表恢复）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/refund-reason-test.mjs`（3 项，退货原因非必填：留空 / 只填空格落库记「无」，填了去首尾空白）、`node tests/orders-api-test.mjs`（19 项，`/api/orders` 与 `/api/amends` 全链路，含备注、状态迁移与旧备份归一化）、`node tests/clear-test.mjs`（14 项，`/api/clear` 清空入口：票据/密码/CLEAR 三道闸门、单表与全清各一次提交、库存按剩余单据重算、孤儿单据与退款单改名、退款痕迹回滚、订单退回未过账、空库幂等不空提交）、`node tests/derived-atomic-test.mjs`（5 项，派生写回：单据一次提交 + 派生一次提交、无变化 0 提交、商品与供应商商品列表同一次提交、换写路径仍走 `assertSafeWrite`（退货单直接改写被拦且不落库）、`/normalize` 一次提交修编码且幂等）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/return-void-test.mjs`（10 项，退货单作废闸门：未核销可作废并释放可退额度、已开 TK-/HX- 凭证或已核销一律 409、子单作废后原单解锁、幂等）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）、`node tests/backup-api-test.mjs`（9 项，备份恢复：`restore` 订单/退款一次提交且不动库存、空表清空、非法/重复整表拒绝、`import-merge` 对订单与退款按单号/凭证号去重）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
+- **回归测试（纯 Node，不碰线上仓）**：`node tests/storage-test.mjs`（27 项，存储层：归年规则、迁移原子性、幂等跳过、删空年片、资金保护、并发 409、>1MB blob 回退、commitFiles 一次提交增删改）、`node tests/api-test.mjs`（13 项，直接调 `handleApi`，以真实数据仓为底跑「存一张单 → 迁移 → 原样重存 0 提交 → 改历史单只写当年片 → 退货退款」全链路，并守住一次请求 50 子请求的上限）、`node tests/account-test.mjs`（27 项，账务口径：`grossOf` 总额 ≠ 余额、`overpaidOf` 红线①、`settleBalance` 结清联动、多级折扣链）、`node refund-test.mjs`（11 项，退款核销 + 历史补凭证；夹具里两张历史退货单的 id 已同步 `4f5f243` 的编码改名 `T2026051912000000x → CT-20260519-000x`，此前该用例一直红——代码按新 id 定位、测试还在造旧 id）、`node deposit-test.mjs`（9 项）、`node tests/orders-test.mjs`（20 项，订单状态机 / 订金凭证 / 撤销闸门 / 孤儿订单 / 清空草稿（作废而非删行）/ 批量作废 / 状态值统一与 `migrateStatus` / 备注 / `restore` 整表恢复）、`node tests/amend-test.mjs`（9 项，明细 diff 与 `applyAmendOperation`）、`node tests/refund-reason-test.mjs`（3 项，退货原因非必填：留空 / 只填空格落库记「无」，填了去首尾空白）、`node tests/orders-api-test.mjs`（19 项，`/api/orders` 与 `/api/amends` 全链路，含备注、状态迁移与旧备份归一化）、`node tests/clear-test.mjs`（14 项，`/api/clear` 清空入口：票据/密码/CLEAR 三道闸门、单表与全清各一次提交、库存按剩余单据重算、孤儿单据与退款单改名、退款痕迹回滚、订单退回未过账、空库幂等不空提交）、`node tests/derived-atomic-test.mjs`（5 项，派生写回：单据一次提交 + 派生一次提交、无变化 0 提交、商品与供应商商品列表同一次提交、换写路径仍走 `assertSafeWrite`（退货单直接改写被拦且不落库）、`/normalize` 一次提交修编码且幂等）、`node tests/void-test.mjs`（13 项，作废纯函数：归零/凭证同废/库存回滚/预存退回/闸门/幂等/订单回退）、`node tests/return-void-test.mjs`（10 项，退货单作废闸门：未核销可作废并释放可退额度、已开 TK-/HX- 凭证或已核销一律 409、子单作废后原单解锁、幂等）、`node tests/void-api-test.mjs`（7 项，`/api/voids` 全链路：一次提交、年片口径、404/409 不落库）、`node tests/backup-api-test.mjs`（9 项，备份恢复：`restore` 订单/退款一次提交且不动库存、空表清空、非法/重复整表拒绝、`import-merge` 对订单与退款按单号/凭证号去重）。`node tests/auth-session-test.mjs`（10 项，会话安全：初始密码登录带版本 0、改密要求当前密码且短密码 400、改密后旧票失效且只存盐+哈希、吊销要求密码并递增版本、吊销不覆盖密码）。这些接口类用例都用 `tests/fake-github.mjs` 这个内存版 GitHub（照抄 `>1MB 不返回 content`、`sha 不符 409`、`refs PATCH force:false`、`POST /git/trees` 条目必须「sha 与内容二选一」（`content: null` 一律 422）、`不传 base_tree 即提交完整树` 语义），所以 409/覆盖/API 用法类缺陷能在本地就被抓到。
 - **真浏览器回归（弹窗时序与「肉眼看到的对不对」，纯 Node 测不出来）**：先起 dev server `npx vite --port 5173 --strictPort --host 127.0.0.1`，再 `node tests/settle-link-browser-test.mjs`（5 项，结清联动）、`node tests/amend-browser-test.mjs`（14 项，明细锁定 + 变更明细弹窗 + 订单页 + 看板待过账卡片 + 清空草稿 + 菜单顺序 + 菜单角标对齐）、`node tests/void-browser-test.mjs`（9 项，作废按钮/确认框 + 作废标记 + 详情页锁写 + 凭证打标与合计 + 订单行折扣 + 提示间距）、`node tests/backup-browser-test.mjs`（5 项，备份：分类表含订单/退款行、全量导出 JSON 含 9 类、全量导入按序调用含两个 `restore`、旧备份不含订单/退款时不误清、分类导入订单按单号去重）、`node tests/orders-print-browser-test.mjs`（4 项，订单打印/导出：列表 CSV 只导当前页且含业务单号、单张 A4 单头与折扣合计、单张 CSV 明细、已过账订单带关联单据号）、`node tests/orders-bulk-browser-test.mjs`（8 项，订单批量操作：默认只看未过账与三档下拉、历史「草稿」自动迁移、列表备注只提交 `remark`、只打印勾选订单、打印列表商品超过 3 个截断、详情直接打印每单分页、隐藏金额打印无任何金额、勾选批量删除一次 `deleteMany`）、`node tests/order-detail-browser-test.mjs`（10 项，订单详情页：默认只看本次数据、显示售价/进价、隐藏单价与金额、对外只读、供应商联系方式、展开历史价与商品档案、打印/CSV 跟随开关、备注框保存 `remark`）、`node tests/list-print-truncate-browser-test.mjs`（3 项，销售/采购/订单列表打印：商品名称或编码超过 3 个只留前 3 个 +「…」，CSV 仍完整）、`node tests/duplicate-item-browser-test.mjs`（4 项，明细重复商品：订单/销售/采购「快速添加」再次录入同一商品弹出「本商品已录入」、定位后蓝色闪烁不新增行、再次添加成两行）、`node refund-browser-test.mjs`、`node record-payment-browser-test.mjs`、`node timezone-browser-test.mjs`、`node tests/detail-discount-browser-test.mjs`（详情页行折扣与折后单价）、`node tests/unit-net-discount-browser-test.mjs`（9 项，折后单价含整单折扣：销售/采购/订单页面与打印 CSV 同步 + 打印跨页每页重复商品表头）、`node tests/line-batch-browser-test.mjs`（明细勾选框与批量折扣/批量删除）、`node tests/profile-share-browser-test.mjs`（19 项，打印落款、订单金额 xl 字号、分享弹窗与公开只读页）、`node tests/entry-page-browser-test.mjs`（7 项，整页开单表单：直达 `/xxx/new`、继承批量勾选、保存仍走列表页链路、出口是「返回」）、`node tests/entry-newtab-browser-test.mjs`（7 项，列表页不再有「新页面开单」按钮、`/xxx/new` 直达仍是无外壳整页、「返回」回列表）、`node tests/print-layout-browser-test.mjs`（22 项，打印版面：A4 基准 11px、A5 9.5px、每页行数按虚拟边距重算、xl＝1.2 倍加粗、分片数＝Chromium 真实页数且每页都带商品表头、跨页列宽一致（同一份 colgroup + fixed 布局）、「跨页表头」开关对 A4/A5 都生效并被记住）、`node tests/print-paper-browser-test.mjs`（17 项，纸张换算、按折行行数分页、虚拟边距下整页仍装得下、A4 纵向 / 自定义纸张 PDF 实测页数＝分片数、打印设置记住偏好、面板显示的自动行数与切片同口径、标头/商品行数拆解）、`node tests/templates-import-browser-test.mjs`（10 项，订单模板保存/编辑的 POST 与列表渲染、A4/A5/空表打印、订单页从模板导入后仍走新建保存）。全部用 `context.route('**/api/**')` 拦截成内存夹具，**不会写线上仓**。
 
 ## 读取性能优化（Phase 0）
@@ -833,11 +833,26 @@ npx wrangler secret put GITHUB_TOKEN
 - 登录态保存在浏览器本地；点右上角「退出登录」立即失效
 - 会话默认 12 小时过期，勾选记住我则为 30 天；过期后任意操作会提示重新登录
 
-### 修改密码
-密码与签名密钥保存在 Cloudflare Worker Secret（**不写入代码、不进仓库**）：
+### 修改密码 / 退出所有设备
+「用户信息」页底部有一块**登录安全**：
+
+- **修改密码**：填当前密码 + 新密码（至少 8 位）。成功后服务端把会话版本 `+1`，并给本机换发新票据——本机不用重新登录；其他设备上的旧票据会在**约 30 秒内**失效（见下面的缓存说明）。
+- **退出所有设备**：不动密码，只把版本 `+1`，所有票据（包括本机）立即作废，重新登录即可。两个操作都要求当前密码：手机上还挂着会话 ≠ 知道密码，这一层就是拿来挡「手机被人拿到」的。
+
+密码的权威副本存在**数据仓**的 `auth.json`（仓库私有）：
+
+```json
+{ "version": 2, "salt": "…", "hash": "PBKDF2-SHA256(…)", "iterations": 12000, "updatedAt": "…" }
+```
+
+只存盐和哈希，**不存明文**。Worker 每个请求都会校验票据里的 `v` 是否等于该文件的 `version`；为避免每个请求都打 GitHub，这个值在 isolate 里缓存 **30 秒**——所以「改密码后别的设备立刻下线」实际是「最多 30 秒内下线」，同一节点上是立刻。
+
+**初始密码与找回**：还没在应用内改过密码时，登录回退到 Worker Secret `APP_PASSWORD`。忘记密码时，在数据仓**删除 `auth.json`**，即恢复到用 `APP_PASSWORD` 登录（下次应用内改密码会重新生成该文件）。
+
+Worker Secret 仍用于引导与签名（**不写入代码、不进仓库**）：
 
 ```bash
-npx wrangler secret put APP_PASSWORD      # 登录密码
+npx wrangler secret put APP_PASSWORD      # 初始登录密码
 npx wrangler secret put SESSION_SECRET    # 会话签名密钥（随机串即可）
 ```
 
@@ -848,6 +863,8 @@ npx wrangler secret put SESSION_SECRET    # 会话签名密钥（随机串即可
 |---|---|
 | 全站鉴权 | 除 `/api/login`、`/api/session` 与公开的 `/api/share/<token>` 外，所有读、写接口均校验 `Authorization: Bearer <票据>` |
 | 票据签名 | HMAC-SHA256 自签票据，含过期时间；密钥在 Secret 中，前端不可见 |
+| 票据吊销 | 票据带会话版本 `v`；改密码 / 退出所有设备把数据仓 `auth.json` 的 `version` +1，旧票全部作废（跨节点 ≤30 秒生效） |
+| 密码存储 | 应用内改过的密码以 PBKDF2-SHA256（12000 次、随机盐）存入数据仓，不存明文；未改过时回退 Secret `APP_PASSWORD` |
 | 常量时间比对 | 密码与签名比对均为常量时间，避免时序侧信道 |
 | 登录节流 | 同一来源连续失败 6 次锁定 15 分钟，返回剩余尝试次数 |
 | CORS 白名单 | 仅允许 `ALLOWED_ORIGINS` 中配置的域名，不再对全网开放 |

@@ -24,13 +24,19 @@ export const auth = {
       localStorage.removeItem(TOKEN_KEY)
       sessionStorage.removeItem(TOKEN_KEY)
     } catch (e) { /* 忽略 */ }
+  },
+  // 当前票据是否勾了「记住我」：改密码换票时要沿用同一个存储位置，
+  // 否则一次改密会悄悄把跨标签页的登录变成仅当前会话。
+  remembered() {
+    try { return !!localStorage.getItem(TOKEN_KEY) } catch { return false }
   }
 }
 
-// 会话过期广播：由 App.vue 监听并跳转登录页
-export function onUnauthorized() {
+// 会话过期广播：由 App.vue 监听并跳转登录页。
+// message 可选：主动吊销会话时给一句更准确的话（而不是「登录已过期」）。
+export function onUnauthorized(message = '') {
   auth.clear()
-  window.dispatchEvent(new CustomEvent('auth:expired'))
+  window.dispatchEvent(new CustomEvent('auth:expired', { detail: { message } }))
 }
 
 function authHeaders(extra = {}) {
@@ -104,6 +110,20 @@ export const api = {
     request('/login', { method: 'POST', body: JSON.stringify({ password, remember }) }),
   // 启动时自检：票据是否仍然有效
   verify: () => request('/session'),
+  // 改密码：成功后服务端把会话版本 +1 并回一张新票，旧票在别的设备上随即失效。
+  // 本机立刻换上新票，不用重新登录。
+  changePassword: async (current, next) => {
+    const remember = auth.remembered()
+    const r = await request('/auth/password', { method: 'POST', body: JSON.stringify({ current, next, remember }) })
+    if (r.token) auth.set(r.token, remember)
+    return r
+  },
+  // 吊销所有会话：只递增版本、不动密码。本机也会退出（重新登录即用新版本）。
+  revokeSessions: async (password) => {
+    const r = await request('/auth/revoke', { method: 'POST', body: JSON.stringify({ password }) })
+    onUnauthorized('已退出所有设备，请重新登录')
+    return r
+  },
 
   getItems: () => cachedGet('/items'),
   // 历史采购价（{ 商品编码: [行] }）：服务端按采购单实时派生，只在展开历史价时取一次

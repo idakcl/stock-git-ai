@@ -3,7 +3,7 @@ import { readCollection, writeCollection, sortOrders, SPLIT_KEYS } from './stora
 import { refundTransaction } from './refunds.js'
 import { orderTransaction } from './orders.js'
 import { amendTransaction } from './amends.js'
-import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
+import { checkLogin, verifyToken, bearer, corsHeaders, changePassword, revokeSessions, issueToken } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 import { isVoided } from '../src/utils/account.js'
 import { voidTransaction } from './voids.js'
@@ -397,7 +397,7 @@ export async function handleApi(req, url, env, execCtx) {
     try {
       const body = await req.json()
       const r = await checkLogin(req, env, body)
-      if (r.ok) return json(req, env, { ok: true, token: r.token, expiresIn: r.expiresIn })
+      if (r.ok) return json(req, env, { ok: true, token: r.token, expiresIn: r.expiresIn, version: r.version })
       if (r.misconfigured) return json(req, env, { error: '服务端未配置登录密钥，请联系管理员' }, 500)
       if (r.lockedFor) return json(req, env, { error: `登录尝试过多，请 ${r.lockedFor} 秒后重试` }, 429)
       return json(req, env, { error: `密码错误，还可尝试 ${r.remain} 次` }, 401)
@@ -426,6 +426,30 @@ export async function handleApi(req, url, env, execCtx) {
   }
 
   try {
+    // 登录安全：改密码 / 吊销所有会话。
+    // 两者都要求「当前密码」，持有会话不等于知道密码——这正是这一步的价值：
+    // 手机被别人拿到时，改不了密码、也吊销不了，但至少动不了账。
+    // 成功后版本 +1：本机用返回的新票据继续用，其他设备上的旧票据在 30 秒内失效。
+    if (path === '/auth/password' && method === 'POST') {
+      try {
+        const body = await req.json()
+        const version = await changePassword(env, body)
+        const remember = body && body.remember
+        const ttlMs = remember ? 30 * 24 * 3600 * 1000 : 12 * 3600 * 1000
+        return json(req, env, { ok: true, token: await issueToken(env, 'admin', ttlMs, version), expiresIn: ttlMs })
+      } catch (e) {
+        return json(req, env, { error: e.message || '修改密码失败' }, e.status || 500)
+      }
+    }
+    if (path === '/auth/revoke' && method === 'POST') {
+      try {
+        const body = await req.json()
+        const version = await revokeSessions(env, body)
+        return json(req, env, { ok: true, version })
+      } catch (e) {
+        return json(req, env, { error: e.message || '吊销失败' }, e.status || 500)
+      }
+    }
     if (path === '/items' && method === 'GET') return json(req, env, await readJSON(env, 'items.json'))
     // 历史采购价：按需派生（不再内嵌 items.json，见 derive 中的说明）。
     // 只在商品行「展开历史价」时请求一次；结果与 derive 完全同源，不存在两套口径。

@@ -114,9 +114,9 @@ async function check() {
 }
 
 // 任何接口返回 401（会话过期）都会广播此事件
-function onExpired() {
+function onExpired(e) {
   authed.value = false
-  ElMessage.warning('登录已过期，请重新登录')
+  ElMessage.warning((e && e.detail && e.detail.message) || '登录已过期，请重新登录')
 }
 // ---- 宽表自适应 ------------------------------------------------------------
 // 取舍：

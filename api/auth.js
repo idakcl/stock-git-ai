@@ -2,7 +2,17 @@
 // 为什么不用 JWT 库：Worker 环境内置 Web Crypto，自签 HMAC-SHA256 足够，且零依赖。
 // token 格式：base64url(payload).base64url(signature)
 // payload 内含过期时间(exp)、签发时间(iat)、主题(sub)，签名密钥来自 Worker Secret(SESSION_SECRET)
+import { gh, writeJSON } from './github.js'
+
 const enc = new TextEncoder()
+// 密码与会话版本存在数据仓（私有）里的 auth.json：
+//   { version, salt, hash, iterations, updatedAt }
+// 为什么放数据仓而不是 KV：本项目没有绑定 KV/DO，而“改了密码/吊销后旧票据立刻失效”
+// 必须有一个所有边缘节点都能读到的权威值。数据仓本来就是唯一持久层，读它一次 30 秒缓存。
+const SESSIONS_FILE = 'auth.json'
+const AUTH_CACHE_MS = 30 * 1000
+const MIN_PASSWORD = 8
+const ITERATIONS = 12000
 
 const b64url = (buf) => {
   const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer || buf)
@@ -33,9 +43,107 @@ async function hmac(secret, message) {
   return await crypto.subtle.sign('HMAC', key, enc.encode(message))
 }
 
-export async function issueToken(env, user = 'admin', ttlMs = 12 * 3600 * 1000) {
+const toHex = (bytes) => [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
+const fromHex = (hex) => new Uint8Array((String(hex).match(/../g) || []).map(h => parseInt(h, 16)))
+
+async function pbkdf2(password, saltHex, iterations) {
+  const key = await crypto.subtle.importKey('raw', enc.encode(String(password)), 'PBKDF2', false, ['deriveBits'])
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: fromHex(saltHex), iterations, hash: 'SHA-256' }, key, 256)
+  return toHex(new Uint8Array(bits))
+}
+
+// 读 auth.json。fresh=true 用于登录/改密这类「必须看到最新值」的场合；
+// 其余路径走 30 秒缓存，避免每个 API 请求都打一次 GitHub。
+// 读失败时沿用上一次已知值（GitHub 抖动不该把所有人踢下线）；404 表示还没设置过密码。
+let authCache = { at: 0, value: null }
+async function readAuth(env, fresh = false) {
+  if (!fresh && authCache.value !== undefined && authCache.at && Date.now() - authCache.at < AUTH_CACHE_MS) {
+    return authCache.value
+  }
+  try {
+    const data = await gh(`/contents/${SESSIONS_FILE}`, env)
+    let content = ''
+    if (data.encoding === 'base64') content = atob(String(data.content || '').replace(/\s/g, ''))
+    else if (typeof data.content === 'string') content = data.content
+    const value = content ? JSON.parse(content) : null
+    authCache = { at: Date.now(), value }
+    return value
+  } catch (e) {
+    if (/GitHub 404/.test(String(e && e.message))) {
+      authCache = { at: Date.now(), value: null }
+      return null
+    }
+    return authCache.value === undefined ? null : authCache.value
+  }
+}
+
+// 当前会话版本：票据里带 v，v 与这里不一致即视为已吊销。
+export async function sessionVersion(env) {
+  const rec = await readAuth(env)
+  return Number(rec && rec.version || 0)
+}
+
+// 校验密码：设置过密码就用数据仓里的 PBKDF2 记录，否则回退到 Worker Secret 里的初始密码。
+export async function passwordMatches(env, password, { fresh = true } = {}) {
+  const rec = await readAuth(env, fresh)
+  if (rec && rec.hash) {
+    const got = await pbkdf2(password, rec.salt, Number(rec.iterations) || ITERATIONS)
+    return timingSafeEqual(got, rec.hash)
+  }
+  return !!env.APP_PASSWORD && timingSafeEqual(String(password || ''), env.APP_PASSWORD)
+}
+
+function newSalt() {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return toHex(bytes)
+}
+
+// 改密码：要求当前密码（会话在手不等于知道密码），成功后版本 +1，
+// 于是「改了密码，别的设备还挂着旧票据」这件事在 30 秒内自动消失。
+export async function changePassword(env, input) {
+  const current = String((input && input.current) || '')
+  const next = String((input && input.next) || '')
+  if (next.length < MIN_PASSWORD) {
+    throw Object.assign(new Error(`新密码至少 ${MIN_PASSWORD} 位`), { status: 400 })
+  }
+  if (!(await passwordMatches(env, current))) {
+    throw Object.assign(new Error('当前密码错误'), { status: 403 })
+  }
+  const prev = await readAuth(env, true) || { version: 0 }
+  const salt = newSalt()
+  const hash = await pbkdf2(next, salt, ITERATIONS)
+  const record = {
+    version: Number(prev.version || 0) + 1,
+    salt, hash, iterations: ITERATIONS,
+    updatedAt: new Date().toISOString()
+  }
+  await writeJSON(env, SESSIONS_FILE, record, 'update password')
+  authCache = { at: Date.now(), value: record }
+  return record.version
+}
+
+// 吊销所有会话：不动密码，只把版本 +1。当前设备重新登录即可，其他设备全部失效。
+export async function revokeSessions(env, input) {
+  const current = String((input && input.password) || '')
+  if (!(await passwordMatches(env, current))) {
+    throw Object.assign(new Error('密码错误'), { status: 403 })
+  }
+  const prev = await readAuth(env, true) || { version: 0 }
+  const record = {
+    ...(prev.hash ? { salt: prev.salt, hash: prev.hash, iterations: prev.iterations } : {}),
+    version: Number(prev.version || 0) + 1,
+    updatedAt: new Date().toISOString()
+  }
+  await writeJSON(env, SESSIONS_FILE, record, 'revoke sessions')
+  authCache = { at: Date.now(), value: record }
+  return record.version
+}
+
+export async function issueToken(env, user = 'admin', ttlMs = 12 * 3600 * 1000, version = 0) {
   const now = Date.now()
-  const payload = JSON.stringify({ sub: user, iat: now, exp: now + ttlMs })
+  const payload = JSON.stringify({ sub: user, iat: now, exp: now + ttlMs, v: Number(version || 0) })
   const sig = await hmac(env.SESSION_SECRET, payload)
   return `${b64url(enc.encode(payload))}.${b64url(sig)}`
 }
@@ -50,7 +158,10 @@ export async function verifyToken(token, env) {
     if (!timingSafeEqual(s, b64url(expect))) return false
     const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(p)))
     if (!payload || typeof payload.exp !== 'number') return false
-    return payload.exp > Date.now()
+    if (payload.exp <= Date.now()) return false
+    // 版本号对不上＝这张票已被「改密码 / 吊销所有会话」作废。
+    // 旧版本签发的票没有 v，按 0 处理：没改过密码前它们继续有效，改过之后一并失效。
+    return Number(payload.v || 0) === await sessionVersion(env)
   } catch {
     return false
   }
@@ -92,9 +203,13 @@ export async function checkLogin(req, env, body) {
   const locked = lockRemaining(key)
   if (locked > 0) return { ok: false, lockedFor: locked }
 
-  if (!env.APP_PASSWORD) return { ok: false, misconfigured: true }
   const pass = String((body && body.password) || '')
-  if (!timingSafeEqual(pass, env.APP_PASSWORD)) {
+  // 密码来源：数据仓里的 PBKDF2 记录优先（应用内改过密码），否则用 Worker Secret 的初始密码。
+  // 未配置任何密码时才算服务端配置错误。
+  const rec = await readAuth(env, true)
+  if (!(rec && rec.hash) && !env.APP_PASSWORD) return { ok: false, misconfigured: true }
+  const ok = await passwordMatches(env, pass, { fresh: true })
+  if (!ok) {
     const fails = noteFailure(key)
     const remain = MAX_FAIL - fails
     return { ok: false, remain: remain > 0 ? remain : 0 }
@@ -102,7 +217,8 @@ export async function checkLogin(req, env, body) {
   noteSuccess(key)
   const remember = body && body.remember
   const ttlMs = remember ? 30 * 24 * 3600 * 1000 : 12 * 3600 * 1000
-  return { ok: true, token: await issueToken(env, 'admin', ttlMs), expiresIn: ttlMs }
+  const version = Number(rec && rec.version || 0)
+  return { ok: true, token: await issueToken(env, 'admin', ttlMs, version), expiresIn: ttlMs, version }
 }
 
 // 从请求中取出 bearer token
