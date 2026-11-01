@@ -174,6 +174,7 @@ POST /api/ai/v1/purchases
 ```json
 { "customer": "客户甲", "date": "2026-02-01",
   "items": [{ "code": "P00001", "qty": 3, "price": 12, "discountRate": 1 }],
+  "discountRates": [0.95, 0.95, 0.97],
   "discount": 0, "remark": "AI 代开", "requestId": "req-20260201-0002" }
 ```
 
@@ -184,7 +185,34 @@ POST /api/ai/v1/purchases
 3. 生成单号（销售 `X…`、采购 `C…`），挂账、无收款流水，`createdBy: "ai:<密钥名>"`；
 4. 一次 git 提交写入单据 + 重算库存/商品档案/供应商链接 + 审计日志。
 
-返回 `{ ok, id, kind, amount }`。
+**折扣的两种写法（可叠加）**
+
+| 字段 | 含义 | 落在哪 |
+|---|---|---|
+| `items[].discountRate` / `items[].discountRates` | 行折扣：标量或级联数组，只影响本行 | 行 `discountRate` / `discountRates` / `discount` / `total` |
+| `discountRates: [0.95,0.95,0.97]` | **整单层级折扣**：逐级连乘（等效 0.875425），作用在明细合计之后 | 单据 `discountRates`（原样存数组）与等效值 `discountRate` |
+| `discount: 23.92` | 整单优惠：减**固定金额**，在折扣链之后 | 单据 `discount` |
+
+三者顺序与网页完全一致：`明细合计 → 整单折扣链 → 整单优惠 → 应收/应付`。
+金额核对：`total` 是明细原价合计，`discountRates` 按连乘作用于它，`discount` 再减掉。
+
+返回：
+
+```json
+{ "ok": true, "id": "X202602011000000001", "kind": "sale",
+  "total": 192, "amount": 168.08,
+  "discountRates": [0.95, 0.95, 0.97], "discountRate": 0.88,
+  "discountAmount": 23.92, "discountedTotal": 168.08, "due": 168.08 }
+```
+
+- `amount` 与历史口径一致，是**折后应付**（已含折扣链与优惠）；
+- `total` 是明细原价合计，用来核对折扣基数；
+- `discountedTotal` 是「明细合计 × 折扣链」，`discountAmount = total − discountedTotal`，`due` 再减 `discount`；
+- AI 不要再自己乘一遍折扣，直接读 `amount` / `due` 即可。
+
+> 草稿订单（`POST /orders` 的 `action=save`）用同一组字段：`order.discountRates`、`order.discount`，
+> 过账时原样带进正式单据。历史上直接开单这条路把 `discountRates` 写成空数组（只认 `discount`），
+> 传了链也只剩「整单优惠」——已修正，旧单不会自动补链，如需补请按原单金额重开。
 
 ### `POST /refunds` — 退货退款（需要 `write:refunds`）
 

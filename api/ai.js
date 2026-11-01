@@ -19,7 +19,7 @@ import { genVoucherCode } from '../src/utils/voucher.js'
 import { AI_ENDPOINTS, AI_SCOPE_GROUPS, AI_PRESETS } from '../src/utils/aiScopes.js'
 import { genOrderId, nextEntityCode } from '../src/utils/code.js'
 import { todayCN } from '../src/utils/time.js'
-import { round2, receivableOf, payableOf, grossOf, receivedSumOf, paidSumOf, isVoided, syncPayments } from '../src/utils/account.js'
+import { round2, receivableOf, payableOf, grossOf, receivedSumOf, paidSumOf, isVoided, syncPayments, discountedTotalOf } from '../src/utils/account.js'
 import { orderAmount, isUnposted } from '../src/utils/orders.js'
 import { orderTransaction } from './orders.js'
 import { refundTransaction } from './refunds.js'
@@ -431,6 +431,24 @@ function salePriceOf(state, customer, item) {
   return Number(item.price) || 0
 }
 
+// 整单折扣链：与网页「层级折扣」同一字段（discountRates 数组，逐级连乘），
+// 兼容旧调用方传的单个 discountRate 标量。以前这里把 discountRates 写死成 []，
+// AI 传了链也只按「整单优惠金额」算——用户第一单就是这么丢的（M09 的孪生问题）。
+const MAX_DISCOUNT_STEPS = 10
+function discountChainOf(input) {
+  const raw = Array.isArray(input.discountRates) && input.discountRates.length
+    ? input.discountRates
+    : (input.discountRate != null && input.discountRate !== '' ? [input.discountRate] : [])
+  if (raw.length > MAX_DISCOUNT_STEPS) fail(`整单折扣最多 ${MAX_DISCOUNT_STEPS} 级`)
+  const rates = raw.map(Number)
+  for (const r of rates) {
+    if (!(Number.isFinite(r) && r > 0 && r <= 1)) {
+      fail('discountRates 每一项必须在 (0,1] 之间（如 [0.95,0.95,0.97]；1＝不打折）；想减固定金额请用 discount')
+    }
+  }
+  return rates.map(r => round4(r))
+}
+
 // 直接开单：服务端按商品档案重算每一行。
 // 默认要求客户/供应商与商品都已建档（防手滑造出新名字）；
 // 传了 allowNewItems / allowNewSuppliers 时，才按名称自动建档（见 api/ai-catalog.js）。
@@ -461,15 +479,22 @@ function buildDirectDoc(kind, input, state, keyName, requestId, now, cat) {
     const fallback = isSale ? salePriceOf(state, party, it) : (Number(it.cost) || 0)
     const price = l.price == null || l.price === '' ? fallback : Number(l.price)
     if (!Number.isFinite(price) || price < 0) fail(`第 ${i + 1} 行单价不能为负`)
-    const rate = l.discountRate == null ? 1 : Number(l.discountRate)
+    // 行折扣：支持级联数组 discountRates（与网页一致），也接受旧的单个 discountRate
+    const lineRates = Array.isArray(l.discountRates) && l.discountRates.length ? discountChainOf({ discountRates: l.discountRates }) : []
+    const rate = lineRates.length ? lineRates.reduce((a, b) => a * b, 1) : (l.discountRate == null ? 1 : Number(l.discountRate))
     if (!(rate >= 0 && rate <= 1)) fail(`第 ${i + 1} 行折扣率必须在 0~1 之间（1＝不打折）`)
     const gross = round2(qty * price)
     const total = Math.max(0, round2(gross - round2(gross * (1 - rate))))
-    return { code: it.code, name: it.name, unit: it.unit || '', qty, price, discountRate: round4(rate), discount: round2(gross - total), total }
+    const line = { code: it.code, name: it.name, unit: it.unit || '', qty, price, discountRate: round4(rate), discount: round2(gross - total), total }
+    if (lineRates.length) line.discountRates = lineRates
+    return line
   })
   const list = isSale ? (state.sales || []) : (state.purchases || [])
   const discount = round2(Number(input.discount || 0))
   if (discount < 0) fail('整单优惠 discount 不能为负')
+  // 整单折扣链：落库成 discountRates 数组（与网页一致），discountRate 存等效乘积供旧读法兼容
+  const discountRates = discountChainOf(input)
+  const chainRate = discountRates.length ? round2(discountRates.reduce((a, b) => a * b, 1)) : 1
   const total = round2(lines.reduce((s, l) => s + l.total, 0))
   const doc = {
     id: genOrderId(isSale ? 'X' : 'C', list, date),
@@ -478,8 +503,8 @@ function buildDirectDoc(kind, input, state, keyName, requestId, now, cat) {
     items: lines,
     total,
     discount,
-    discountRates: [],
-    discountRate: 1,
+    discountRates,
+    discountRate: chainRate,
     payments: [],
     [isSale ? 'received' : 'paid']: 0,
     settle: '挂账',
@@ -510,8 +535,16 @@ async function createDirectDoc(kind, input, env, ctx, deps, requestId) {
     message: `ai: create ${kind} ${doc.id} by ${ctx.key.name}`,
     logEntry: { source: 'ai', action: `create-${kind}`, code: doc.id, key: ctx.key.name, keyId: ctx.key.id }
   })
+  // 金额口径：amount 仍是「原价合计」（与历史调用方一致），折扣链效果另给三个字段，
+  // 避免 AI 拿到金额后自己再乘一遍折扣、把账算重。
+  const discountedTotal = discountedTotalOf(doc)
   return {
-    ok: true, id: doc.id, kind, amount: grossOf(doc),
+    ok: true, id: doc.id, kind, amount: grossOf(doc), total: doc.total,
+    discountRates: doc.discountRates || [],
+    discountRate: doc.discountRate,
+    discountAmount: round2(grossOf(doc) - discountedTotal),
+    discountedTotal,
+    due: kind === 'sale' ? receivableOf(doc) : payableOf(doc),
     ...(cat.createdItems.length ? { createdItems: cat.createdItems } : {}),
     ...(cat.createdSuppliers.length ? { createdSuppliers: cat.createdSuppliers } : {}),
     commit: r.unchanged ? undefined : r.sha
@@ -755,7 +788,8 @@ function schemaFor(env, ctx) {
     endpoints: AI_ENDPOINTS.map(e => ({ ...e, allowed: !e.scope || ctx.scopes.has(e.scope) })),
     notes: [
       '所有接口都需要在请求头带 Authorization: Bearer <密钥>（也支持 ?key=，但不推荐，容易留在日志里）。',
-      '金额由服务端按商品档案重算；AI 只需给商品编码（code）、数量（qty），可选 price 与 discountRate。',
+      '金额由服务端按商品档案重算；AI 只需给商品编码（code）、数量（qty），可选 price 与行折扣 discountRate（0~1，1＝不打折）。',
+      '层级（整单）折扣用 discountRates 数组，逐级连乘，与网页「多级折扣」同一字段：如 [0.95,0.95,0.97]＝先打 95 折两次、再打 97 折（等效 0.875425）。落库仍是数组，回读不变；折扣链作用在明细合计之后、「整单优惠」之前。想直接减固定金额用 discount（元），二者可叠加。',
       '所有写接口都必须带 requestId（16~80 位字母/数字/短横线），网络重试时复用同一个值，服务端据此保证不重复开单。',
       '直接开单（POST /sales、/purchases）默认要求客户/供应商与商品已建档；新单位请先用 POST /master 建档。',
       '需要一步到底时可传 allowNewItems: true（明细行只给 name + price，按名称匹配不到就自动建商品）与 allowNewSuppliers: true（采购单的供应商按名称自动建档）。两个开关默认关闭，只在本次请求生效，返回里有 createdItems / createdSuppliers 便于核对；一次最多各建 10 个。',
@@ -786,19 +820,27 @@ function normalizeDraftOrder(order, cat, state = {}) {
     const fallback = kind === 'sale' ? salePriceOf(state, party, it) : (Number(it.cost) || 0)
     const price = l.price == null || l.price === '' ? fallback : Number(l.price)
     if (!Number.isFinite(price) || price < 0) fail(`第 ${i + 1} 行单价不能为负`)
-    const rate = l.discountRate == null ? 1 : Number(l.discountRate)
+    const lineRates = Array.isArray(l.discountRates) && l.discountRates.length ? discountChainOf({ discountRates: l.discountRates }) : []
+    const rate = lineRates.length ? lineRates.reduce((a, b) => a * b, 1) : (l.discountRate == null ? 1 : Number(l.discountRate))
     if (!(rate >= 0 && rate <= 1)) fail(`第 ${i + 1} 行折扣率必须在 0~1 之间（1＝不打折）`)
     const gross = round2(qty * price)
     const total = Math.max(0, round2(gross - round2(gross * (1 - rate))))
-    return { code: it.code, name: it.name, unit: it.unit || '', qty, price, discountRate: round4(rate), discount: round2(gross - total), total }
+    const line = { code: it.code, name: it.name, unit: it.unit || '', qty, price, discountRate: round4(rate), discount: round2(gross - total), total }
+    if (lineRates.length) line.discountRates = lineRates
+    return line
   })
+  // 整单折扣链与正式单同字段：AI 传 discountRates（或旧的 discountRate 标量）都落成数组，
+  // discountRate 存等效乘积，过账时 orderToOrderDoc 原样带进正式单据
+  const rates = discountChainOf(order)
   return {
     ...order,
     [partyKey]: party,
     date,
     items: lines,
     total: round2(lines.reduce((s, l) => s + l.total, 0)),
-    discount: round2(Number(order.discount || 0))
+    discount: round2(Number(order.discount || 0)),
+    discountRates: rates,
+    discountRate: rates.length ? round2(rates.reduce((a, b) => a * b, 1)) : 1
   }
 }
 

@@ -278,6 +278,64 @@ await t('M09 草稿订单同口径：只给编码+数量也按最近成交价带
   assert.equal(draft.items[0].price, 10.5)
 })
 
+await t('M09 层级折扣：discountRates 数组落库并真的按链算应付', async () => {
+  const data = await ok('/api/ai/v1/sales', {
+    key: maxKey, method: 'POST',
+    body: {
+      customer: '客户甲', date: '2026-02-06',
+      items: [{ code: 'P00001', qty: 16 }], // 16 × 12 = 192
+      discountRates: [0.95, 0.95, 0.97],
+      requestId: rid(9101)
+    }
+  })
+  assert.equal(data.total, 192, '原价合计单独给，便于核对折扣基数')
+  assert.equal(data.amount, 168.08, 'amount 一直是折后应付（与历史口径一致）')
+  assert.deepEqual(data.discountRates, [0.95, 0.95, 0.97])
+  assert.equal(data.discountedTotal, 168.08)
+  assert.equal(data.due, 168.08)
+  const doc = salesFile().find(x => x.id === data.id)
+  assert.deepEqual(doc.discountRates, [0.95, 0.95, 0.97], '回读必须还是数组，不是空数组')
+  assert.equal(doc.total, 192)
+})
+
+await t('M09 层级折扣可与整单优惠叠加；非法折扣率 → 400', async () => {
+  const data = await ok('/api/ai/v1/sales', {
+    key: maxKey, method: 'POST',
+    body: {
+      customer: '客户甲', date: '2026-02-07',
+      items: [{ code: 'P00001', qty: 16 }],
+      discountRates: [0.95, 0.95, 0.97], discount: 10,
+      requestId: rid(9102)
+    }
+  })
+  assert.equal(data.discountedTotal, 168.08)
+  assert.equal(data.due, 158.08, '折扣链之后才是整单优惠')
+  const bad = await call('/api/ai/v1/sales', {
+    key: maxKey, method: 'POST',
+    body: { customer: '客户甲', items: [{ code: 'P00001', qty: 1 }], discountRates: [0.9, 1.2], requestId: rid(9103) }
+  })
+  assert.equal(bad.status, 400)
+  assert.match(bad.data.error, /0,1\]|0~1|discountRates/)
+})
+
+await t('M09 草稿订单同样保留折扣链，过账后金额一致', async () => {
+  const saved = await ok('/api/ai/v1/orders', {
+    key: maxKey, method: 'POST',
+    body: {
+      action: 'save', requestId: rid(9104),
+      order: { kind: 'sale', customer: '客户甲', date: '2026-02-08', items: [{ code: 'P00001', qty: 16 }], discountRates: [0.95, 0.95, 0.97] }
+    }
+  })
+  const draft = JSON.parse(repo.read('orders.json')).find(o => o.id === saved.code)
+  assert.deepEqual(draft.discountRates, [0.95, 0.95, 0.97])
+  const posted = await ok('/api/ai/v1/orders', {
+    key: maxKey, method: 'POST', body: { action: 'post', orderId: saved.code, requestId: rid(9105) }
+  })
+  const doc = salesFile().find(x => x.id === posted.code)
+  assert.deepEqual(doc.discountRates, [0.95, 0.95, 0.97])
+  assert.equal(doc.total, 192)
+})
+
 await t('M05 老脏单（payments:[] + 旧 received）走 AI 收款不丢旧钱', async () => {
   const dirty = {
     id: 'X202601051200000001', date: '2026-01-05', customer: '客户甲',
