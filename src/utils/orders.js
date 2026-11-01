@@ -9,7 +9,7 @@
 // 状态机：草稿 --过账--> 已过账（生成销售/采购单）--撤销过账--> 草稿（仅当那张单还没动过钱）
 // 订金：订单阶段就能收钱，收的时候开一张正常收款单（SK-/FK-），items.orderId 指向订单号；
 //       过账时这笔订金原样搬成新单的第一条收款流水（凭证号带着走，不改写已开凭证）。
-import { grossOf, round2, syncPayments, ensurePayments, depositSumOf } from './account.js'
+import { grossOf, round2, syncPayments, ensurePayments, depositSumOf, isVoided, VOIDED } from './account.js'
 import { normalizeRate } from './catalog.js'
 import { genOrderId } from './code.js'
 import { genVoucherCode } from './voucher.js'
@@ -146,8 +146,32 @@ function settlePostedDoc(state, doc, kind, now) {
 const clone = (state) => (typeof structuredClone === 'function' ? structuredClone(state) : JSON.parse(JSON.stringify(state)))
 
 // 服务端事务体：所有订单写操作都走这里，输入非法一律抛错（调用方负责一次提交、失败不重放）。
+
+// 作废订单时连带作废它已经开出的订金凭证。
+// 为什么必须连带：订金落库时开的是正经收款单/付款单（SK-/FK-），它已经进了「收付款单」台账。
+// 订单作废而凭证留着，就是一笔永远对不上的钱；反过来，只要凭证还在，订单也不该被抹掉。
+// 共享凭证（一张凭证同时覆盖别的单据）不替用户猜，直接拦住让他先去拆开。
+function voidOrderDeposits(state, order, now) {
+  const codes = (order.deposits || []).map(d => d.voucher).filter(Boolean)
+  if (!codes.length) return { state, vouchers: [] }
+  const { voucherFile } = orderKeys(order.kind)
+  const set = new Set(codes)
+  const list = state[voucherFile] || []
+  const shared = list.filter(v => set.has(v.code) && (v.items || []).some(it => it.orderId && it.orderId !== order.id))
+  if (shared.length) {
+    fail(`订金凭证 ${shared.map(v => v.code).join('、')} 还覆盖其他单据，请先到「收付款单」里拆开再作废`, 409)
+  }
+  const voided = []
+  const next = list.map(v => {
+    if (!set.has(v.code) || isVoided(v)) return v
+    voided.push(v.code)
+    return { ...v, status: VOIDED, voidedAt: now, voidedReason: '随订单作废', voidOf: order.id }
+  })
+  return { state: { ...state, [voucherFile]: next }, vouchers: voided }
+}
+
 export function applyOrderOperation(snapshot, input, now = new Date().toISOString()) {
-  const state = clone(snapshot)
+  let state = clone(snapshot)
   state.orders = Array.isArray(state.orders) ? state.orders.slice() : []
   const action = input?.action
   const find = id => state.orders.find(o => o.id === id)
@@ -326,15 +350,19 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
       const exists = (state[listKey] || []).some(o => o.id === order.postedOrderId)
       if (exists) fail('已过账的订单请先撤销过账')
     }
-    if (orderDepositSum(order) > 0) fail('这张订单已收过订金（订金凭证已开），不能作废；请过账后在单据里处理退款')
+    // 收过订金的订单：把订金凭证一并作废（钱退回对方），而不是拦着不让作废。
+    // 以前这里直接报错，结果是一张「收了订金又想取消」的订单永远卡在列表里，
+    // 只能去收付款单里手工作废凭证、再回来删订单——两步都容易漏。
+    const dep = voidOrderDeposits(state, order, now)
+    state = dep.state
     const idx = state.orders.findIndex(o => o.id === order.id)
     state.orders[idx] = {
       ...order,
       status: VOIDED_ORDER,
       voidedAt: now,
-      voidedReason: String(input.reason || '').trim().slice(0, 200)
+      voidedReason: String(input.reason || '作废订单').trim().slice(0, 200)
     }
-    return { state, code: order.id, voided: true }
+    return { state, code: order.id, voided: true, vouchers: dep.vouchers }
   }
 
   // 批量删除：勾选多张订单后一次提交，只写一次 orders.json。
@@ -356,15 +384,22 @@ export function applyOrderOperation(snapshot, input, now = new Date().toISOStrin
         const exists = (state[listKey] || []).some(o => o.id === order.postedOrderId)
         if (exists) { skipped++; continue }
       }
-      if (orderDepositSum(order) > 0) { skipped++; continue }
+      // 收过订金的也允许作废：订金凭证会跟着一起作废（见 voidOrderDeposits）
       removable.push(id)
     }
-    if (!removable.length) fail('勾选的订单都不能作废：已过账的需先撤销过账，收过订金的需先处理订金')
+    if (!removable.length) fail('勾选的订单都不能作废：已过账的需先撤销过账')
     const drop = new Set(removable)
+    const vouchers = []
+    for (const id of removable) {
+      const o = state.orders.find(x => x.id === id)
+      const dep = voidOrderDeposits(state, o, now)
+      state = dep.state
+      vouchers.push(...dep.vouchers)
+    }
     state.orders = state.orders.map(o => drop.has(o.id)
-      ? { ...o, status: VOIDED_ORDER, voidedAt: now, voidedReason: String(input.reason || '').trim().slice(0, 200) }
+      ? { ...o, status: VOIDED_ORDER, voidedAt: now, voidedReason: String(input.reason || '作废订单').trim().slice(0, 200) }
       : o)
-    return { state, code: '', removed: removable.length, skipped }
+    return { state, code: '', removed: removable.length, skipped, vouchers }
   }
 
   // 清空草稿：一次请求删掉全部「纯草稿」，避免几十张草稿各发一次请求、各写一次 git 提交。

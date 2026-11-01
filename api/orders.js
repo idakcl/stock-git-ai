@@ -35,7 +35,7 @@ export async function orderTransaction(env, input, derive, rebuildStock, prepare
   const r = await commitTransaction(tx, {
     next,
     message: `order: ${input.action} ${result.code || input.orderId || (result.removed != null ? `${result.removed} orders` : result.restored != null ? `${result.restored} orders` : result.migrated != null ? `${result.migrated} status` : '')}`.trim(),
-    logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed }
+    logEntry: { source: 'order', action: input.action, code: result.code, orderId: input.orderId, removed: result.removed, vouchers: result.vouchers }
   })
   if (r.unchanged) return { ok: true, code: result.code, unchanged: true, removed: result.removed || 0, skipped: result.skipped || 0, restored: result.restored, migrated: result.migrated || 0 }
   // code 按操作含义不同：save/post/delete = 订单号，post 时 result.orderId 也是订单号、code 是新单据号，
@@ -50,6 +50,7 @@ export async function orderTransaction(env, input, derive, rebuildStock, prepare
     posted: result.posted,
     settleMode: result.settleMode,
     skipped: result.skipped,
+    vouchers: result.vouchers || [],
     restored: result.restored,
     migrated: result.migrated,
     commit: r.sha

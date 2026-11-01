@@ -221,10 +221,55 @@ test('作废草稿：记录保留、状态转已作废；收过订金/已过账�
   assert.throws(() => applyOrderOperation(v.state, { action: 'unpost', orderId: id }), /已作废/)
   // 作废单不算未过账：不能被「清空草稿」再算一次，也不进待过账
   assert.equal(isUnposted(VOIDED_ORDER), false)
-  const withDep = applyOrderOperation(s, { action: 'deposit', orderId: id, amount: 5, date: '2026-10-29' }).state
-  assert.throws(() => applyOrderOperation(withDep, { action: 'delete', orderId: id }), /订金/)
   const posted = applyOrderOperation(s, { action: 'post', orderId: id }).state
   assert.throws(() => applyOrderOperation(posted, { action: 'delete', orderId: id }), /撤销过账/)
+})
+
+test('带订金的草稿也能作废：订金凭证一并作废，金额不再进台账', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const id = s.orders[0].id
+  const withDep = applyOrderOperation(s, { action: 'deposit', orderId: id, amount: 5, date: '2026-10-29' }).state
+  const voucher = withDep.orders[0].deposits[0].voucher
+  assert.ok(voucher, '订金要开凭证')
+  const v = applyOrderOperation(withDep, { action: 'delete', orderId: id, reason: '客户取消' })
+  assert.equal(v.state.orders[0].status, VOIDED_ORDER)
+  assert.deepEqual(v.vouchers, [voucher], '要回报被连带作废的凭证号')
+  const rv = v.state.receipts.find(x => x.code === voucher)
+  assert.equal(rv.status, '作废', '凭证必须一起作废，否则台账上留一笔无主的钱')
+  assert.equal(rv.voidOf, id)
+  assert.equal(rv.voidedReason, '随订单作废')
+  // 明细/金额原样保留，方便回溯
+  assert.equal(rv.total, 5)
+  // 幂等：重复作废不再改凭证
+  const again = applyOrderOperation(v.state, { action: 'delete', orderId: id })
+  assert.equal(again.duplicate, true)
+  assert.equal(again.state.receipts.find(x => x.code === voucher).voidedAt, rv.voidedAt)
+})
+
+test('共享的订金凭证不替用户猜：一张凭证覆盖别的单据时 409', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const id = s.orders[0].id
+  const withDep = applyOrderOperation(s, { action: 'deposit', orderId: id, amount: 5, date: '2026-10-29' }).state
+  const code = withDep.receipts[0].code
+  // 手工模拟「合并收款」：这张凭证同时指向另一张订单
+  const shared = {
+    ...withDep,
+    receipts: withDep.receipts.map(r => r.code === code
+      ? { ...r, items: [...r.items, { orderId: 'D-other', orderType: 'order', amount: 1 }] } : r)
+  }
+  assert.throws(() => applyOrderOperation(shared, { action: 'delete', orderId: id }), /还覆盖其他单据/)
+})
+
+test('批量作废：带订金的订单也在可作废范围内', () => {
+  const s = saveOrder(fixture(), draft()).state
+  const two = saveOrder(s, draft({ date: '2026-10-30' })).state
+  const id = two.orders[0].id
+  const withDep = applyOrderOperation(two, { action: 'deposit', orderId: id, amount: 5, date: '2026-10-30' }).state
+  const r = applyOrderOperation(withDep, { action: 'deleteMany', orderIds: withDep.orders.map(o => o.id) })
+  assert.equal(r.removed, 2)
+  assert.equal(r.vouchers.length, 1)
+  assert.ok(r.state.orders.every(o => o.status === VOIDED_ORDER))
+  assert.equal(r.state.receipts[0].status, '作废')
 })
 
 test('孤儿订单（过账生成的单据已被删掉）：撤销退回草稿、删除也放行', () => {
@@ -270,7 +315,7 @@ test('清空草稿：一次请求删掉全部纯草稿，已过账与已收订�
   assert.equal(s.orders.length, 5)
 })
 
-test('批量删除：一次请求删多张，已过账/已收订金/不存在的自动跳过', () => {
+test('批量删除：一次请求删多张，已过账/不存在的自动跳过（收过订金的连带作废凭证）', () => {
   let s = fixture()
   const ids = []
   for (let i = 0; i < 3; i++) { const r = saveOrder(s, draft()); s = r.state; ids.push(r.code) }
@@ -285,12 +330,13 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
     action: 'deleteMany',
     orderIds: [...ids, ids[0], withDeposit.code, posted.code, 'D-NOPE']
   })
-  assert.equal(r.removed, 3)
-  assert.equal(r.skipped, 3)
+  assert.equal(r.removed, 4, '3 张纯草稿 + 1 张已收订金的（订金凭证一并作废）')
+  assert.equal(r.skipped, 2, '已过账 + 不存在的号')
   assert.equal(r.state.orders.length, 5, '批量作废同样不删行')
-  assert.equal(r.state.orders.filter(o => o.status === VOIDED_ORDER).length, 3)
+  assert.equal(r.state.orders.filter(o => o.status === VOIDED_ORDER).length, 4)
   assert.deepEqual(r.state.orders.filter(o => o.status !== VOIDED_ORDER).map(o => o.id).sort(),
-    [withDeposit.code, posted.code].sort())
+    [posted.code].sort())
+  assert.equal(r.state.receipts.find(v => v.voidOf === withDeposit.code).status, '作废')
   // 单据集合不受影响
   assert.deepEqual(r.state.sales.map(o => o.id), s.sales.map(o => o.id))
   // 快照不被就地修改
@@ -298,7 +344,7 @@ test('批量删除：一次请求删多张，已过账/已收订金/不存在的
 
   // 全都不能删时直接报错，而不是静默返回 0
   assert.throws(() => applyOrderOperation(s, {
-    action: 'deleteMany', orderIds: [withDeposit.code, posted.code]
+    action: 'deleteMany', orderIds: [posted.code, 'D-NOPE']
   }), /都不能作废/)
   assert.throws(() => applyOrderOperation(s, { action: 'deleteMany', orderIds: [] }), /请选择/)
   // 孤儿订单（过账单据已被删）与单张删除同一口径，允许删

@@ -326,7 +326,7 @@ const clearableCount = computed(() => list.value.filter(o => isUnposted(o.status
 const keptDepositCount = computed(() => list.value.filter(o => isUnposted(o.status) && orderDepositSum(o) > 0).length)
 const clearDraftsTitle = computed(() =>
   `可作废 ${clearableCount.value} 张未过账订单（记录保留可查）`
-  + (keptDepositCount.value ? `；另有 ${keptDepositCount.value} 张因已收订金会跳过（订金凭证已开，需先处理订金）` : '')
+  + (keptDepositCount.value ? `；另有 ${keptDepositCount.value} 张已收订金，勾选后点「作废勾选」可连带作废订金凭证` : '')
   + '；已过账订单不受影响')
 // 换筛选条件后旧勾选可能已经不在列表里，直接清空，避免「看不见的单被打印/删除」
 watch([keyword, status, kind, dateStart, dateEnd], () => {
@@ -533,14 +533,14 @@ async function removeSelected() {
   if (!rows.length) return
   try {
     await ElMessageBox.confirm(
-      `将作废勾选的 ${rows.length} 张订单（已过账 / 已收订金的会自动跳过）。作废后不再参与任何业务，记录保留可查。`,
+      `将作废勾选的 ${rows.length} 张订单（已过账的会自动跳过）。已收订金的订单，其订金凭证（SK-/FK-）会一并作废。作废后不再参与任何业务，记录保留可查。`,
       '作废勾选订单', { type: 'warning', confirmButtonText: `作废 ${rows.length} 张` }
     )
   } catch { return }
   busy.value = true
   try {
     const r = await api.orderOperation({ action: 'deleteMany', orderIds: rows.map(o => o.id) })
-    ElMessage.success(`已作废 ${r.removed || 0} 张订单${r.skipped ? `，跳过 ${r.skipped} 张（已过账 / 已收订金）` : ''}`)
+    ElMessage.success(`已作废 ${r.removed || 0} 张订单${r.vouchers && r.vouchers.length ? `，连带作废订金凭证 ${r.vouchers.join('、')}` : ''}${r.skipped ? `，跳过 ${r.skipped} 张（已过账）` : ''}`)
     tableRef.value?.clearSelection()
     selected.value = []
     await load()
@@ -774,12 +774,16 @@ async function unpost(row) {
 
 async function remove(row) {
   try {
-    await ElMessageBox.confirm(`作废订单 ${row.id}？作废后不再参与任何业务，记录保留可查（已收订金的订单不能作废）。`, '作废订单', { type: 'warning' })
+    const dep = orderDepositSum(row)
+    await ElMessageBox.confirm(
+      `作废订单 ${row.id}？作废后不再参与任何业务，记录保留可查。`
+      + (dep > 0 ? `\n\n这张单已收订金 ¥${dep.toFixed(2)}，其订金凭证会一并作废（金额退回对方）。` : ''),
+      '作废订单', { type: 'warning' })
   } catch { return }
   busy.value = true
   try {
-    await api.orderOperation({ action: 'delete', orderId: row.id })
-    ElMessage.success('订单已作废')
+    const r = await api.orderOperation({ action: 'delete', orderId: row.id })
+    ElMessage.success(`订单已作废${r.vouchers && r.vouchers.length ? `，连带作废订金凭证 ${r.vouchers.join('、')}` : ''}`)
     await load()
   } catch (e) { fail(e, '删除失败') } finally { busy.value = false }
 }
@@ -792,7 +796,7 @@ async function clearDrafts() {
   const keptDeposit = keptDepositCount.value
   try {
     await ElMessageBox.confirm(
-      `将作废 ${n} 张未过账订单，作废后不再参与任何业务，记录保留可查。${keptDeposit ? `另有 ${keptDeposit} 张未过账订单因已收订金会跳过；` : ''}已过账订单不受影响。`,
+      `将作废 ${n} 张未过账订单，作废后不再参与任何业务，记录保留可查。${keptDeposit ? `另有 ${keptDeposit} 张已收订金的订单不会在这里作废（涉及已开的订金凭证，请勾选它们后点「作废勾选」）；` : ''}已过账订单不受影响。`,
       '清空未过账订单', { type: 'warning', confirmButtonText: '全部作废' }
     )
   } catch { return }
