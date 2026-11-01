@@ -463,7 +463,7 @@ await t('付款超过未付 → 409；采购单付款生成付款单 FK-', async
   assert.match(over.data.error, /预存款|预付款/)
   const data = await ok('/api/ai/v1/payments', {
     key: maxKey, method: 'POST',
-    body: { requestId: rid(505), kind: 'purchase', id: 'C202601011000000001', amount: 80 }
+    body: { requestId: rid(505), kind: 'purchase', id: 'C202601011000000001', amount: 80, date: '2026-10-31' }
   })
   assert.match(data.voucher, /^FK-20261031-\d{4}$/)
   assert.equal(data.settle, '结清')

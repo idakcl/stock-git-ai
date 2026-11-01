@@ -1,0 +1,42 @@
+name: Tests (non-blocking)
+
+# 这里故意**不是发布门禁**：本 workflow 与 deploy.yml 完全独立，
+# deploy.yml 的 deploy job 没有 needs 指向它，测试红了也照旧发版。
+# 想让它变成真门禁，只有一种做法：在 deploy.yml 里加 `needs: test`（或把 job 合并进去），
+# 那会改变 main 的发布流程，需要 owner 明确同意后才做。
+#
+# 现在能保证的只有一件事：每次 push / PR 都有一份可查的测试结果，
+# 红灯不会再靠人肉 `node tests/xxx.mjs` 才发现。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 纯 Node 用例：不需要浏览器、不需要真实数据仓（用 tests/fake-github.mjs 的内存夹仓）。
+      # 依赖 /tmp/data 真实数据的 api-test / storage-test 不在其中——它们在 CI 里必然红，
+      # 红的原因与代码无关，混进来只会让信号失效。
+      - name: Unit / API regression
+        run: npm test
+
+      - name: Build (确保 SPA 仍可构建)
+        run: npm run build
