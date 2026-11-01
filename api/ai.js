@@ -596,6 +596,11 @@ function applyMaster(state, input, requestId) {
       const cur = Array.isArray(nextRecord[field]) ? nextRecord[field].slice() : []
       // 幂等：同一 requestId 重试时，已经记过的流水（id 里带 requestId）直接跳过，不再加一次钱
       const seen = new Set(cur.map(f => f && f.id).filter(Boolean))
+      // 余额：与 POST /deposits 的「抵扣」同一口径——扣到负数是数据错误，不是透支业务。
+      // 以前这条路只查 amount≠0，AI 可以在建档时写一条 -99999 的抵扣把余额打成负数，
+      // 而界面走 /deposits 抵扣同一笔钱却会被 409 拦住，同一笔钱两套规则。
+      // 逐条累加判断，允许一次请求里「先充后抵」，也允许正好扣到 0。
+      let running = cur.reduce((sum, f) => sum + Number(f && f.amount || 0), 0)
       const vouchers = Array.isArray(state[spec.voucherFile]) ? state[spec.voucherFile].slice() : []
       data[field].forEach((f, i) => {
         if (!f || typeof f !== 'object') fail(`第 ${i + 1} 条流水不是合法对象`)
@@ -603,6 +608,10 @@ function applyMaster(state, input, requestId) {
         if (!Number.isFinite(amount) || amount === 0) fail(`第 ${i + 1} 条流水 amount 必须是非零数字（存入为正、抵扣为负）`)
         if (Math.abs(amount) > MAX_FLOW_AMOUNT) fail(`第 ${i + 1} 条流水金额不能超过 ${MAX_FLOW_AMOUNT}`)
         if (f.date && !isDate(f.date)) fail(`第 ${i + 1} 条流水 date 格式应为 YYYY-MM-DD`)
+        if (amount < 0 && running + amount < -1e-6) {
+          fail(`${spec.money}余额不足：「${nextRecord.name || ''}」当前 ¥${running.toFixed(2)}，本次抵扣 ¥${Math.abs(amount).toFixed(2)}（第 ${i + 1} 条流水）`, 409)
+        }
+        running += amount
         const date = isDate(f.date) ? f.date : todayCN()
         const id = requestId ? `af-${requestId}-${i + 1}` : `af-${Date.now()}-${i + 1}`
         if (seen.has(id)) return
