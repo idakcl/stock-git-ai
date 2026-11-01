@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyRefundOperation, returnableLines, backfillHistoricalRefunds } from './src/utils/refunds.js'
-import { netOf, grossOf, syncPayments, distributePayment } from './src/utils/account.js'
-import { derive, rebuildStock } from './api/routes.js'
-import { refundTransaction } from './api/refunds.js'
+import { applyRefundOperation, returnableLines, backfillHistoricalRefunds } from '../src/utils/refunds.js'
+import { netOf, grossOf, syncPayments, distributePayment } from '../src/utils/account.js'
+import { derive, rebuildStock } from '../api/routes.js'
+import { refundTransaction } from '../api/refunds.js'
 const fixture = () => ({ logs: [], items: [{ code: 'P00001', name: '管件', cost: 10 }], stock: {}, refunds: [], customers: [{ code: 'C00001', name: '客户甲' }], suppliers: [{ code: 'S00001', name: '供应商甲' }],
   sales: [{ id: 'S1', date: '2026-10-01', customer: '客户甲', total: 100, discount: 10, payments: [], items: [{ code: 'P00001', name: '管件', qty: 10, price: 10, total: 100 }] }],
   purchases: [{ id: 'B1', date: '2026-10-01', supplier: '供应商甲', total: 100, paid: 100, items: [{ code: 'P00001', name: '管件', qty: 10, price: 10, total: 100 }] }] })

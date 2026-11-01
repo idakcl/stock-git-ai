@@ -1,8 +1,8 @@
 // 存储层回归：整表读写、按年迁移、幂等跳过、删除单据、迁移原子性与资金保护。
 // 跑法：node tests/storage-test.mjs   （纯 Node，不需要浏览器）
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { makeFakeRepo } from './fake-github.mjs'
+import { makePurchases } from './seed-data.mjs'
 import { readCollectionWithRaw, writeCollection, bucketOf, bucketize, SPLIT_KEYS } from '../api/storage.js'
 import { serialize, commitFiles } from '../api/github.js'
 
@@ -123,12 +123,11 @@ await t('known 回传的是写后 sha：连续两次改写不会自撞 409', asy
   void w
 })
 
-// ---- 分片收益实测（真实数据） ----
-console.log('\n分片收益（真实数据）')
+// ---- 分片收益实测（自造 500 张单，跨 8 个年份） ----
+console.log('\n分片收益（自造夹具）')
 const bytes = (s) => new TextEncoder().encode(s).length
-await t('真实 416 张采购单切片：单次保存的提交体积从整表降到当年', async () => {
-  const raw = readFileSync(new URL('../../data/purchases.json', import.meta.url), 'utf8')
-  const orders = JSON.parse(raw)
+await t('500 张采购单切片：单次保存的提交体积从整表降到当年', async () => {
+  const orders = makePurchases(500)
   repo = makeFakeRepo({ 'purchases.json': serialize(orders), 'sales.json': '[]', 'items.json': '[]', 'stock.json': '{}', 'logs.json': '[]' })
   const whole = bytes(serialize(orders))
   await writeCollection(env, 'purchases', orders, 'seed')     // 触发迁移
@@ -144,7 +143,7 @@ await t('读全量的子请求数远小于 Workers 免费版 50 的上限', asyn
   const v = (await readCollectionWithRaw(env, 'purchases')).value
   const used = (repo.calls.GET || 0) - before
   console.log(`      全量读 ${v.length} 张单用了 ${used} 个子请求（1 标记 + 1 列目录 + ${v.length ? 'N' : 0} 片）`)
-  assert.ok(v.length > 400, '真实数据要真的读回来了')
+  assert.ok(v.length > 400, '500 张夹具单要真的读回来了')
   assert.ok(used < 30, `子请求数 ${used} 必须留足余量：同一次请求里还要读 items/suppliers/customers/stock`)
 })
 

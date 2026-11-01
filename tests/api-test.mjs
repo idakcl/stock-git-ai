@@ -1,9 +1,9 @@
-// 端到端回归：直接调 handleApi，用线上真实数据当底，验证
+// 端到端回归：直接调 handleApi，用自造夹具（tests/seed-data.mjs）当底，验证
 //   「存一张采购单」这条主链路在紧凑化 + 字段瘦身 + 按年分片之后仍然正确且不再重复写。
-// 跑法：node tests/api-test.mjs   （纯 Node，不需要浏览器）
+// 跑法：node tests/api-test.mjs   （纯 Node，不需要浏览器，也不读真实数据仓）
 import assert from 'node:assert/strict'
-import { readFileSync, existsSync } from 'node:fs'
 import { makeFakeRepo } from './fake-github.mjs'
+import { seedFiles } from './seed-data.mjs'
 import { handleApi } from '../api/routes.js'
 import { issueToken } from '../api/auth.js'
 
@@ -14,8 +14,6 @@ const env = {
   GITHUB_TOKEN: 't', GITHUB_OWNER: 'o', GITHUB_REPO: 'r', GITHUB_BRANCH: 'main',
   SESSION_SECRET: 'test-secret', ADMIN_USER: 'admin', ADMIN_PASSWORD: 'pw'
 }
-const DATA_DIR = new URL('../../data/', import.meta.url)
-const FILES = ['items', 'suppliers', 'customers', 'purchases', 'sales', 'stock', 'refunds', 'receipts', 'payment-vouchers', 'logs']
 let pass = 0, fail = 0
 const t = async (name, fn) => {
   try { await fn(); pass++; console.log('  ✓ ' + name) }
@@ -23,13 +21,7 @@ const t = async (name, fn) => {
 }
 
 function seed() {
-  const initial = {}
-  for (const f of FILES) {
-    const p = new URL(`${f}.json`, DATA_DIR)
-    if (existsSync(p)) initial[`${f}.json`] = readFileSync(p, 'utf8')
-    else initial[`${f}.json`] = f === 'stock' ? '{}' : '[]'
-  }
-  return makeFakeRepo(initial)
+  return makeFakeRepo(seedFiles())
 }
 
 const bytes = (s) => new TextEncoder().encode(s).length
@@ -59,7 +51,7 @@ console.log('\n读：迁移前')
 await t('鉴权后的 GET /purchases 能读全量', async () => {
   token = await issueToken(env)
   purchases = await call('/purchases', 'GET', token)
-  assert.ok(Array.isArray(purchases) && purchases.length > 400, `应读到真实采购单全量，实际 ${purchases && purchases.length}`)
+  assert.ok(Array.isArray(purchases) && purchases.length >= 60, `应读到全部采购单，实际 ${purchases && purchases.length}`)
   assert.ok(!repo.has('.split-yearly.json'), '还没迁移过')
 })
 
@@ -99,7 +91,7 @@ await t('商品档案里的空字段被瘦身掉', async () => {
 })
 
 await t('瘦身+紧凑化的实测体积收益', async () => {
-  const before = bytes(readFileSync(new URL('items.json', DATA_DIR), 'utf8'))
+  const before = bytes(seedFiles()['items.json'])
   const after = bytes(repo.read('items.json'))
   console.log(`      items.json ${Math.round(before / 1024)}KB → ${Math.round(after / 1024)}KB（-${Math.round((1 - after / before) * 100)}%）`)
   assert.ok(after < before * 0.8, '至少要比原来小 20%')
@@ -118,7 +110,7 @@ await t('原样再保存一次不产生任何新提交', async () => {
 await t('改一张历史单据：只重写它那一年的片', async () => {
   const current = await call('/purchases', 'GET', token)
   const target = current.find(o => /^2021-/.test(String(o.date)) && Number(o.total) > 0)
-  assert.ok(target, '真实数据里要有 2021 年的单')
+  assert.ok(target, '夹具里要有 2021 年的单')
   const commits = repo.log().length
   const puts = repo.calls.PUT || 0
   const gets = repo.calls.GET || 0
@@ -136,7 +128,7 @@ await t('改一张历史单据：只重写它那一年的片', async () => {
 
 await t('派生数据仍正确：库存与商品历史价能算出来', async () => {
   const stock = JSON.parse(repo.read('stock.json'))
-  assert.ok(Object.keys(stock).length > 100, '库存快照要有内容')
+  assert.ok(Object.keys(stock).length >= 100, '库存快照要覆盖全部商品')
   const gets = repo.calls.GET || 0
   const hist = await call('/purchase-history', 'GET', token)
   const used = (repo.calls.GET || 0) - gets
@@ -151,7 +143,7 @@ let returnId = ''
 await t('新建采购退货：退货单落进它自己那一年的片，旧整表不会复活', async () => {
   const all = await call('/purchases', 'GET', token)
   const src = all.find(o => /^2021-/.test(String(o.date)) && Number(o.total) > 0 && Array.isArray(o.items) && o.items.length)
-  assert.ok(src, '真实数据里要有可退的 2021 年采购单')
+  assert.ok(src, '夹具里要有可退的 2021 年采购单')
   const commits = repo.log().length
   // 退货日期取原单日期（补录场景）：退货单因此落在 2021 片的中段，
   // 能同时检验「退款写入的次序必须与存储层 canon 次序一致」

@@ -29,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 依赖 /tmp 下真实数据仓的 api-test / storage-test 不在 npm test 里：
-      # 它们在 CI 里必然红，且红的原因与代码无关，混进来只会让门禁失去信号。
+      # api-test / storage-test 已改用 tests/seed-data.mjs 自造夹具（不再读真实数据仓），
+      # 因此与其余用例一样进 npm test，由本 job 统一守住。
       - name: Unit / API regression
         run: npm test
 

@@ -130,14 +130,27 @@ export function derive(items, suppliers, purchases, sales, customers) {
   const itemByName = {}
   items.forEach(i => { if (i.code) itemByCode[i.code] = i; if (i.name) itemByName[i.name] = i })
 
+  // 编码改写的唯一允许场景：单据里的编码本身无效（历史乱码 N 开头、空值），
+  // 且能按名称唯一匹配到已有商品 —— 这时才回写到解析到的正式 P 编码，并记入 codeFixes。
+  // 反过来，一个「非空但档案里没有」的编码不会被按名称合并到别的商品上：
+  // 同名不同码完全可能是两个真实 SKU，静默改写会把两个商品的库存/历史价混在一起。
+  const isValidItemCode = (c) => Boolean(c) && !/^N/i.test(String(c))
+  const codeFixes = []
   const ensureItem = (code, name) => {
-    let it = (code && itemByCode[code]) || (name && itemByName[name])
+    let it = code ? itemByCode[code] : null
+    if (!it && name && itemByName[name] && (!code || !isValidItemCode(code))) it = itemByName[name]
     if (!it) {
-      let max = 0
-      for (const x of items) { const m = /^P(\d{5})$/.exec(x.code || ''); if (m) max = Math.max(max, parseInt(m[1], 10)) }
-      const code = 'P' + String(max + 1).padStart(5, '0')
-      it = { code, name: name || code || '', unit: '', cost: 0, price: 0, warning: 0 }
+      let nextCode
+      if (isValidItemCode(code)) {
+        nextCode = code
+      } else {
+        let max = 0
+        for (const x of items) { const m = /^P(\d{5})$/.exec(x.code || ''); if (m) max = Math.max(max, parseInt(m[1], 10)) }
+        nextCode = 'P' + String(max + 1).padStart(5, '0')
+      }
+      it = { code: nextCode, name: name || nextCode, unit: '', cost: 0, price: 0, warning: 0 }
       items.push(it)
+      itemByCode[nextCode] = it
     }
     it.suppliers = it.suppliers || []
     if (code) itemByCode[code] = it
@@ -168,9 +181,12 @@ export function derive(items, suppliers, purchases, sales, customers) {
     if (!sCode) { const s = ensureSupplier(supName); sCode = s.code; nameToCode[supName] = sCode }
     for (const l of (p.items || [])) {
       const it = ensureItem(l.code, l.name)
-      // 修正存量乱码编码（N… 等无效编码）：回写为解析到的正式 P 编码，
-      // 保证后续按 code 关联主数据、商品库改名/改单位即时联动
-      if (l.code !== it.code) l.code = it.code
+      // 仅修正无效编码（N… / 空值），合法编码一律原样保留；每次修正都记录下来，
+      // 由 syncDerived 写进日志，不再出现「保存 A 单却悄悄改掉 B 单编码」而无人知晓。
+      if (l.code !== it.code) {
+        codeFixes.push({ order: p.id, from: l.code || '', to: it.code, name: it.name || '' })
+        l.code = it.code
+      }
       if (!it.suppliers.includes(sCode)) it.suppliers.push(sCode)
       ;(purchaseHist[it.code] = purchaseHist[it.code] || []).push({
         id: p.id,
@@ -189,8 +205,10 @@ export function derive(items, suppliers, purchases, sales, customers) {
     if (custName) ensureCustomer(custName)
     for (const l of (s.items || [])) {
       const it = ensureItem(l.code, l.name)
-      // 修正存量乱码编码（N… 等无效编码）：回写为解析到的正式 P 编码
-      if (l.code !== it.code) l.code = it.code
+      if (l.code !== it.code) {
+        codeFixes.push({ order: s.id, from: l.code || '', to: it.code, name: it.name || '' })
+        l.code = it.code
+      }
       ;(saleHist[it.code] = saleHist[it.code] || []).push({
         id: s.id,
         date: s.date, customer: s.customer || '',
@@ -246,7 +264,9 @@ export function derive(items, suppliers, purchases, sales, customers) {
     purchases,
     sales,
     history: purchaseHist,
-    saleHistory: saleHist
+    saleHistory: saleHist,
+    // 本次派生修正了哪些无效编码（供写回路径记日志；只读接口忽略即可）
+    codeFixes
   }
 }
 
@@ -330,7 +350,11 @@ async function syncDerived(env) {
     assertSafeWrite('sales.json', sales || [], next.sales)
     assertSafeWrite('customers.json', customers || [], next.customers || [])
     assertSafeWrite('suppliers.json', suppliers || [], next.suppliers)
-    await commitTransaction(tx, { next, message: 'derive 同步派生数据（商品/供应商/客户/库存/单据编码）' })
+    // 编码修正不再静默：一次派生里改过哪些行，写进 logs.json（最多保留最近 200 条）
+    const logEntry = derived.codeFixes && derived.codeFixes.length
+      ? { source: 'derive', codeFixes: derived.codeFixes.slice(0, 50), fixed: derived.codeFixes.length }
+      : undefined
+    await commitTransaction(tx, { next, message: 'derive 同步派生数据（商品/供应商/客户/库存）', logEntry })
   } catch (e) {
     throw new Error(`派生数据同步失败（${e.message || e}）。单据本身已保存；请重新保存一次该采购单/销售单，系统会自动重建商品链接、历史价与库存`)
   }

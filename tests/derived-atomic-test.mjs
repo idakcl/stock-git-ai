@@ -120,5 +120,30 @@ await t('/normalize 一次提交把乱码编码改回正式编码，再跑一次
   assert.equal(commits(), after, '幂等：没有可改的就不提交')
 })
 
+await t('合法但档案里没有的编码：原样保留并按该编码单独建档，不按名称合并', async () => {
+  repo = seed(); token = await issueToken(env)
+  const other = sale('XS3', { items: [{ code: 'Q001', name: '三通', qty: 1, price: 10, total: 10 }] })
+  await call('/sales', 'POST', { sales: [other] })
+  const sales = await read('sales-2026.json')
+  assert.equal(sales[0].items[0].code, 'Q001', '合法编码不得被静默改写')
+  const items = await read('items.json')
+  assert.ok(items.some(i => i.code === 'Q001' && i.name === '三通'), '应按 Q001 单独建档')
+  assert.equal(items.filter(i => i.name === '三通').length, 2, '同名不同码是两条独立档案')
+  const logs = await read('logs.json')
+  assert.ok(!logs.some(l => l.source === 'derive'), '没有无效编码时不写修正日志')
+})
+
+await t('无效编码（N 开头）被修正时写入日志，不再静默', async () => {
+  repo = seed(); token = await issueToken(env)
+  const broken = sale('XS4', { items: [{ code: 'N123', name: '三通', qty: 1, price: 10, total: 10 }] })
+  await call('/sales', 'POST', { sales: [broken] })
+  const logs = await read('logs.json')
+  const entry = logs.find(l => l.source === 'derive')
+  assert.ok(entry, '修正必须留痕')
+  assert.equal(entry.fixed, 1)
+  assert.equal(entry.codeFixes[0].from, 'N123')
+  assert.equal(entry.codeFixes[0].to, 'P1')
+})
+
 console.log(`\n${pass} 通过 / ${fail} 失败`)
 process.exit(fail ? 1 : 0)

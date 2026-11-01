@@ -1,6 +1,6 @@
 // deposit.js 逻辑测试：用内存 mock 模拟 Worker API，验证删除单据时预付款/预收款的退回行为。
 // 运行：node deposit-test.mjs
-import { applyDepositFlows, removeDepositFlows } from './src/utils/deposit.js'
+import { applyDepositFlows, removeDepositFlows } from '../src/utils/deposit.js'
 
 let pass = 0, fail = 0
 function assert(cond, msg) {

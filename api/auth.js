@@ -231,12 +231,16 @@ export function bearer(req) {
   return m ? m[1] : ''
 }
 
-// CORS 白名单：只允许自家域名（不再对全网开放读取）
+// CORS 白名单：只允许自家域名（不再对全网开放读取）。
+// 本地开发不强制配置 ALLOWED_ORIGINS：白名单为空时才放行 localhost / 127.0.0.1，
+// 一旦配置了白名单就只认配置（生产环境必须配置，localhost 不再被隐式放行）。
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/
 export function corsHeaders(req, env) {
   const origin = req.headers.get('Origin') || ''
   const allow = (env.ALLOWED_ORIGINS || '')
     .split(',').map(s => s.trim()).filter(Boolean)
-  const okOrigin = allow.includes(origin) ? origin : (allow[0] || '')
+  const devOrigin = !allow.length && LOCAL_ORIGIN.test(origin)
+  const okOrigin = allow.includes(origin) ? origin : (devOrigin ? origin : (allow[0] || ''))
   return {
     'Access-Control-Allow-Origin': okOrigin,
     'Vary': 'Origin',
