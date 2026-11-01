@@ -1,5 +1,10 @@
 name: Deploy to Cloudflare Workers
 
+# 发布门禁：测试不过，不发版。
+#   test job 先跑（纯 Node 用例，内存假仓，不需要真实数据与浏览器），
+#   deploy 用 needs: test 挂在它后面 —— test 红或超时，deploy 直接不启动，线上保持上一版。
+# 代价（owner 已知并接受）：每次发版多 2~4 分钟；测试自身写错也会挡住发版，没有应急绕行通道。
+# 构建只在 deploy 里做一次（test 不做 build），避免每次发版白跑两遍 npm ci + vite build。
 on:
   push:
     branches: [main]
@@ -9,7 +14,28 @@ permissions:
   contents: read
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 依赖 /tmp 下真实数据仓的 api-test / storage-test 不在 npm test 里：
+      # 它们在 CI 里必然红，且红的原因与代码无关，混进来只会让门禁失去信号。
+      - name: Unit / API regression
+        run: npm test
+
   deploy:
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
