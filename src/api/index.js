@@ -244,6 +244,8 @@ export const api = {
   },
   getStock: () => cachedGet('/stock'),
   getLogs: () => request('/logs'),
+  // 对账体检：只读检查，每次打开都重新算（不缓存，避免看完修完还显示旧问题）
+  getAudit: () => request('/audit'),
   // 用户信息（打印落款）：独立文件，保存后失效缓存即可
   getProfile: () => cachedGet('/profile'),
   saveProfile: async (profile) => {

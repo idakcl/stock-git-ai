@@ -16,6 +16,11 @@
         <el-icon><Box /></el-icon>
         <span>库存</span>
       </el-menu-item>
+      <!-- 对账检查：只读体检，把金额/流水/状态的矛盾一次列出来 -->
+      <el-menu-item index="/audit">
+        <el-icon><CircleCheck /></el-icon>
+        <span>对账检查</span>
+      </el-menu-item>
     </el-menu-item-group>
 
     <el-menu-item-group title="业务">
@@ -117,7 +122,7 @@
 import { ref, onMounted } from 'vue'
 import {
   HomeFilled, Goods, OfficeBuilding, User, Download, Sell, Box, DataAnalysis,
-  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Key, RefreshLeft, Document
+  Money, Wallet, CreditCard, FolderOpened, Delete, Postcard, Tickets, UserFilled, Link, Key, RefreshLeft, Document, CircleCheck
 } from '@element-plus/icons-vue'
 import { api } from '../api'
 import { receivableOf, payableOf } from '../utils/account'

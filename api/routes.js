@@ -17,6 +17,7 @@ import { listKeys, createKey, updateKey, revokeKey } from './ai-keys.js'
 import { listAiLogs } from './ai-logs.js'
 import { pruneItem, normalizeOrderPayments } from './write-normalize.js'
 import { restoreTransaction } from './restore.js'
+import { auditState } from './audit.js'
 
 // 对外仍从 routes.js 取（tests/storage-test.mjs 的旧入口），实现已挪到 write-normalize.js
 export { pruneItem, normalizeOrderPayments }
@@ -468,6 +469,18 @@ export async function handleApi(req, url, env, execCtx) {
     if (path === '/orders' && method === 'GET') return json(req, env, await readOptionalArray(env, 'orders.json'))
     if (path === '/stock' && method === 'GET') return json(req, env, await readJSON(env, 'stock.json'))
     if (path === '/logs' && method === 'GET') return json(req, env, await readJSON(env, 'logs.json'))
+    // 对账体检：只读，把「单头/明细、实收/流水、结算状态、凭证引用、退货额度、重复单号」的矛盾一次列出。
+    // 资金单据与退款单在老数据仓里可能没有，按空集合读，不能因为缺文件就让整个体检失败。
+    if (path === '/audit' && method === 'GET') {
+      const [purchases, sales, receipts, paymentVouchers, refunds] = await Promise.all([
+        readCollection(env, 'purchases'),
+        readCollection(env, 'sales'),
+        readOptionalArray(env, 'receipts.json'),
+        readOptionalArray(env, 'payment-vouchers.json'),
+        readOptionalArray(env, 'refunds.json')
+      ])
+      return json(req, env, auditState({ purchases, sales, receipts, paymentVouchers, refunds }))
+    }
     // 用户信息：打印落款用，单独一个文件；缺失按空资料处理
     if (path === '/profile' && method === 'GET') return json(req, env, await readProfile(env))
     // 外链分享列表：带单据摘要（单据已删除/作废也会列出，便于取消）
