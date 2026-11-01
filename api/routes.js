@@ -7,6 +7,7 @@ import { checkLogin, verifyToken, bearer, corsHeaders } from './auth.js'
 import { diffImport, isValidImportKey } from '../src/utils/dedupe.js'
 import { isVoided } from '../src/utils/account.js'
 import { voidTransaction } from './voids.js'
+import { clearTransaction } from './clear.js'
 import { readProfile, saveProfile } from './profile.js'
 import { listShares, readPublicShare, shareOperation } from './shares.js'
 import { listTemplates, templateOperation } from './templates.js'
@@ -606,6 +607,11 @@ export async function handleApi(req, url, env, execCtx) {
       if (path === '/voids') {
         return json(req, env, await voidTransaction(env, body, derive, rebuildStock))
       }
+      // 清空业务数据：密码二次校验 + 一次提交 + 审计日志，替代前端逐表 POST 空数组。
+      // 边界见 api/clear.js 顶部注释：这不是防越权的边界，持票人仍可直接整表覆盖。
+      if (path === '/clear') {
+        return json(req, env, await clearTransaction(req, env, body, rebuildStock))
+      }
       if (path === '/purchases') {
         // 写入端规范化：见 normalizeOrderPayments——堵住「payments 空数组 + 旧 paid」实付漏算缺陷
         // sortOrders：与存储层落库次序同一口径，派生（库存/历史价）才不会因次序不同而每次算出不同结果
@@ -783,7 +789,7 @@ export async function handleApi(req, url, env, execCtx) {
     return json(req, env, { error: 'Not Found' }, 404)
   } catch (e) {
     // 业务校验自带状态码（作废闸门 404/409 等）优先透传，前端据此给可操作的提示
-    const mapped = [400, 403, 404, 409, 422].includes(e.status) ? e.status
+    const mapped = [400, 403, 404, 409, 422, 429].includes(e.status) ? e.status
       : /GitHub (409|422)/.test(e.message || '') ? 409 : 500
     return json(req, env, { error: e.message || String(e) }, mapped)
   }

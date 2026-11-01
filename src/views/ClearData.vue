@@ -8,7 +8,7 @@
       </template>
 
       <el-alert type="error" :closable="false" show-icon class="danger-intro">
-        清空后数据<b>不可恢复</b>，执行前请务必先到「数据备份」页「导出全部数据」备份。每项清空均需<b>两步确认</b>并验证<b>管理密码</b>。
+        清空后数据<b>不可恢复</b>，执行前请务必先到「数据备份」页「导出全部数据」备份。每项清空均需<b>两步确认</b>：先确认警告，再输入<b>管理密码</b>与 <b>CLEAR</b>。清空由服务端<b>一次提交</b>完成，并在操作日志里留痕（时间、目标、条数、来源 IP）。
       </el-alert>
 
       <!-- 清空所有数据 -->
@@ -33,17 +33,20 @@
       </el-card>
     </el-card>
 
-    <!-- 管理密码确认弹窗（第二步） -->
-    <el-dialog v-model="pwdVisible" :title="`清空确认 · ${clearTargetLabel}`" width="420px" top="12vh" @closed="pwdText=''">
+    <!-- 管理密码确认弹窗（第二步）：密码 + 手输 CLEAR，两项都对才放行 -->
+    <el-dialog v-model="pwdVisible" :title="`清空确认 · ${clearTargetLabel}`" width="420px" top="12vh" @closed="resetDialog">
       <p class="pwd-warn">{{ clearWarnText }}</p>
       <el-form @submit.prevent="confirmClear">
         <el-form-item :error="pwdError">
           <el-input v-model="pwdText" type="password" show-password placeholder="请输入管理密码" :prefix-icon="Lock" @keyup.enter="confirmClear" />
         </el-form-item>
+        <el-form-item :error="confirmError">
+          <el-input v-model="confirmText" placeholder="请输入 CLEAR 以确认" @keyup.enter="confirmClear" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="pwdVisible=false">取消</el-button>
-        <el-button type="danger" :loading="clearing" @click="confirmClear">确认清空</el-button>
+        <el-button type="danger" :loading="clearing" :disabled="confirmText.trim() !== 'CLEAR'" @click="confirmClear">确认清空</el-button>
       </template>
     </el-dialog>
   </div>
@@ -90,6 +93,9 @@ onMounted(loadCounts)
 const pwdVisible = ref(false)
 const pwdText = ref('')
 const pwdError = ref('')
+const confirmText = ref('')
+const confirmError = ref('')
+function resetDialog() { pwdText.value = ''; confirmText.value = ''; pwdError.value = ''; confirmError.value = '' }
 const clearing = ref(false)
 const clearTarget = ref('')
 const clearTargetLabel = ref('')
@@ -126,68 +132,33 @@ async function requestClear(key) {
   pwdVisible.value = true
 }
 
-const SAVERS = {
-  items: (d) => api.saveItems(d),
-  customers: (d) => api.saveCustomers(d),
-  suppliers: (d) => api.saveSuppliers(d),
-  sales: (d) => api.saveSales(d),
-  purchases: (d) => api.savePurchases(d),
-  receipts: (d) => api.saveReceipts(d),
-  'payment-vouchers': (d) => api.savePaymentVouchers(d)
-}
-const ALL_KEYS = ['items', 'customers', 'suppliers', 'sales', 'purchases', 'receipts', 'payment-vouchers']
-
-// 第二步：验证管理密码（复用登录接口），通过后整表写入空数组清空
+// 第二步：密码 + CLEAR 都齐了才提交给服务端。
+// 清空是一次服务端事务（/api/clear）：密码二次校验、原子提交、写审计日志都在那边，
+// 前端不再逐表 POST 空数组——那样中途失败会留下半截数据，而且不留痕。
 async function confirmClear() {
   if (clearing.value) return
   if (!pwdText.value) { pwdError.value = '请输入管理密码'; return }
+  if (confirmText.value.trim() !== 'CLEAR') { confirmError.value = '请输入 CLEAR 才能继续'; return }
   pwdError.value = ''
+  confirmError.value = ''
   clearing.value = true
   const key = clearTarget.value
   try {
-    await api.login(pwdText.value, false)
-  } catch (e) {
-    const msg = (e && e.message) || '登录失败'
-    pwdError.value = /密码|password|unauthorized|401|登录/i.test(msg) ? '管理密码错误，请重试' : msg
-    clearing.value = false
-    return
-  }
-  try {
-    if (key === 'all') {
-      await Promise.all(ALL_KEYS.map(k => SAVERS[k]([])))
-    } else {
-      await SAVERS[key]([])
-      // 清空客户/供应商后，把名下孤儿单据的客户/供应商名标记为「(已删除…)」，保持汇总整洁
-      if (key === 'customers') await markOrphans('sales', 'customer', '已删除客户')
-      if (key === 'suppliers') await markOrphans('purchases', 'supplier', '已删除供应商')
-    }
+    await api.clearData(key, pwdText.value)
     pwdVisible.value = false
     ElMessage.success(`已清空${clearTargetLabel.value}`)
     if (key === 'all') setTimeout(() => window.location.reload(), 700)
     else loadCounts()
   } catch (e) {
-    ElMessage.error(`清空失败：${e.message || '网络异常'}，请重试`)
+    const msg = (e && e.message) || '网络异常'
+    if (/密码/.test(msg)) pwdError.value = '管理密码错误，请重试'
+    else ElMessage.error(`清空失败：${msg}，请重试`)
   } finally {
     clearing.value = false
   }
 }
 
-// 把孤儿单据的客户/供应商名加「(已删除…)」前缀（幂等：已加前缀的不重复加）
-async function markOrphans(kind, field, tag) {
-  const getter = kind === 'sales' ? api.getSales : api.getPurchases
-  const saver = kind === 'sales' ? api.saveSales : api.savePurchases
-  const list = await getter()
-  const prefix = `(${tag}) `
-  let changed = false
-  for (const o of (list || [])) {
-    const name = (o[field] || '').trim()
-    if (name && !name.startsWith(prefix)) {
-      o[field] = prefix + name
-      changed = true
-    }
-  }
-  if (changed) await saver(list)
-}
+// 孤儿单据改名（「(已删除客户) …」）已挪到服务端：与清空同一次提交，避免半截状态。
 </script>
 
 <style scoped>

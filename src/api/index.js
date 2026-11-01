@@ -142,6 +142,15 @@ export const api = {
     invalidate('/payment-vouchers')
     return r
   },
+  // 清空业务数据：服务端一次事务完成（密码二次校验、原子提交、写审计日志）。
+  // 不再走「前端逐表 POST 空数组」——那既不是一次事务，密码校验也等于没有。
+  clearData: async (target, password) => {
+    const r = await request('/clear', { method: 'POST', body: JSON.stringify({ target, password, confirm: 'CLEAR' }) })
+    // 清空动的是整库：所有读缓存一律作废，否则 15s 内还会显示已清空的旧数据
+    for (const k of ['/items', '/customers', '/suppliers', '/sales', '/purchases', '/receipts',
+      '/payment-vouchers', '/refunds', '/orders', '/stock', '/logs', '/purchase-history', '/sale-history']) invalidate(k)
+    return r
+  },
   getRefunds: () => cachedGet('/refunds'),
   saveRefundOperation: async (operation) => {
     const result = await request('/refunds', { method: 'POST', body: JSON.stringify(operation) })
